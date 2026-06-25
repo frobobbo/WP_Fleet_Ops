@@ -1,44 +1,208 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WP FleetOps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:2rem;max-width:1200px;color:#1f2937}
-    table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{border-bottom:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}
-    input{margin:.25rem;padding:.35rem}.green{color:green}.yellow{color:#a66b00}.red{color:#b00020}.card{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}
+    :root{
+      color-scheme:dark;
+      --bg:#07080b;
+      --bg-2:#0a0c12;
+      --panel:rgba(255,255,255,.035);
+      --panel-2:rgba(255,255,255,.055);
+      --panel-3:rgba(255,255,255,.075);
+      --text:#f7f8f8;
+      --muted:#9ca3af;
+      --soft:#d0d6e0;
+      --line:rgba(255,255,255,.085);
+      --line-2:rgba(255,255,255,.055);
+      --brand:#6d6aff;
+      --brand-2:#8b7cff;
+      --green:#23c55e;
+      --amber:#f59e0b;
+      --red:#f43f5e;
+      --blue:#38bdf8;
+      --shadow:0 24px 80px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.04);
+      --radius:22px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      font-feature-settings:"cv01","ss03";
+      color:var(--text);
+      background:
+        radial-gradient(circle at 18% -12%, rgba(109,106,255,.28), transparent 34rem),
+        radial-gradient(circle at 86% 8%, rgba(56,189,248,.16), transparent 31rem),
+        linear-gradient(180deg,#090a10 0%,#07080b 52%,#050506 100%);
+      min-height:100vh;
+    }
+    a{color:inherit;text-decoration:none}
+    .shell{max-width:1420px;margin:0 auto;padding:28px clamp(18px,3vw,44px) 52px}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:34px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .mark{width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,var(--brand),#31d4ff);display:grid;place-items:center;box-shadow:0 16px 44px rgba(109,106,255,.32)}
+    .mark svg{width:24px;height:24px;color:white}
+    .brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:-.02em}
+    .brand span{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+    .nav{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+    .pill,.btn{border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.035);color:var(--soft);font-size:13px;font-weight:520;padding:9px 13px;display:inline-flex;align-items:center;gap:8px;backdrop-filter:blur(18px)}
+    .btn.primary{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:white;border-color:rgba(255,255,255,.18);box-shadow:0 16px 44px rgba(109,106,255,.24)}
+    .hero{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr);gap:26px;align-items:stretch;margin-bottom:24px}
+    .hero-card,.card,.metric,.table-card{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.028));border:1px solid var(--line);box-shadow:var(--shadow);border-radius:var(--radius);position:relative;overflow:hidden}
+    .hero-card{padding:42px;min-height:390px;display:flex;flex-direction:column;justify-content:space-between}
+    .hero-card:before{content:"";position:absolute;inset:-1px;background:radial-gradient(circle at 78% 8%, rgba(109,106,255,.25), transparent 20rem);pointer-events:none}
+    .eyebrow{font-family:'JetBrains Mono',ui-monospace,monospace;color:#a8b0ff;font-size:12px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 18px;position:relative}
+    .hero h2{font-size:clamp(42px,5.6vw,76px);line-height:.94;letter-spacing:-.07em;margin:0 0 20px;font-weight:650;max-width:820px;position:relative}
+    .hero p.lede{font-size:18px;line-height:1.65;color:var(--muted);max-width:740px;margin:0;position:relative}
+    .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px;position:relative}
+    .insight-panel{padding:26px;display:flex;flex-direction:column;gap:16px}
+    .status-orb{height:170px;border-radius:20px;background:radial-gradient(circle at 50% 45%,rgba(35,197,94,.36),transparent 42%),linear-gradient(135deg,rgba(35,197,94,.18),rgba(109,106,255,.12));border:1px solid var(--line);display:grid;place-items:center;position:relative;overflow:hidden}
+    .status-orb:after{content:"";position:absolute;width:210px;height:210px;border-radius:50%;border:1px solid rgba(255,255,255,.08)}
+    .orb-inner{text-align:center;z-index:1}.orb-inner strong{font-size:46px;letter-spacing:-.06em}.orb-inner span{display:block;color:var(--muted);font-size:13px;margin-top:6px}
+    .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0}
+    .metric{padding:18px}.metric label{display:block;color:var(--muted);font-size:12px;margin-bottom:10px}.metric strong{font-size:30px;letter-spacing:-.05em}.metric small{display:block;color:var(--soft);margin-top:8px;font-size:12px}
+    .green{color:var(--green)}.yellow{color:var(--amber)}.red{color:var(--red)}.blue{color:var(--blue)}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:22px}.card{padding:24px}.card-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:18px}.card h3,.table-card h3{font-size:18px;letter-spacing:-.03em;margin:0}.card p,.table-card p{color:var(--muted);line-height:1.5;margin:7px 0 0;font-size:14px}
+    form{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.field{display:grid;gap:7px}.field label{color:var(--soft);font-size:12px;font-weight:560}.field.full{grid-column:1/-1}
+    input{width:100%;background:rgba(255,255,255,.045);border:1px solid var(--line);border-radius:13px;color:var(--text);padding:12px 13px;font:500 14px 'Inter',system-ui;outline:none;transition:.18s ease}input:focus{border-color:rgba(139,124,255,.72);box-shadow:0 0 0 4px rgba(109,106,255,.13);background:rgba(255,255,255,.065)}input::placeholder{color:#626977}.check-field{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:13px;padding:10px 12px;color:var(--soft);font-size:13px}.check-field input{width:auto;accent-color:var(--brand)}
+    button{cursor:pointer;border:0;border-radius:13px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:white;padding:12px 15px;font-weight:650;font-size:14px;box-shadow:0 14px 34px rgba(109,106,255,.22)}
+    .tables{display:grid;gap:18px}.table-card{padding:0}.table-header{padding:22px 24px;border-bottom:1px solid var(--line-2);display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:920px}th{color:#808797;text-transform:uppercase;letter-spacing:.08em;font-size:11px;text-align:left;font-weight:650;background:rgba(255,255,255,.018)}td,th{padding:15px 18px;border-bottom:1px solid var(--line-2);vertical-align:top}td{color:var(--soft);font-size:13px}tbody tr:hover{background:rgba(255,255,255,.026)}.site-name{color:var(--text);font-weight:650}.score{display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace}.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 18px currentColor}.tag{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;margin:2px;color:var(--soft);background:rgba(255,255,255,.035);font-size:12px}.empty{padding:34px 24px;color:var(--muted);text-align:center}.report-link{display:flex;justify-content:flex-end;margin-top:20px}.mono{font-family:'JetBrains Mono',ui-monospace,monospace}.footer-note{color:#6f7685;font-size:12px;text-align:center;margin-top:28px}
+    @media (max-width:1050px){.hero,.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:repeat(2,1fr)}}
+    @media (max-width:680px){.shell{padding:20px 14px 40px}.topbar{align-items:flex-start;flex-direction:column}.hero-card{padding:28px}.metrics,.form-grid{grid-template-columns:1fr}.hero h2{font-size:42px}.table-header{flex-direction:column}.nav{justify-content:flex-start}}
   </style>
 </head>
 <body>
-  <h1>WP FleetOps</h1>
-  <p>Combined WordPress client care monitoring and fleet operations dashboard.</p>
+{% set fleet_count = fleet_rows|length %}
+{% set care_count = care_checks|length %}
+{% set site_count = sites|length %}
+{% set critical_count = namespace(value=0) %}
+{% set healthy_count = namespace(value=0) %}
+{% set attention_count = namespace(value=0) %}
+{% set score_total = namespace(value=0) %}
+{% for r in fleet_rows %}
+  {% set score_total.value = score_total.value + (r.score or 0) %}
+  {% if r.score >= 85 %}{% set healthy_count.value = healthy_count.value + 1 %}{% endif %}
+  {% if r.score < 70 %}{% set critical_count.value = critical_count.value + 1 %}{% endif %}
+{% endfor %}
+{% for c in care_checks %}
+  {% if c.status == 'red' %}{% set attention_count.value = attention_count.value + 1 %}{% endif %}
+{% endfor %}
+{% set avg_score = (score_total.value / fleet_count)|round|int if fleet_count else 100 %}
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/">
+        <div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 17.5 9.5 12 13 15.5 20 8.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 6.5h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" opacity=".55"/></svg>
+        </div>
+        <div><h1>WP FleetOps</h1><span>WordPress care command center</span></div>
+      </a>
+      <nav class="nav">
+        <span class="pill"><span class="dot green"></span> Live monitor</span>
+        <a class="pill" href="#fleet">Fleet</a>
+        <a class="pill" href="#care">Care checks</a>
+        <a class="btn primary" href="/report">View report</a>
+      </nav>
+    </header>
 
-  <div class="card">
-    <h2>Manual care check</h2>
-    <form method="post" action="/care/manual-check">
-      <input name="name" placeholder="Site name" required><input name="url" placeholder="https://example.com" required><input name="client" placeholder="Client">
-      <input name="http_status" type="number" value="200"><input name="latency_ms" type="number" value="250"><input name="ssl_days_remaining" type="number" value="60">
-      <input name="wordpress_version" value="6.6"><input name="update_count" type="number" value="0"><input name="backup_age_hours" type="number" value="24"><button>Save care check</button>
-    </form>
-  </div>
+    <section class="hero">
+      <div class="hero-card">
+        <div>
+          <p class="eyebrow">Operations dashboard · Client care · Maintenance intelligence</p>
+          <h2>Keep every WordPress site healthy, visible, and under control.</h2>
+          <p class="lede">A polished cockpit for tracking uptime, SSL health, updates, backups, response time, and client-facing care reports across your full WordPress fleet.</p>
+          <div class="hero-actions">
+            <a class="btn primary" href="#snapshot">Add fleet snapshot</a>
+            <a class="btn" href="#care-form">Log care check</a>
+          </div>
+        </div>
+      </div>
+      <aside class="insight-panel hero-card">
+        <div class="status-orb">
+          <div class="orb-inner"><strong>{{ avg_score }}</strong><span>average fleet score</span></div>
+        </div>
+        <div class="metrics" style="grid-template-columns:1fr 1fr;margin:0">
+          <div class="metric"><label>Sites</label><strong>{{ site_count }}</strong><small>tracked properties</small></div>
+          <div class="metric"><label>Needs attention</label><strong class="{{ 'red' if critical_count.value else 'green' }}">{{ critical_count.value }}</strong><small>below 70 score</small></div>
+        </div>
+      </aside>
+    </section>
 
-  <div class="card">
-    <h2>Fleet snapshot</h2>
-    <form method="post" action="/snapshot">
-      <input name="name" placeholder="Site" required><input name="url" type="url" placeholder="https://example.com" pattern="https?://.*" required><input name="client" placeholder="Client">
-      <label><input name="uptime_ok" type="checkbox" checked value="true">Up</label><input name="ssl_days" type="number" min="0" value="60"><input name="wp_updates" type="number" min="0" value="0">
-      <input name="backup_age_hours" type="number" min="0" value="24"><input name="response_ms" type="number" min="0" value="250"><input name="security_header_count" type="number" min="0" value="3"><button>Save snapshot</button>
-    </form>
-  </div>
+    <section class="metrics" aria-label="Fleet summary metrics">
+      <div class="metric"><label>Fleet snapshots</label><strong>{{ fleet_count }}</strong><small>latest operational rows</small></div>
+      <div class="metric"><label>Care checks</label><strong>{{ care_count }}</strong><small>client care entries</small></div>
+      <div class="metric"><label>Healthy sites</label><strong class="green">{{ healthy_count.value }}</strong><small>score 85 or higher</small></div>
+      <div class="metric"><label>Client risks</label><strong class="{{ 'red' if attention_count.value else 'green' }}">{{ attention_count.value }}</strong><small>red care statuses</small></div>
+    </section>
 
-  <h2>Fleet operations</h2>
-  <table><tr><th>Site</th><th>Client</th><th>Score</th><th>Up</th><th>SSL</th><th>Updates</th><th>Backup</th><th>Response</th><th>Alerts</th></tr>
-  {% for r in fleet_rows %}<tr><td>{{r.name}}</td><td>{{r.client}}</td><td>{{r.score}}</td><td>{{r.uptime_ok}}</td><td>{{r.ssl_days}}</td><td>{{r.wp_updates}}</td><td>{{r.backup_age_hours}}h</td><td>{{r.response_ms}}ms</td><td>{% for a in r.alerts %}{{a.severity}}: {{a.message}}<br>{% endfor %}</td></tr>{% endfor %}
-  </table>
+    <section class="grid">
+      <div class="card" id="care-form">
+        <div class="card-head"><div><h3>Manual care check</h3><p>Capture the numbers you want clients to see in their recurring care report.</p></div><span class="tag">CarePulse</span></div>
+        <form method="post" action="/care/manual-check">
+          <div class="form-grid">
+            <div class="field"><label>Site name</label><input name="name" placeholder="Strategy Plus" required></div>
+            <div class="field"><label>URL</label><input name="url" placeholder="https://example.com" required></div>
+            <div class="field"><label>Client</label><input name="client" placeholder="Client or brand"></div>
+            <div class="field"><label>HTTP status</label><input name="http_status" type="number" value="200"></div>
+            <div class="field"><label>Latency ms</label><input name="latency_ms" type="number" value="250"></div>
+            <div class="field"><label>SSL days</label><input name="ssl_days_remaining" type="number" value="60"></div>
+            <div class="field"><label>WP version</label><input name="wordpress_version" value="6.6"></div>
+            <div class="field"><label>Updates</label><input name="update_count" type="number" value="0"></div>
+            <div class="field"><label>Backup age hrs</label><input name="backup_age_hours" type="number" value="24"></div>
+          </div>
+          <button>Save care check</button>
+        </form>
+      </div>
 
-  <h2>Client care checks</h2>
-  <table><tr><th>Site</th><th>Client</th><th>Status</th><th>Score</th><th>HTTP</th><th>SSL days</th><th>Updates</th><th>Backup age</th><th>Summary</th></tr>
-  {% for c in care_checks %}<tr><td>{{c.name}}</td><td>{{c.client}}</td><td class="{{c.status}}">{{c.status}}</td><td>{{c.score}}</td><td>{{c.http_status}}</td><td>{{c.ssl_days_remaining}}</td><td>{{c.update_count}}</td><td>{{c.backup_age_hours}}h</td><td>{{c.summary}}</td></tr>{% endfor %}
-  </table>
-  <p><a href="/report">View combined Markdown report</a></p>
+      <div class="card" id="snapshot">
+        <div class="card-head"><div><h3>Fleet snapshot</h3><p>Log the operational posture of a site and generate alerts automatically.</p></div><span class="tag">FleetOps</span></div>
+        <form method="post" action="/snapshot">
+          <div class="form-grid">
+            <div class="field"><label>Site</label><input name="name" placeholder="Site" required></div>
+            <div class="field"><label>URL</label><input name="url" type="url" placeholder="https://example.com" pattern="https?://.*" required></div>
+            <div class="field"><label>Client</label><input name="client" placeholder="Client"></div>
+            <label class="check-field"><input name="uptime_ok" type="checkbox" checked value="true"> Site is up</label>
+            <div class="field"><label>SSL days</label><input name="ssl_days" type="number" min="0" value="60"></div>
+            <div class="field"><label>WP updates</label><input name="wp_updates" type="number" min="0" value="0"></div>
+            <div class="field"><label>Backup age hrs</label><input name="backup_age_hours" type="number" min="0" value="24"></div>
+            <div class="field"><label>Response ms</label><input name="response_ms" type="number" min="0" value="250"></div>
+            <div class="field"><label>Security headers</label><input name="security_header_count" type="number" min="0" value="3"></div>
+          </div>
+          <button>Save snapshot</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="tables">
+      <div class="table-card" id="fleet">
+        <div class="table-header"><div><h3>Fleet operations</h3><p>Operational health score, uptime, SSL, backups, performance, and generated alerts.</p></div><span class="tag mono">{{ fleet_count }} rows</span></div>
+        <div class="table-wrap">
+          {% if fleet_rows %}
+          <table><thead><tr><th>Site</th><th>Client</th><th>Score</th><th>Up</th><th>SSL</th><th>Updates</th><th>Backup</th><th>Response</th><th>Alerts</th></tr></thead><tbody>
+          {% for r in fleet_rows %}<tr><td><span class="site-name">{{r.name}}</span></td><td>{{r.client or '—'}}</td><td><span class="score {{ 'green' if r.score >= 85 else 'yellow' if r.score >= 70 else 'red' }}"><span class="dot"></span>{{r.score}}</span></td><td>{{'Yes' if r.uptime_ok else 'No'}}</td><td>{{r.ssl_days}} days</td><td>{{r.wp_updates}}</td><td>{{r.backup_age_hours}}h</td><td>{{r.response_ms}}ms</td><td>{% for a in r.alerts %}<span class="tag {{ 'red' if a.severity == 'critical' else 'yellow' if a.severity == 'warning' else 'blue' }}">{{a.severity}} · {{a.message}}</span>{% else %}<span class="tag green">clear</span>{% endfor %}</td></tr>{% endfor %}
+          </tbody></table>
+          {% else %}<div class="empty">No fleet snapshots yet. Add the first snapshot above to light up the dashboard.</div>{% endif %}
+        </div>
+      </div>
+
+      <div class="table-card" id="care">
+        <div class="table-header"><div><h3>Client care checks</h3><p>Client-ready care status with health narrative and maintenance posture.</p></div><span class="tag mono">{{ care_count }} checks</span></div>
+        <div class="table-wrap">
+          {% if care_checks %}
+          <table><thead><tr><th>Site</th><th>Client</th><th>Status</th><th>Score</th><th>HTTP</th><th>SSL days</th><th>Updates</th><th>Backup age</th><th>Summary</th></tr></thead><tbody>
+          {% for c in care_checks %}<tr><td><span class="site-name">{{c.name}}</span></td><td>{{c.client or '—'}}</td><td><span class="tag {{c.status}}">{{c.status}}</span></td><td><span class="score {{c.status}}"><span class="dot"></span>{{c.score}}</span></td><td>{{c.http_status}}</td><td>{{c.ssl_days_remaining}}</td><td>{{c.update_count}}</td><td>{{c.backup_age_hours}}h</td><td>{{c.summary}}</td></tr>{% endfor %}
+          </tbody></table>
+          {% else %}<div class="empty">No care checks yet. Log a manual care check to build the client report.</div>{% endif %}
+        </div>
+      </div>
+    </section>
+
+    <div class="report-link"><a class="btn primary" href="/report">Open combined Markdown report</a></div>
+    <p class="footer-note mono">WP FleetOps · FastAPI · SQLite · Helm · GHCR · Harvester</p>
+  </main>
 </body>
 </html>
