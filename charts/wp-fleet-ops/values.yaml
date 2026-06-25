@@ -60,6 +60,18 @@ persistence:
 config:
   dataDir: /data
 
+# Development/bootstrapping mode for clusters where the final app image has
+# not been pushed yet. Create a ConfigMap containing app.tar.gz and set this to
+# true; the chart will unpack and run the source with a stock Python image.
+sourceBundle:
+  enabled: false
+  configMapName: ""
+  fileName: app.tar.gz
+  mountPath: /work
+  pythonImage: python:3.13-slim
+  prepareCommand: "mkdir -p /work/app /work/site && tar -xzf /bundle/app.tar.gz -C /work/app && python -m pip install --no-cache-dir --target /work/site /work/app"
+  runCommand: "PYTHONPATH=/work/site:/work/app python -m uvicorn wp_fleet_ops.main:app --host 0.0.0.0 --port 8000"
+
 livenessProbe:
   httpGet:
     path: /health

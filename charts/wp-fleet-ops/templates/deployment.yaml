@@ -28,12 +28,32 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.sourceBundle.enabled }}
+      initContainers:
+        - name: unpack-source
+          image: {{ .Values.sourceBundle.pythonImage | quote }}
+          command: ["/bin/sh", "-lc"]
+          args:
+            - {{ .Values.sourceBundle.prepareCommand | quote }}
+          volumeMounts:
+            - name: source-bundle
+              mountPath: /bundle
+              readOnly: true
+            - name: source-work
+              mountPath: {{ .Values.sourceBundle.mountPath | quote }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          image: {{ ternary .Values.sourceBundle.pythonImage (printf "%s:%s" .Values.image.repository (.Values.image.tag | default .Chart.AppVersion)) .Values.sourceBundle.enabled | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.sourceBundle.enabled }}
+          workingDir: {{ .Values.sourceBundle.mountPath | quote }}
+          command: ["/bin/sh", "-lc"]
+          args:
+            - {{ .Values.sourceBundle.runCommand | quote }}
+          {{- end }}
           env:
             - name: WP_FLEET_OPS_DATA_DIR
               value: {{ .Values.config.dataDir | quote }}
@@ -50,6 +70,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.config.dataDir | quote }}
+            {{- if .Values.sourceBundle.enabled }}
+            - name: source-work
+              mountPath: {{ .Values.sourceBundle.mountPath | quote }}
+            {{- end }}
       volumes:
         - name: data
           {{- if .Values.persistence.enabled }}
@@ -58,6 +82,13 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if .Values.sourceBundle.enabled }}
+        - name: source-bundle
+          configMap:
+            name: {{ required "sourceBundle.configMapName is required when sourceBundle.enabled=true" .Values.sourceBundle.configMapName | quote }}
+        - name: source-work
+          emptyDir: {}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
