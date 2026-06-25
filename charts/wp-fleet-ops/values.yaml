@@ -69,7 +69,7 @@ sourceBundle:
   fileName: app.tar.gz
   mountPath: /work
   pythonImage: python:3.13-slim
-  prepareCommand: "mkdir -p /work/app /work/site && tar -xzf /bundle/app.tar.gz -C /work/app && python -m pip install --no-cache-dir --target /work/site /work/app"
+  prepareCommand: "mkdir -p /work/app /work/site && tar -xzf /bundle/app.tar.gz -C /work/app && chmod -R a+rX /work/app && python -m pip install --no-cache-dir --target /work/site /work/app && chmod -R a+rX /work/site"
   runCommand: "PYTHONPATH=/work/site:/work/app python -m uvicorn wp_fleet_ops.main:app --host 0.0.0.0 --port 8000"
 
 livenessProbe:
