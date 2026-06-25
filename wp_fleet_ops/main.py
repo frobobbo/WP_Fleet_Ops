@@ -15,8 +15,23 @@ BASE = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("WP_FLEET_OPS_DATA_DIR", BASE / "data"))
 DB_PATH = Path(os.getenv("WP_FLEET_OPS_DB", DATA_DIR / "fleetops.sqlite3"))
 
+
+def template_dir() -> Path:
+    candidates = [
+        os.getenv("WP_FLEET_OPS_TEMPLATE_DIR"),
+        BASE / "templates",
+        Path.cwd() / "templates",
+        Path.cwd() / "app" / "templates",
+        Path(__file__).resolve().parent / "templates",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).joinpath("index.html").exists():
+            return Path(candidate)
+    return BASE / "templates"
+
+
 app = FastAPI(title="WP FleetOps", version="0.1.0")
-templates = Jinja2Templates(directory=str(BASE / "templates"))
+templates = Jinja2Templates(directory=str(template_dir()))
 store = FleetOpsStore(DB_PATH)
 
 

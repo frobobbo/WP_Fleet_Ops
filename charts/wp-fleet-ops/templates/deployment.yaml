@@ -57,6 +57,10 @@ spec:
           env:
             - name: WP_FLEET_OPS_DATA_DIR
               value: {{ .Values.config.dataDir | quote }}
+            {{- if .Values.sourceBundle.enabled }}
+            - name: WP_FLEET_OPS_TEMPLATE_DIR
+              value: {{ printf "%s/app/templates" .Values.sourceBundle.mountPath | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8000
