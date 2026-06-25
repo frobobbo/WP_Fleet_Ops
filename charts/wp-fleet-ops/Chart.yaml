@@ -1,0 +1,6 @@
+apiVersion: v2
+name: wp-fleet-ops
+description: Combined WordPress client care monitoring and fleet operations dashboard
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <title>WP FleetOps</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:2rem;max-width:1200px;color:#1f2937}
+    table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{border-bottom:1px solid #ddd;padding:.5rem;text-align:left;vertical-align:top}
+    input{margin:.25rem;padding:.35rem}.green{color:green}.yellow{color:#a66b00}.red{color:#b00020}.card{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}
+  </style>
+</head>
+<body>
+  <h1>WP FleetOps</h1>
+  <p>Combined WordPress client care monitoring and fleet operations dashboard.</p>
+
+  <div class="card">
+    <h2>Manual care check</h2>
+    <form method="post" action="/care/manual-check">
+      <input name="name" placeholder="Site name" required><input name="url" placeholder="https://example.com" required><input name="client" placeholder="Client">
+      <input name="http_status" type="number" value="200"><input name="latency_ms" type="number" value="250"><input name="ssl_days_remaining" type="number" value="60">
+      <input name="wordpress_version" value="6.6"><input name="update_count" type="number" value="0"><input name="backup_age_hours" type="number" value="24"><button>Save care check</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Fleet snapshot</h2>
+    <form method="post" action="/snapshot">
+      <input name="name" placeholder="Site" required><input name="url" type="url" placeholder="https://example.com" pattern="https?://.*" required><input name="client" placeholder="Client">
+      <label><input name="uptime_ok" type="checkbox" checked value="true">Up</label><input name="ssl_days" type="number" min="0" value="60"><input name="wp_updates" type="number" min="0" value="0">
+      <input name="backup_age_hours" type="number" min="0" value="24"><input name="response_ms" type="number" min="0" value="250"><input name="security_header_count" type="number" min="0" value="3"><button>Save snapshot</button>
+    </form>
+  </div>
+
+  <h2>Fleet operations</h2>
+  <table><tr><th>Site</th><th>Client</th><th>Score</th><th>Up</th><th>SSL</th><th>Updates</th><th>Backup</th><th>Response</th><th>Alerts</th></tr>
+  {% for r in fleet_rows %}<tr><td>{{r.name}}</td><td>{{r.client}}</td><td>{{r.score}}</td><td>{{r.uptime_ok}}</td><td>{{r.ssl_days}}</td><td>{{r.wp_updates}}</td><td>{{r.backup_age_hours}}h</td><td>{{r.response_ms}}ms</td><td>{% for a in r.alerts %}{{a.severity}}: {{a.message}}<br>{% endfor %}</td></tr>{% endfor %}
+  </table>
+
+  <h2>Client care checks</h2>
+  <table><tr><th>Site</th><th>Client</th><th>Status</th><th>Score</th><th>HTTP</th><th>SSL days</th><th>Updates</th><th>Backup age</th><th>Summary</th></tr>
+  {% for c in care_checks %}<tr><td>{{c.name}}</td><td>{{c.client}}</td><td class="{{c.status}}">{{c.status}}</td><td>{{c.score}}</td><td>{{c.http_status}}</td><td>{{c.ssl_days_remaining}}</td><td>{{c.update_count}}</td><td>{{c.backup_age_hours}}h</td><td>{{c.summary}}</td></tr>{% endfor %}
+  </table>
+  <p><a href="/report">View combined Markdown report</a></p>
+</body>
+</html>
