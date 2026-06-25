@@ -90,6 +90,22 @@ def fetch_care_check(name: str = Form(...), url: str = Form(...), client: str = 
     site_id = store.upsert_site(name, url, client)
     check = fetch_basic_site_check(name, url)
     store.save_care_check(site_id, check)
+    security_header_count = sum(
+        1
+        for header in ("strict-transport-security", "x-frame-options", "content-security-policy")
+        if header in check.security_headers
+    )
+    fleet_site = FleetSite(
+        check.name,
+        check.url,
+        200 <= check.http_status < 400,
+        check.ssl_days_remaining,
+        check.update_count,
+        check.backup_age_hours,
+        check.latency_ms,
+        security_header_count,
+    )
+    store.save_snapshot(site_id, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site))
     return RedirectResponse("/", status_code=303)
 
 

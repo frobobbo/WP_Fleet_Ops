@@ -39,6 +39,42 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+
+    def fake_fetch(name, url):
+        from wp_fleet_ops.checks import evaluate_site
+
+        return evaluate_site(
+            name,
+            url,
+            200,
+            321,
+            45,
+            "6.6.2",
+            2,
+            18,
+            {"Strict-Transport-Security": "max-age=31536000", "X-Frame-Options": "SAMEORIGIN"},
+        )
+
+    import wp_fleet_ops.main as main
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fake_fetch)
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": "Fetched Site", "url": "fetched.example", "client": "Client F"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    page = client.get("/").text
+    assert "Fetched Site" in page
+    assert "321ms" in page
+    report = client.get("/report").text
+    assert "Fetched Site" in report
+    assert "2 WordPress updates pending" in report
+
+
 def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post("/snapshot", data=valid_snapshot_payload(ssl_days="-1"), follow_redirects=False).status_code == 422
