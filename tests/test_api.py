@@ -39,6 +39,39 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_api_summary_returns_dashboard_rollups(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy Site", url="https://healthy.example", response_ms="250"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Risky Site",
+            url="https://risky.example",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="5",
+            backup_age_hours="96",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["sites"] == 2
+    assert summary["fleet_snapshots"] == 2
+    assert summary["care_checks"] == 2
+    assert summary["healthy_sites"] == 1
+    assert summary["needs_attention"] == 1
+    assert summary["average_score"] == 50
+    assert summary["critical_alerts"] >= 1
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

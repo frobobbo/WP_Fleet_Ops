@@ -40,6 +40,26 @@ def health():
     return {"status": "ok", "app": "wp-fleet-ops"}
 
 
+@app.get("/api/summary")
+def api_summary():
+    """Return compact dashboard rollups for automation and lightweight checks."""
+    fleet_rows = store.latest_dashboard()
+    care_checks = store.latest_care_checks()
+    sites = store.list_sites()
+    score_total = sum(row["score"] or 0 for row in fleet_rows)
+    critical_alerts = sum(1 for row in fleet_rows for alert in row["alerts"] if alert.get("severity") == "critical")
+    return {
+        "sites": len(sites),
+        "fleet_snapshots": len(fleet_rows),
+        "care_checks": len(care_checks),
+        "healthy_sites": sum(1 for row in fleet_rows if row["score"] >= 85),
+        "needs_attention": sum(1 for row in fleet_rows if row["score"] < 70),
+        "client_risks": sum(1 for check in care_checks if check["status"] == "red"),
+        "critical_alerts": critical_alerts,
+        "average_score": round(score_total / len(fleet_rows)) if fleet_rows else 100,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
