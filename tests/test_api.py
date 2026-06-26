@@ -79,3 +79,12 @@ def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post("/snapshot", data=valid_snapshot_payload(ssl_days="-1"), follow_redirects=False).status_code == 422
     assert client.post("/snapshot", data=valid_snapshot_payload(url="javascript:alert(1)"), follow_redirects=False).status_code == 422
+
+
+def test_manual_care_check_rejects_invalid_operational_metrics(tmp_path):
+    client = make_test_client(tmp_path)
+    payload = {"name": "Bad Metrics", "url": "https://bad.example", "latency_ms": "-25"}
+    assert client.post("/care/manual-check", data=payload, follow_redirects=False).status_code == 422
+
+    payload = {"name": "Bad Status", "url": "https://bad.example", "http_status": "700"}
+    assert client.post("/care/manual-check", data=payload, follow_redirects=False).status_code == 422

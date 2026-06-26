@@ -57,15 +57,15 @@ def add_site(name: str = Form(...), url: str = Form(...), client: str = Form("")
 
 @app.post("/care/manual-check")
 def manual_care_check(
-    name: str = Form(...),
-    url: str = Form(...),
+    name: str = Form(..., min_length=1),
+    url: str = Form(..., min_length=1, pattern=r"^https?://"),
     client: str = Form(""),
-    http_status: int = Form(200),
-    latency_ms: int = Form(250),
-    ssl_days_remaining: int = Form(60),
+    http_status: int = Form(200, ge=100, le=599),
+    latency_ms: int = Form(250, ge=0),
+    ssl_days_remaining: int = Form(60, ge=0),
     wordpress_version: str = Form("unknown"),
-    update_count: int = Form(0),
-    backup_age_hours: int = Form(24),
+    update_count: int = Form(0, ge=0),
+    backup_age_hours: int = Form(24, ge=0),
 ):
     site_id = store.upsert_site(name, url, client)
     check = evaluate_site(
