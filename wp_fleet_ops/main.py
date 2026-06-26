@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -52,7 +53,12 @@ def api_summary():
     sites = store.list_sites()
     score_total = sum(row["score"] or 0 for row in fleet_rows)
     critical_alerts = sum(1 for row in fleet_rows for alert in row["alerts"] if alert.get("severity") == "critical")
+    last_snapshot_at = max((row["captured_at"] for row in fleet_rows if row.get("captured_at")), default=None)
+    average_score = round(score_total / len(fleet_rows)) if fleet_rows else 100
+    overall_status = "green" if average_score >= 85 and critical_alerts == 0 else ("yellow" if average_score >= 65 else "red")
     return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "overall_status": overall_status,
         "sites": len(sites),
         "fleet_snapshots": len(fleet_rows),
         "care_checks": len(care_checks),
@@ -60,7 +66,8 @@ def api_summary():
         "needs_attention": sum(1 for row in fleet_rows if row["score"] < 70),
         "client_risks": sum(1 for check in care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
-        "average_score": round(score_total / len(fleet_rows)) if fleet_rows else 100,
+        "average_score": average_score,
+        "last_snapshot_at": last_snapshot_at,
     }
 
 

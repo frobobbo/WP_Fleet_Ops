@@ -69,6 +69,9 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
     assert summary["healthy_sites"] == 1
     assert summary["needs_attention"] == 1
     assert summary["average_score"] == 50
+    assert summary["overall_status"] == "red"
+    assert summary["generated_at"].endswith("+00:00")
+    assert summary["last_snapshot_at"]
     assert summary["critical_alerts"] >= 1
 
 
