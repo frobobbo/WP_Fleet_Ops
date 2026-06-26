@@ -72,6 +72,38 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
     assert summary["critical_alerts"] >= 1
 
 
+def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy Site", url="https://healthy.example"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/care/manual-check",
+        data={
+            "name": "Risky Site",
+            "url": "https://risky.example",
+            "http_status": "503",
+            "latency_ms": "1800",
+            "ssl_days_remaining": "5",
+            "update_count": "4",
+            "backup_age_hours": "96",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/sites")
+
+    assert response.status_code == 200
+    sites = response.json()["sites"]
+    assert [site["name"] for site in sites] == ["Risky Site", "Healthy Site"]
+    assert sites[0]["status"] == "red"
+    assert sites[0]["score"] < sites[1]["score"]
+    assert sites[0]["critical_alerts"] >= 1
+    assert sites[0]["latest_snapshot_at"]
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

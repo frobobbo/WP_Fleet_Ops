@@ -40,6 +40,10 @@ def health():
     return {"status": "ok", "app": "wp-fleet-ops"}
 
 
+def _dashboard_status(score: int) -> str:
+    return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
+
+
 @app.get("/api/summary")
 def api_summary():
     """Return compact dashboard rollups for automation and lightweight checks."""
@@ -57,6 +61,26 @@ def api_summary():
         "client_risks": sum(1 for check in care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": round(score_total / len(fleet_rows)) if fleet_rows else 100,
+    }
+
+
+@app.get("/api/sites")
+def api_sites():
+    """Return latest per-site operational status, sorted by riskiest site first."""
+    return {
+        "sites": [
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row["client"],
+                "score": row["score"],
+                "status": _dashboard_status(row["score"]),
+                "latest_snapshot_at": row["captured_at"],
+                "critical_alerts": sum(1 for alert in row["alerts"] if alert.get("severity") == "critical"),
+                "alerts": row["alerts"],
+            }
+            for row in store.latest_dashboard()
+        ]
     }
 
 
