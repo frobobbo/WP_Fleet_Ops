@@ -97,6 +97,44 @@ def api_sites():
     }
 
 
+@app.get("/api/clients")
+def api_clients():
+    """Return account-level health rollups for client review and automation."""
+    client_rows: dict[str, dict] = {}
+    for row in store.latest_dashboard():
+        client_name = row.get("client") or "Unassigned"
+        summary = client_rows.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "site_count": 0,
+                "score_total": 0,
+                "healthy_sites": 0,
+                "needs_attention": 0,
+                "critical_alerts": 0,
+                "latest_snapshot_at": None,
+            },
+        )
+        summary["site_count"] += 1
+        summary["score_total"] += row["score"] or 0
+        summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
+        summary["needs_attention"] += 1 if row["score"] < 70 else 0
+        summary["critical_alerts"] += sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
+        captured_at = row.get("captured_at")
+        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
+            summary["latest_snapshot_at"] = captured_at
+
+    clients = []
+    for summary in client_rows.values():
+        average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
+        summary["average_score"] = average_score
+        summary["status"] = "red" if summary["critical_alerts"] else _dashboard_status(average_score)
+        clients.append(summary)
+
+    clients.sort(key=lambda row: (row["status"] != "red", row["average_score"], row["client"].lower()))
+    return {"clients": clients}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

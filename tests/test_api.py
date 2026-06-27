@@ -123,6 +123,47 @@ def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     assert sites[0]["latest_snapshot_at"]
 
 
+def test_api_clients_rolls_up_account_health(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Client A Healthy", url="https://healthy-a.example", client="Client A"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Client A Risky",
+            url="https://risky-a.example",
+            client="Client A",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="7",
+            backup_age_hours="120",
+            response_ms="2500",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/care/manual-check",
+        data={"name": "Unassigned", "url": "https://unassigned.example", "client": "", "http_status": "200"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/clients")
+
+    assert response.status_code == 200
+    clients = response.json()["clients"]
+    assert [row["client"] for row in clients] == ["Client A", "Unassigned"]
+    assert clients[0]["site_count"] == 2
+    assert clients[0]["average_score"] < 85
+    assert clients[0]["status"] == "red"
+    assert clients[0]["critical_alerts"] >= 1
+    assert clients[0]["needs_attention"] == 1
+    assert clients[1]["site_count"] == 1
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
