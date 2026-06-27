@@ -39,6 +39,22 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_ready_reports_database_access_and_current_counts(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post("/care/manual-check", data={"name": "Ready Site", "url": "https://ready.example"}, follow_redirects=False)
+
+    payload = client.get("/ready").json()
+
+    assert payload == {
+        "status": "ready",
+        "app": "wp-fleet-ops",
+        "database": "ok",
+        "sites": 1,
+        "care_checks": 1,
+        "fleet_snapshots": 1,
+    }
+
+
 def test_api_summary_returns_dashboard_rollups(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

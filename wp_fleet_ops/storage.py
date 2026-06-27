@@ -89,6 +89,15 @@ class FleetOpsStore:
         with self._connect() as con:
             return [dict(r) for r in con.execute("select * from sites order by name")]
 
+    def health_counts(self) -> dict[str, int]:
+        """Return minimal persistence counters for readiness checks."""
+        with self._connect() as con:
+            return {
+                "sites": int(con.execute("select count(*) from sites").fetchone()[0]),
+                "care_checks": int(con.execute("select count(*) from care_checks").fetchone()[0]),
+                "fleet_snapshots": int(con.execute("select count(*) from snapshots").fetchone()[0]),
+            }
+
     def save_care_check(self, site_id: int, check: SiteCheck) -> int:
         with self._connect() as con:
             cur = con.execute(

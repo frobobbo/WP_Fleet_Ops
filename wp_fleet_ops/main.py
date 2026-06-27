@@ -41,6 +41,12 @@ def health():
     return {"status": "ok", "app": "wp-fleet-ops"}
 
 
+@app.get("/ready")
+def ready():
+    """Confirm the app can reach its SQLite store before receiving traffic."""
+    return {"status": "ready", "app": "wp-fleet-ops", "database": "ok", **store.health_counts()}
+
+
 def _dashboard_status(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
