@@ -164,6 +164,51 @@ def test_api_clients_rolls_up_account_health(tmp_path):
     assert clients[1]["site_count"] == 1
 
 
+
+def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Site",
+            url="https://critical.example",
+            client="Client C",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="5",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Site",
+            url="https://warning.example",
+            client="Client W",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/actions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action_count"] >= 2
+    actions = payload["actions"]
+    assert actions[0]["site"] == "Critical Site"
+    assert actions[0]["client"] == "Client C"
+    assert actions[0]["severity"] == "critical"
+    warning_actions = [
+        action for action in actions if action["severity"] == "warning" and action["site"] == "Warning Site"
+    ]
+    assert warning_actions
+    assert actions[0]["score"] < warning_actions[0]["score"]
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

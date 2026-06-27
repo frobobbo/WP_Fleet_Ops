@@ -135,6 +135,37 @@ def api_clients():
     return {"clients": clients}
 
 
+@app.get("/api/actions")
+def api_actions():
+    """Return a prioritized work queue of current fleet alerts for operators."""
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    actions = []
+    for row in store.latest_dashboard():
+        for alert in row["alerts"]:
+            severity = alert.get("severity", "info")
+            actions.append(
+                {
+                    "site": row["name"],
+                    "url": row["url"],
+                    "client": row.get("client") or "Unassigned",
+                    "score": row["score"],
+                    "severity": severity,
+                    "message": alert.get("message", "Review site status."),
+                    "latest_snapshot_at": row["captured_at"],
+                }
+            )
+
+    actions.sort(
+        key=lambda action: (
+            severity_rank.get(action["severity"], 99),
+            action["score"],
+            action["client"].lower(),
+            action["site"].lower(),
+        )
+    )
+    return {"action_count": len(actions), "actions": actions}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
