@@ -202,10 +202,12 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     assert actions[0]["site"] == "Critical Site"
     assert actions[0]["client"] == "Client C"
     assert actions[0]["severity"] == "critical"
+    assert actions[0]["recommended_action"] == "Confirm site availability, hosting status, and recent deploys."
     warning_actions = [
         action for action in actions if action["severity"] == "warning" and action["site"] == "Warning Site"
     ]
     assert warning_actions
+    assert warning_actions[0]["recommended_action"] == "Schedule WordPress core, plugin, and theme updates."
     assert actions[0]["score"] < warning_actions[0]["score"]
 
 

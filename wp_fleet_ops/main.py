@@ -51,6 +51,24 @@ def _dashboard_status(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
 
+def _recommended_action(alert: dict) -> str:
+    """Translate an alert into a concise operator next step."""
+    message = (alert.get("message") or "").lower()
+    if "down" in message or "uptime" in message:
+        return "Confirm site availability, hosting status, and recent deploys."
+    if "ssl" in message or "certificate" in message:
+        return "Renew or replace the TLS certificate before it expires."
+    if "backup" in message:
+        return "Run and verify a fresh backup, then confirm backup scheduling."
+    if "wordpress updates" in message or "updates pending" in message:
+        return "Schedule WordPress core, plugin, and theme updates."
+    if "slow" in message or "response" in message or "latency" in message:
+        return "Review performance, caching, and upstream response time."
+    if "security" in message or "header" in message:
+        return "Add or correct the missing security headers."
+    return "Review the site dashboard and resolve the reported condition."
+
+
 @app.get("/api/summary")
 def api_summary():
     """Return compact dashboard rollups for automation and lightweight checks."""
@@ -151,6 +169,7 @@ def api_actions():
                     "score": row["score"],
                     "severity": severity,
                     "message": alert.get("message", "Review site status."),
+                    "recommended_action": _recommended_action(alert),
                     "latest_snapshot_at": row["captured_at"],
                 }
             )
