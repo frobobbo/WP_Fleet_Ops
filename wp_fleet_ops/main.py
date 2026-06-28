@@ -230,6 +230,55 @@ def api_backups():
     }
 
 
+def _security_status(security_header_count: int) -> str:
+    if security_header_count >= 3:
+        return "covered"
+    if security_header_count >= 2:
+        return "warning"
+    return "critical"
+
+
+def _security_recommended_action(status: str) -> str:
+    if status == "critical":
+        return "Add HSTS and clickjacking protection headers."
+    if status == "warning":
+        return "Review missing security headers and add the remaining recommended header."
+    return "Continue normal security header monitoring."
+
+
+@app.get("/api/security")
+def api_security():
+    """Return security header coverage gaps across the monitored fleet."""
+    sites = []
+    for row in store.latest_dashboard():
+        status = _security_status(row["security_header_count"])
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "security_header_count": row["security_header_count"],
+                "security_status": status,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _security_recommended_action(status),
+            }
+        )
+
+    sites.sort(key=lambda site: (site["security_header_count"], site["client"].lower(), site["name"].lower()))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "covered_count": sum(1 for site in sites if site["security_status"] == "covered"),
+        "gap_count": sum(1 for site in sites if site["security_status"] != "covered"),
+        "average_security_header_count": round(
+            sum(site["security_header_count"] for site in sites) / len(sites), 1
+        )
+        if sites
+        else 0,
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

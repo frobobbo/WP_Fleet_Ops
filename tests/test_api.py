@@ -275,6 +275,53 @@ def test_api_backups_highlights_stale_backup_queue(tmp_path):
     assert payload["sites"][2]["backup_status"] == "fresh"
 
 
+def test_api_security_highlights_header_coverage_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Missing Headers",
+            url="https://missing-headers.example",
+            client="Client Security",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Partial Headers",
+            url="https://partial-headers.example",
+            client="Client Security",
+            security_header_count="2",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Covered Headers",
+            url="https://covered-headers.example",
+            security_header_count="3",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/security")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 3
+    assert payload["covered_count"] == 1
+    assert payload["gap_count"] == 2
+    assert payload["average_security_header_count"] == 1.7
+    assert [site["name"] for site in payload["sites"]] == ["Missing Headers", "Partial Headers", "Covered Headers"]
+    assert payload["sites"][0]["security_status"] == "critical"
+    assert payload["sites"][0]["recommended_action"] == "Add HSTS and clickjacking protection headers."
+    assert payload["sites"][1]["security_status"] == "warning"
+    assert payload["sites"][2]["security_status"] == "covered"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
