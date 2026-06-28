@@ -185,6 +185,51 @@ def api_actions():
     return {"action_count": len(actions), "actions": actions}
 
 
+def _backup_status(backup_age_hours: int) -> str:
+    if backup_age_hours > 72:
+        return "critical"
+    if backup_age_hours > 36:
+        return "warning"
+    return "fresh"
+
+
+def _backup_recommended_action(status: str) -> str:
+    if status == "critical":
+        return "Run and verify an immediate backup."
+    if status == "warning":
+        return "Confirm the next scheduled backup completes successfully."
+    return "Continue normal backup monitoring."
+
+
+@app.get("/api/backups")
+def api_backups():
+    """Return backup freshness status for each monitored site."""
+    sites = []
+    for row in store.latest_dashboard():
+        status = _backup_status(row["backup_age_hours"])
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "backup_age_hours": row["backup_age_hours"],
+                "backup_status": status,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _backup_recommended_action(status),
+            }
+        )
+
+    sites.sort(key=lambda site: (-site["backup_age_hours"], site["client"].lower(), site["name"].lower()))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "fresh_count": sum(1 for site in sites if site["backup_status"] == "fresh"),
+        "stale_count": sum(1 for site in sites if site["backup_status"] != "fresh"),
+        "oldest_backup_age_hours": max((site["backup_age_hours"] for site in sites), default=0),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

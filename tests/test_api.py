@@ -232,6 +232,49 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     assert actions[0]["score"] < warning_actions[0]["score"]
 
 
+def test_api_backups_highlights_stale_backup_queue(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Backup",
+            url="https://critical-backup.example",
+            client="Client Backup",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Backup",
+            url="https://warning-backup.example",
+            client="Client Backup",
+            backup_age_hours="48",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Fresh Backup", url="https://fresh-backup.example", backup_age_hours="12"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/backups")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 3
+    assert payload["fresh_count"] == 1
+    assert payload["stale_count"] == 2
+    assert payload["oldest_backup_age_hours"] == 120
+    assert [site["name"] for site in payload["sites"]] == ["Critical Backup", "Warning Backup", "Fresh Backup"]
+    assert payload["sites"][0]["backup_status"] == "critical"
+    assert payload["sites"][0]["recommended_action"] == "Run and verify an immediate backup."
+    assert payload["sites"][1]["backup_status"] == "warning"
+    assert payload["sites"][2]["backup_status"] == "fresh"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
