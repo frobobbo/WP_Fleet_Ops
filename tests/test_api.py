@@ -232,6 +232,47 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     assert actions[0]["score"] < warning_actions[0]["score"]
 
 
+def test_api_incidents_returns_only_critical_alerts(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Client Site",
+            url="https://critical-client.example",
+            client="Client Critical",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="5",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Only Site",
+            url="https://warning-only.example",
+            client="Client Warning",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/incidents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["incident_count"] >= 1
+    assert payload["affected_site_count"] == 1
+    assert payload["affected_client_count"] == 1
+    assert all(incident["severity"] == "critical" for incident in payload["incidents"])
+    assert {incident["site"] for incident in payload["incidents"]} == {"Critical Client Site"}
+    assert payload["incidents"][0]["client"] == "Client Critical"
+    assert payload["incidents"][0]["recommended_action"]
+
+
 def test_api_backups_highlights_stale_backup_queue(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

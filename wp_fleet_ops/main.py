@@ -153,9 +153,8 @@ def api_clients():
     return {"clients": clients}
 
 
-@app.get("/api/actions")
-def api_actions():
-    """Return a prioritized work queue of current fleet alerts for operators."""
+def _current_actions() -> list[dict]:
+    """Build a sorted action list from the latest fleet snapshots."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     actions = []
     for row in store.latest_dashboard():
@@ -182,7 +181,27 @@ def api_actions():
             action["site"].lower(),
         )
     )
+    return actions
+
+
+@app.get("/api/actions")
+def api_actions():
+    """Return a prioritized work queue of current fleet alerts for operators."""
+    actions = _current_actions()
     return {"action_count": len(actions), "actions": actions}
+
+
+@app.get("/api/incidents")
+def api_incidents():
+    """Return critical current incidents for alerting and escalation."""
+    incidents = [action for action in _current_actions() if action["severity"] == "critical"]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "incident_count": len(incidents),
+        "affected_site_count": len({incident["site"] for incident in incidents}),
+        "affected_client_count": len({incident["client"] for incident in incidents}),
+        "incidents": incidents,
+    }
 
 
 def _backup_status(backup_age_hours: int) -> str:
