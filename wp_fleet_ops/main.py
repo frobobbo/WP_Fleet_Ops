@@ -274,8 +274,7 @@ def snapshot(
     return RedirectResponse("/", status_code=303)
 
 
-@app.get("/report", response_class=PlainTextResponse)
-def report():
+def _build_text_report() -> tuple[str, int, int]:
     care_checks = [
         evaluate_site(
             r["name"],
@@ -303,7 +302,27 @@ def report():
         )
         for r in store.latest_dashboard()
     ]
-    return summarize_care_report(care_checks) + "\n---\n\n" + generate_maintenance_report(fleet_sites)
+    report_text = summarize_care_report(care_checks) + "\n---\n\n" + generate_maintenance_report(fleet_sites)
+    return report_text, len(care_checks), len(fleet_sites)
+
+
+@app.get("/api/report")
+def api_report():
+    """Return the combined care/fleet report with metadata for integrations."""
+    report_text, care_check_count, site_count = _build_text_report()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": site_count,
+        "care_check_count": care_check_count,
+        "line_count": len(report_text.splitlines()),
+        "report": report_text,
+    }
+
+
+@app.get("/report", response_class=PlainTextResponse)
+def report():
+    report_text, _, _ = _build_text_report()
+    return report_text
 
 
 def run():

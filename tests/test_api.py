@@ -39,6 +39,27 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_api_report_returns_structured_report_export(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Export Site", url="https://export.example", client="Client Export"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 1
+    assert payload["care_check_count"] == 1
+    assert payload["line_count"] == len(payload["report"].splitlines())
+    assert "Monthly WordPress Care Report" in payload["report"]
+    assert "WP FleetOps Maintenance Report" in payload["report"]
+    assert "Export Site" in payload["report"]
+
+
 def test_ready_reports_database_access_and_current_counts(tmp_path):
     client = make_test_client(tmp_path)
     client.post("/care/manual-check", data={"name": "Ready Site", "url": "https://ready.example"}, follow_redirects=False)
