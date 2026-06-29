@@ -434,6 +434,75 @@ def api_updates():
     }
 
 
+def _maintenance_reasons(row: dict) -> list[str]:
+    """Identify conditions that should be grouped into a safe work window."""
+    reasons = []
+    if not row["uptime_ok"]:
+        reasons.append("site availability incident")
+    if row["ssl_days"] <= 30:
+        reasons.append("TLS certificate renewal")
+    if row["wp_updates"] > 0:
+        reasons.append("WordPress update backlog")
+    if row["backup_age_hours"] > 36:
+        reasons.append("backup freshness verification")
+    if row["response_ms"] > 750:
+        reasons.append("performance tuning")
+    if row["security_header_count"] < 3:
+        reasons.append("security header hardening")
+    return reasons
+
+
+def _maintenance_window(row: dict, reasons: list[str]) -> str:
+    if not row["uptime_ok"] or row["ssl_days"] <= 7 or row["backup_age_hours"] > 72 or row["wp_updates"] >= 5:
+        return "immediate"
+    if reasons:
+        return "scheduled"
+    return "none"
+
+
+def _maintenance_recommended_action(window: str) -> str:
+    if window == "immediate":
+        return "Take a verified backup, notify the client, and run an immediate supervised maintenance window."
+    if window == "scheduled":
+        return "Plan a routine maintenance window with backup verification and post-change smoke checks."
+    return "No maintenance window is currently required."
+
+
+@app.get("/api/maintenance-windows")
+def api_maintenance_windows():
+    """Return sites that need grouped maintenance work, prioritized by urgency."""
+    urgency_rank = {"immediate": 0, "scheduled": 1, "none": 2}
+    sites = []
+    for row in store.latest_dashboard():
+        reasons = _maintenance_reasons(row)
+        window = _maintenance_window(row, reasons)
+        if window == "none":
+            continue
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "score": row["score"],
+                "maintenance_window": window,
+                "risk_count": len(reasons),
+                "reasons": reasons,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _maintenance_recommended_action(window),
+            }
+        )
+
+    sites.sort(key=lambda site: (urgency_rank[site["maintenance_window"]], -site["risk_count"], site["score"], site["client"].lower(), site["name"].lower()))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(store.latest_dashboard()),
+        "window_count": len(sites),
+        "immediate_count": sum(1 for site in sites if site["maintenance_window"] == "immediate"),
+        "scheduled_count": sum(1 for site in sites if site["maintenance_window"] == "scheduled"),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

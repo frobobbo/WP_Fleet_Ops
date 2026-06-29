@@ -493,6 +493,58 @@ def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
     assert payload["sites"][2]["update_status"] == "current"
 
 
+def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Emergency Updates",
+            url="https://emergency-updates.example",
+            client="Client Work",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="8",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Routine Updates",
+            url="https://routine-updates.example",
+            client="Client Work",
+            ssl_days="24",
+            wp_updates="2",
+            backup_age_hours="48",
+            response_ms="900",
+            security_header_count="2",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Steady Site", url="https://steady.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/maintenance-windows")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 3
+    assert payload["window_count"] == 2
+    assert payload["immediate_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Emergency Updates", "Routine Updates"]
+    assert payload["sites"][0]["maintenance_window"] == "immediate"
+    assert payload["sites"][0]["risk_count"] >= payload["sites"][1]["risk_count"]
+    assert "Take a verified backup" in payload["sites"][0]["recommended_action"]
+    assert payload["sites"][1]["maintenance_window"] == "scheduled"
+    assert "Plan a routine maintenance window" in payload["sites"][1]["recommended_action"]
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
