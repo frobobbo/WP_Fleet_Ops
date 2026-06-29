@@ -450,6 +450,49 @@ def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     assert payload["sites"][2]["certificate_status"] == "healthy"
 
 
+def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Major Backlog",
+            url="https://major-backlog.example",
+            client="Client Updates",
+            wp_updates="7",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Minor Backlog",
+            url="https://minor-backlog.example",
+            client="Client Updates",
+            wp_updates="2",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Current Site", url="https://current.example", wp_updates="0"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/updates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 3
+    assert payload["backlog_count"] == 2
+    assert payload["total_pending_updates"] == 9
+    assert payload["max_pending_updates"] == 7
+    assert [site["name"] for site in payload["sites"]] == ["Major Backlog", "Minor Backlog", "Current Site"]
+    assert payload["sites"][0]["update_status"] == "critical"
+    assert payload["sites"][0]["recommended_action"] == "Plan a supervised update window and backup verification before applying updates."
+    assert payload["sites"][1]["update_status"] == "warning"
+    assert payload["sites"][2]["update_status"] == "current"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

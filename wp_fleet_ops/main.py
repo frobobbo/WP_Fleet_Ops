@@ -389,6 +389,51 @@ def api_certificates():
     }
 
 
+def _update_status(pending_updates: int) -> str:
+    if pending_updates >= 5:
+        return "critical"
+    if pending_updates > 0:
+        return "warning"
+    return "current"
+
+
+def _update_recommended_action(status: str) -> str:
+    if status == "critical":
+        return "Plan a supervised update window and backup verification before applying updates."
+    if status == "warning":
+        return "Schedule routine WordPress core, plugin, and theme updates."
+    return "Continue normal update monitoring."
+
+
+@app.get("/api/updates")
+def api_updates():
+    """Return WordPress update backlog inventory, ordered by largest backlog."""
+    sites = []
+    for row in store.latest_dashboard():
+        status = _update_status(row["wp_updates"])
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "pending_updates": row["wp_updates"],
+                "update_status": status,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _update_recommended_action(status),
+            }
+        )
+
+    sites.sort(key=lambda site: (-site["pending_updates"], site["client"].lower(), site["name"].lower()))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "backlog_count": sum(1 for site in sites if site["pending_updates"] > 0),
+        "total_pending_updates": sum(site["pending_updates"] for site in sites),
+        "max_pending_updates": max((site["pending_updates"] for site in sites), default=0),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
