@@ -298,6 +298,52 @@ def api_security():
     }
 
 
+def _performance_status(response_ms: int) -> str:
+    if response_ms > 1500:
+        return "slow"
+    if response_ms > 750:
+        return "warning"
+    return "fast"
+
+
+def _performance_recommended_action(status: str) -> str:
+    if status == "slow":
+        return "Investigate hosting, caching, and heavy checkout/page dependencies."
+    if status == "warning":
+        return "Review caching and frontend asset weight before it becomes a client-visible issue."
+    return "Continue normal performance monitoring."
+
+
+@app.get("/api/performance")
+def api_performance():
+    """Return response-time health across the monitored fleet, slowest first."""
+    sites = []
+    for row in store.latest_dashboard():
+        status = _performance_status(row["response_ms"])
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "response_ms": row["response_ms"],
+                "performance_status": status,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _performance_recommended_action(status),
+            }
+        )
+
+    sites.sort(key=lambda site: (-site["response_ms"], site["client"].lower(), site["name"].lower()))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "slow_count": sum(1 for site in sites if site["performance_status"] == "slow"),
+        "warning_count": sum(1 for site in sites if site["performance_status"] == "warning"),
+        "average_response_ms": round(sum(site["response_ms"] for site in sites) / len(sites)) if sites else 0,
+        "max_response_ms": max((site["response_ms"] for site in sites), default=0),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

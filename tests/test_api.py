@@ -363,6 +363,50 @@ def test_api_security_highlights_header_coverage_gaps(tmp_path):
     assert payload["sites"][2]["security_status"] == "covered"
 
 
+def test_api_performance_prioritizes_slowest_sites(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Slow Checkout",
+            url="https://slow-checkout.example",
+            client="Client Commerce",
+            response_ms="2200",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Needs Cache",
+            url="https://needs-cache.example",
+            client="Client Content",
+            response_ms="900",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Fast Site", url="https://fast.example", response_ms="250"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/performance")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 3
+    assert payload["slow_count"] == 1
+    assert payload["warning_count"] == 1
+    assert payload["average_response_ms"] == 1117
+    assert payload["max_response_ms"] == 2200
+    assert [site["name"] for site in payload["sites"]] == ["Slow Checkout", "Needs Cache", "Fast Site"]
+    assert payload["sites"][0]["performance_status"] == "slow"
+    assert payload["sites"][0]["recommended_action"] == "Investigate hosting, caching, and heavy checkout/page dependencies."
+    assert payload["sites"][1]["performance_status"] == "warning"
+    assert payload["sites"][2]["performance_status"] == "fast"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
