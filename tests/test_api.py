@@ -407,6 +407,49 @@ def test_api_performance_prioritizes_slowest_sites(tmp_path):
     assert payload["sites"][2]["performance_status"] == "fast"
 
 
+def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Cert",
+            url="https://expired.example",
+            client="Client TLS",
+            ssl_days="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Renew Soon",
+            url="https://renew-soon.example",
+            client="Client TLS",
+            ssl_days="12",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy Cert", url="https://healthy-cert.example", ssl_days="61"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/certificates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 3
+    assert payload["critical_count"] == 1
+    assert payload["warning_count"] == 1
+    assert payload["minimum_ssl_days"] == 0
+    assert [site["name"] for site in payload["sites"]] == ["Expired Cert", "Renew Soon", "Healthy Cert"]
+    assert payload["sites"][0]["certificate_status"] == "critical"
+    assert payload["sites"][0]["recommended_action"] == "Renew or replace the TLS certificate immediately."
+    assert payload["sites"][1]["certificate_status"] == "warning"
+    assert payload["sites"][2]["certificate_status"] == "healthy"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

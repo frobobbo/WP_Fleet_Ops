@@ -344,6 +344,51 @@ def api_performance():
     }
 
 
+def _certificate_status(ssl_days: int) -> str:
+    if ssl_days <= 7:
+        return "critical"
+    if ssl_days <= 30:
+        return "warning"
+    return "healthy"
+
+
+def _certificate_recommended_action(status: str) -> str:
+    if status == "critical":
+        return "Renew or replace the TLS certificate immediately."
+    if status == "warning":
+        return "Schedule certificate renewal before the 7-day critical window."
+    return "Continue normal certificate monitoring."
+
+
+@app.get("/api/certificates")
+def api_certificates():
+    """Return TLS certificate expiry inventory, ordered by soonest renewal need."""
+    sites = []
+    for row in store.latest_dashboard():
+        status = _certificate_status(row["ssl_days"])
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "ssl_days_remaining": row["ssl_days"],
+                "certificate_status": status,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _certificate_recommended_action(status),
+            }
+        )
+
+    sites.sort(key=lambda site: (site["ssl_days_remaining"], site["client"].lower(), site["name"].lower()))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "critical_count": sum(1 for site in sites if site["certificate_status"] == "critical"),
+        "warning_count": sum(1 for site in sites if site["certificate_status"] == "warning"),
+        "minimum_ssl_days": min((site["ssl_days_remaining"] for site in sites), default=None),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
