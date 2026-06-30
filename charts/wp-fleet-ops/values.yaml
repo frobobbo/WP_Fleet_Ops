@@ -1,5 +1,9 @@
 replicaCount: 1
 
+deploymentStrategy:
+  # Recreate avoids RWO PVC multi-attach stalls during single-replica upgrades.
+  type: Recreate
+
 image:
   repository: ghcr.io/frobobbo/wp_fleet_ops
   pullPolicy: IfNotPresent
