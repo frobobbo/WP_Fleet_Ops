@@ -493,6 +493,56 @@ def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
     assert payload["sites"][2]["update_status"] == "current"
 
 
+def test_api_risk_register_groups_current_risks_by_category(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Risk",
+            url="https://critical-risk.example",
+            client="Client Risk",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="7",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Risk",
+            url="https://warning-risk.example",
+            client="Client Risk",
+            ssl_days="24",
+            wp_updates="1",
+            backup_age_hours="48",
+            response_ms="900",
+            security_header_count="2",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/risk-register")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["category_count"] == 6
+    assert payload["critical_category_count"] == 6
+    entries = {entry["category"]: entry for entry in payload["entries"]}
+    assert entries["availability"]["affected_site_count"] == 1
+    assert entries["availability"]["highest_severity"] == "critical"
+    assert entries["availability"]["sites"][0]["name"] == "Critical Risk"
+    assert entries["tls"]["affected_site_count"] == 2
+    assert entries["tls"]["sites"][0]["severity"] == "critical"
+    assert entries["tls"]["sites"][1]["severity"] == "warning"
+    assert entries["updates"]["sites"][0]["recommended_action"].startswith("Apply WordPress")
+    assert entries["security"]["sites"][0]["score"] < entries["security"]["sites"][1]["score"]
+
+
 def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

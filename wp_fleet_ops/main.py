@@ -468,6 +468,105 @@ def _maintenance_recommended_action(window: str) -> str:
     return "No maintenance window is currently required."
 
 
+def _risk_register_entries() -> list[dict]:
+    """Group current site risks by operational category for planning reviews."""
+    definitions = [
+        (
+            "availability",
+            "Site availability incidents",
+            lambda row: not row["uptime_ok"],
+            lambda row: "critical",
+            lambda row: "Confirm hosting availability, DNS, and recent deployment changes.",
+        ),
+        (
+            "tls",
+            "TLS certificate renewals",
+            lambda row: row["ssl_days"] <= 30,
+            lambda row: "critical" if row["ssl_days"] <= 7 else "warning",
+            lambda row: "Renew certificates inside the current maintenance window.",
+        ),
+        (
+            "updates",
+            "WordPress update backlog",
+            lambda row: row["wp_updates"] > 0,
+            lambda row: "critical" if row["wp_updates"] >= 5 else "warning",
+            lambda row: "Apply WordPress core, plugin, and theme updates after backup verification.",
+        ),
+        (
+            "backups",
+            "Backup freshness gaps",
+            lambda row: row["backup_age_hours"] > 36,
+            lambda row: "critical" if row["backup_age_hours"] > 72 else "warning",
+            lambda row: "Run and verify fresh backups before any site changes.",
+        ),
+        (
+            "performance",
+            "Homepage performance degradation",
+            lambda row: row["response_ms"] > 750,
+            lambda row: "critical" if row["response_ms"] > 2500 else "warning",
+            lambda row: "Review caching, hosting resources, and slow page dependencies.",
+        ),
+        (
+            "security",
+            "Security header coverage gaps",
+            lambda row: row["security_header_count"] < 3,
+            lambda row: "critical" if row["security_header_count"] < 2 else "warning",
+            lambda row: "Add missing HSTS, clickjacking, or content security headers.",
+        ),
+    ]
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    entries = []
+    for key, label, predicate, severity_for, action_for in definitions:
+        affected_sites = []
+        for row in store.latest_dashboard():
+            if not predicate(row):
+                continue
+            affected_sites.append(
+                {
+                    "name": row["name"],
+                    "url": row["url"],
+                    "client": row.get("client") or "Unassigned",
+                    "score": row["score"],
+                    "severity": severity_for(row),
+                    "recommended_action": action_for(row),
+                    "latest_snapshot_at": row["captured_at"],
+                }
+            )
+        if not affected_sites:
+            continue
+        affected_sites.sort(
+            key=lambda site: (
+                severity_rank.get(site["severity"], 99),
+                site["score"],
+                site["client"].lower(),
+                site["name"].lower(),
+            )
+        )
+        entries.append(
+            {
+                "category": key,
+                "label": label,
+                "affected_site_count": len(affected_sites),
+                "highest_severity": affected_sites[0]["severity"],
+                "sites": affected_sites,
+            }
+        )
+    entries.sort(key=lambda entry: (severity_rank.get(entry["highest_severity"], 99), -entry["affected_site_count"], entry["category"]))
+    return entries
+
+
+@app.get("/api/risk-register")
+def api_risk_register():
+    """Return category-level operational risks for client planning and QBRs."""
+    entries = _risk_register_entries()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "category_count": len(entries),
+        "critical_category_count": sum(1 for entry in entries if entry["highest_severity"] == "critical"),
+        "entries": entries,
+    }
+
+
 @app.get("/api/maintenance-windows")
 def api_maintenance_windows():
     """Return sites that need grouped maintenance work, prioritized by urgency."""
