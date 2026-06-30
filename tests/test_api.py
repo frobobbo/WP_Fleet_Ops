@@ -299,6 +299,65 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     assert actions[0]["score"] < warning_actions[0]["score"]
 
 
+def test_api_client_workload_groups_open_actions_by_account(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Commerce",
+            url="https://critical-commerce.example",
+            client="Client Commerce",
+            uptime_ok="false",
+            ssl_days="4",
+            wp_updates="6",
+            backup_age_hours="96",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Commerce Warning",
+            url="https://commerce-warning.example",
+            client="Client Commerce",
+            wp_updates="2",
+            response_ms="900",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unassigned Warning",
+            url="https://unassigned-warning.example",
+            client="",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-workload")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 2
+    assert payload["open_action_count"] >= 4
+    assert payload["critical_action_count"] >= 1
+    assert [row["client"] for row in payload["clients"]] == ["Client Commerce", "Unassigned"]
+    commerce = payload["clients"][0]
+    assert commerce["site_count"] == 2
+    assert commerce["open_action_count"] >= 4
+    assert commerce["critical_action_count"] >= 1
+    assert commerce["warning_action_count"] >= 1
+    assert commerce["lowest_score"] < 70
+    assert commerce["top_site"] == "Critical Commerce"
+    assert commerce["top_recommended_action"] == "Confirm site availability, hosting status, and recent deploys."
+    assert commerce["latest_snapshot_at"]
+
+
 def test_api_incidents_returns_only_critical_alerts(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

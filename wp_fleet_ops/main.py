@@ -278,6 +278,77 @@ def api_actions():
     return {"action_count": len(actions), "actions": actions}
 
 
+def _client_workload_rows() -> list[dict]:
+    """Group current open fleet actions by client for account-level triage."""
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    clients: dict[str, dict] = {}
+    for action in _current_actions():
+        client_name = action.get("client") or "Unassigned"
+        summary = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "site_names": set(),
+                "open_action_count": 0,
+                "critical_action_count": 0,
+                "warning_action_count": 0,
+                "info_action_count": 0,
+                "lowest_score": action["score"],
+                "latest_snapshot_at": None,
+                "top_action": None,
+            },
+        )
+        summary["site_names"].add(action["site"])
+        summary["open_action_count"] += 1
+        summary[f"{action['severity']}_action_count"] += 1
+        summary["lowest_score"] = min(summary["lowest_score"], action["score"])
+        captured_at = action.get("latest_snapshot_at")
+        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
+            summary["latest_snapshot_at"] = captured_at
+        current_top = summary["top_action"]
+        if current_top is None or (
+            severity_rank.get(action["severity"], 99), action["score"], action["site"].lower()
+        ) < (
+            severity_rank.get(current_top["severity"], 99), current_top["score"], current_top["site"].lower()
+        ):
+            summary["top_action"] = action
+
+    rows = []
+    for summary in clients.values():
+        top_action = summary.pop("top_action")
+        site_names = summary.pop("site_names")
+        summary["site_count"] = len(site_names)
+        summary["top_site"] = top_action["site"]
+        summary["top_severity"] = top_action["severity"]
+        summary["top_message"] = top_action["message"]
+        summary["top_recommended_action"] = top_action["recommended_action"]
+        rows.append(summary)
+
+    rows.sort(
+        key=lambda row: (
+            -row["critical_action_count"],
+            -row["warning_action_count"],
+            -row["open_action_count"],
+            row["lowest_score"],
+            row["client"].lower(),
+        )
+    )
+    return rows
+
+
+@app.get("/api/client-workload")
+def api_client_workload():
+    """Return account-level open action counts for client triage."""
+    clients = _client_workload_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "open_action_count": sum(client["open_action_count"] for client in clients),
+        "critical_action_count": sum(client["critical_action_count"] for client in clients),
+        "clients": clients,
+    }
+
+
 @app.get("/api/incidents")
 def api_incidents():
     """Return critical current incidents for alerting and escalation."""
