@@ -185,6 +185,56 @@ def test_api_clients_rolls_up_account_health(tmp_path):
     assert clients[1]["site_count"] == 1
 
 
+def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Checkout Incident",
+            url="https://checkout-incident.example",
+            client="Client Commerce",
+            uptime_ok="false",
+            ssl_days="5",
+            backup_age_hours="96",
+            response_ms="2100",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Certificate Watch",
+            url="https://certificate-watch.example",
+            client="Client TLS",
+            ssl_days="13",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Compliant Site", url="https://compliant.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/sla-breaches")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 3
+    assert payload["breach_count"] == 2
+    assert payload["critical_breach_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Checkout Incident", "Certificate Watch"]
+    assert payload["sites"][0]["breach_count"] == 4
+    assert payload["sites"][0]["highest_severity"] == "critical"
+    assert {breach["target"] for breach in payload["sites"][0]["breaches"]} == {
+        "availability",
+        "tls_certificate",
+        "backup_freshness",
+        "response_time",
+    }
+    assert payload["sites"][1]["breaches"][0]["target"] == "tls_certificate"
+
 
 def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     client = make_test_client(tmp_path)

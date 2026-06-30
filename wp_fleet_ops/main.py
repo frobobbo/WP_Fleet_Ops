@@ -153,6 +153,93 @@ def api_clients():
     return {"clients": clients}
 
 
+def _sla_breaches(row: dict) -> list[dict]:
+    """Return operational target misses for a dashboard row."""
+    breaches = []
+    if not row["uptime_ok"]:
+        breaches.append(
+            {
+                "target": "availability",
+                "severity": "critical",
+                "observed": "down",
+                "threshold": "site reachable",
+                "recommended_action": "Confirm site availability, hosting status, DNS, and recent deploys.",
+            }
+        )
+    if row["ssl_days"] < 14:
+        breaches.append(
+            {
+                "target": "tls_certificate",
+                "severity": "critical" if row["ssl_days"] < 7 else "warning",
+                "observed": f"{row['ssl_days']} days remaining",
+                "threshold": ">= 14 days remaining",
+                "recommended_action": "Renew or replace the TLS certificate before client traffic is at risk.",
+            }
+        )
+    if row["backup_age_hours"] > 72:
+        breaches.append(
+            {
+                "target": "backup_freshness",
+                "severity": "critical",
+                "observed": f"{row['backup_age_hours']} hours old",
+                "threshold": "<= 72 hours old",
+                "recommended_action": "Run and verify a fresh backup immediately.",
+            }
+        )
+    if row["response_ms"] > 1500:
+        breaches.append(
+            {
+                "target": "response_time",
+                "severity": "warning",
+                "observed": f"{row['response_ms']} ms",
+                "threshold": "<= 1500 ms",
+                "recommended_action": "Review caching, hosting resources, and slow page dependencies.",
+            }
+        )
+    return breaches
+
+
+@app.get("/api/sla-breaches")
+def api_sla_breaches():
+    """Return sites currently missing core operational service targets."""
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    sites = []
+    for row in store.latest_dashboard():
+        breaches = _sla_breaches(row)
+        if not breaches:
+            continue
+        breaches.sort(key=lambda breach: (severity_rank.get(breach["severity"], 99), breach["target"]))
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "score": row["score"],
+                "breach_count": len(breaches),
+                "highest_severity": breaches[0]["severity"],
+                "latest_snapshot_at": row["captured_at"],
+                "breaches": breaches,
+            }
+        )
+
+    sites.sort(
+        key=lambda site: (
+            severity_rank.get(site["highest_severity"], 99),
+            -site["breach_count"],
+            site["score"],
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(store.latest_dashboard()),
+        "breach_count": len(sites),
+        "critical_breach_count": sum(1 for site in sites if site["highest_severity"] == "critical"),
+        "sites": sites,
+    }
+
+
 def _current_actions() -> list[dict]:
     """Build a sorted action list from the latest fleet snapshots."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
