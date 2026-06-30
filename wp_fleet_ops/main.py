@@ -170,7 +170,7 @@ def _sla_breaches(row: dict) -> list[dict]:
         breaches.append(
             {
                 "target": "tls_certificate",
-                "severity": "critical" if row["ssl_days"] < 7 else "warning",
+                "severity": "critical" if row["ssl_days"] <= 7 else "warning",
                 "observed": f"{row['ssl_days']} days remaining",
                 "threshold": ">= 14 days remaining",
                 "recommended_action": "Renew or replace the TLS certificate before client traffic is at risk.",

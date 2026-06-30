@@ -212,6 +212,16 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     )
     client.post(
         "/snapshot",
+        data=valid_snapshot_payload(
+            name="Seven Day Certificate",
+            url="https://seven-day-certificate.example",
+            client="Client TLS",
+            ssl_days="7",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
         data=valid_snapshot_payload(name="Compliant Site", url="https://compliant.example"),
         follow_redirects=False,
     )
@@ -221,10 +231,14 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["generated_at"].endswith("+00:00")
-    assert payload["site_count"] == 3
-    assert payload["breach_count"] == 2
-    assert payload["critical_breach_count"] == 1
-    assert [site["name"] for site in payload["sites"]] == ["Checkout Incident", "Certificate Watch"]
+    assert payload["site_count"] == 4
+    assert payload["breach_count"] == 3
+    assert payload["critical_breach_count"] == 2
+    assert [site["name"] for site in payload["sites"]] == [
+        "Checkout Incident",
+        "Seven Day Certificate",
+        "Certificate Watch",
+    ]
     assert payload["sites"][0]["breach_count"] == 4
     assert payload["sites"][0]["highest_severity"] == "critical"
     assert {breach["target"] for breach in payload["sites"][0]["breaches"]} == {
@@ -234,6 +248,9 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
         "response_time",
     }
     assert payload["sites"][1]["breaches"][0]["target"] == "tls_certificate"
+    assert payload["sites"][1]["breaches"][0]["severity"] == "critical"
+    assert payload["sites"][2]["breaches"][0]["target"] == "tls_certificate"
+    assert payload["sites"][2]["breaches"][0]["severity"] == "warning"
 
 
 def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
