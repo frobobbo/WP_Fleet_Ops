@@ -859,6 +859,94 @@ def api_remediation_plan():
     }
 
 
+def _client_digest_status(immediate_count: int, scheduled_count: int, average_score: int) -> str:
+    """Return a client-friendly status for an account digest."""
+    if immediate_count:
+        return "red"
+    if scheduled_count or average_score < 85:
+        return "yellow"
+    return "green"
+
+
+@app.get("/api/client-digest")
+def api_client_digest():
+    """Return client-level executive summaries for account check-ins."""
+    actions_by_client: dict[str, list[dict]] = {}
+    for action in _current_actions():
+        actions_by_client.setdefault(action.get("client") or "Unassigned", []).append(action)
+
+    clients: dict[str, dict] = {}
+    for row in store.latest_dashboard():
+        client_name = row.get("client") or "Unassigned"
+        digest = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "site_count": 0,
+                "score_total": 0,
+                "sites": [],
+                "latest_snapshot_at": None,
+            },
+        )
+        digest["site_count"] += 1
+        digest["score_total"] += row["score"] or 0
+        digest["sites"].append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "score": row["score"],
+                "status": _dashboard_status(row["score"]),
+                "critical_alerts": sum(1 for alert in row["alerts"] if alert.get("severity") == "critical"),
+            }
+        )
+        captured_at = row.get("captured_at")
+        if captured_at and (digest["latest_snapshot_at"] is None or captured_at > digest["latest_snapshot_at"]):
+            digest["latest_snapshot_at"] = captured_at
+
+    digest_rows = []
+    for client_name, digest in clients.items():
+        actions = actions_by_client.get(client_name, [])
+        immediate_count = sum(1 for action in actions if _remediation_bucket(action) == "immediate")
+        scheduled_count = sum(1 for action in actions if _remediation_bucket(action) == "scheduled")
+        watch_count = sum(1 for action in actions if _remediation_bucket(action) == "watch")
+        average_score = round(digest.pop("score_total") / digest["site_count"]) if digest["site_count"] else 100
+        top_action = actions[0] if actions else None
+        status = _client_digest_status(immediate_count, scheduled_count, average_score)
+        digest["average_score"] = average_score
+        digest["status"] = status
+        digest["immediate_action_count"] = immediate_count
+        digest["scheduled_action_count"] = scheduled_count
+        digest["watch_action_count"] = watch_count
+        digest["open_action_count"] = len(actions)
+        digest["top_site"] = top_action["site"] if top_action else None
+        digest["top_message"] = top_action["message"] if top_action else "No open fleet actions."
+        digest["executive_summary"] = (
+            f"{client_name} has {digest['site_count']} tracked site"
+            f"{'s' if digest['site_count'] != 1 else ''}, an average score of {average_score}, "
+            f"and {len(actions)} open action{'s' if len(actions) != 1 else ''}."
+        )
+        digest["sites"].sort(key=lambda site: (site["score"], site["name"].lower()))
+        digest_rows.append(digest)
+
+    digest_rows.sort(
+        key=lambda row: (
+            {"red": 0, "yellow": 1, "green": 2}.get(row["status"], 99),
+            -row["immediate_action_count"],
+            -row["scheduled_action_count"],
+            row["average_score"],
+            row["client"].lower(),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(digest_rows),
+        "red_count": sum(1 for client in digest_rows if client["status"] == "red"),
+        "yellow_count": sum(1 for client in digest_rows if client["status"] == "yellow"),
+        "green_count": sum(1 for client in digest_rows if client["status"] == "green"),
+        "clients": digest_rows,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

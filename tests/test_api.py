@@ -816,6 +816,57 @@ def test_api_remediation_plan_groups_actions_by_operational_timing(tmp_path):
     assert scheduled["actions"][0]["due"] == "next maintenance window"
 
 
+def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Client Site",
+            url="https://critical-client.example",
+            client="Client Critical",
+            uptime_ok="false",
+            ssl_days="4",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Healthy Client Site",
+            url="https://healthy-client.example",
+            client="Client Healthy",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-digest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 2
+    assert payload["red_count"] == 1
+    assert payload["green_count"] == 1
+    assert [row["client"] for row in payload["clients"]] == ["Client Critical", "Client Healthy"]
+    critical = payload["clients"][0]
+    assert critical["status"] == "red"
+    assert critical["site_count"] == 1
+    assert critical["immediate_action_count"] >= 1
+    assert critical["scheduled_action_count"] >= 1
+    assert critical["open_action_count"] >= 5
+    assert critical["top_site"] == "Critical Client Site"
+    assert "Client Critical has 1 tracked site" in critical["executive_summary"]
+    assert critical["sites"][0]["critical_alerts"] >= 1
+    healthy = payload["clients"][1]
+    assert healthy["status"] == "green"
+    assert healthy["open_action_count"] == 0
+    assert healthy["top_message"] == "No open fleet actions."
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
