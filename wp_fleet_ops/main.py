@@ -809,6 +809,56 @@ def api_slo():
     }
 
 
+def _remediation_bucket(action: dict) -> str:
+    """Map an open action to a practical operator timing bucket."""
+    if action["severity"] == "critical":
+        return "immediate"
+    if action["severity"] == "warning":
+        return "scheduled"
+    return "watch"
+
+
+def _remediation_due(bucket: str) -> str:
+    if bucket == "immediate":
+        return "today"
+    if bucket == "scheduled":
+        return "next maintenance window"
+    return "monitoring review"
+
+
+@app.get("/api/remediation-plan")
+def api_remediation_plan():
+    """Return current fleet actions grouped into operator timing buckets."""
+    labels = {
+        "immediate": "Immediate remediation",
+        "scheduled": "Scheduled maintenance",
+        "watch": "Monitoring watchlist",
+    }
+    buckets: dict[str, list[dict]] = {"immediate": [], "scheduled": [], "watch": []}
+    for action in _current_actions():
+        bucket = _remediation_bucket(action)
+        buckets[bucket].append({**action, "due": _remediation_due(bucket)})
+
+    bucket_rows = [
+        {
+            "bucket": bucket,
+            "label": labels[bucket],
+            "action_count": len(actions),
+            "actions": actions,
+        }
+        for bucket, actions in buckets.items()
+        if actions
+    ]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "action_count": sum(len(actions) for actions in buckets.values()),
+        "immediate_count": len(buckets["immediate"]),
+        "scheduled_count": len(buckets["scheduled"]),
+        "watch_count": len(buckets["watch"]),
+        "buckets": bucket_rows,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

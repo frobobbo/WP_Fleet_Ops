@@ -767,6 +767,55 @@ def test_api_slo_returns_service_objective_compliance(tmp_path):
     assert objectives["security"]["threshold"] == ">= 2 core headers"
 
 
+def test_api_remediation_plan_groups_actions_by_operational_timing(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Immediate Fix",
+            url="https://immediate-fix.example",
+            client="Client Immediate",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Scheduled Fix",
+            url="https://scheduled-fix.example",
+            client="Client Scheduled",
+            wp_updates="2",
+            response_ms="900",
+            security_header_count="2",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/remediation-plan")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["action_count"] >= 5
+    assert payload["immediate_count"] >= 1
+    assert payload["scheduled_count"] >= 1
+    assert payload["watch_count"] >= 1
+    assert [bucket["bucket"] for bucket in payload["buckets"]] == ["immediate", "scheduled", "watch"]
+    immediate = payload["buckets"][0]
+    scheduled = payload["buckets"][1]
+    assert immediate["label"] == "Immediate remediation"
+    assert immediate["actions"][0]["site"] == "Immediate Fix"
+    assert immediate["actions"][0]["due"] == "today"
+    assert scheduled["label"] == "Scheduled maintenance"
+    assert scheduled["actions"][0]["due"] == "next maintenance window"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
