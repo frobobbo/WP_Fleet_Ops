@@ -721,6 +721,52 @@ def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp
     assert "Plan a routine maintenance window" in payload["sites"][1]["recommended_action"]
 
 
+def test_api_slo_returns_service_objective_compliance(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy SLO", url="https://healthy-slo.example"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Risky SLO",
+            url="https://risky-slo.example",
+            uptime_ok="false",
+            ssl_days="5",
+            backup_age_hours="96",
+            response_ms="2200",
+            security_header_count="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/slo")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 2
+    assert payload["objective_count"] == 5
+    assert payload["at_risk_count"] == 5
+    assert payload["worst_objective"]["compliance_percent"] == 50.0
+    objectives = {objective["name"]: objective for objective in payload["objectives"]}
+    assert objectives["availability"] == {
+        "name": "availability",
+        "label": "Sites reachable",
+        "threshold": "site reachable",
+        "met_count": 1,
+        "miss_count": 1,
+        "compliance_percent": 50.0,
+        "status": "at_risk",
+    }
+    assert objectives["tls"]["threshold"] == ">= 14 days remaining"
+    assert objectives["backups"]["threshold"] == "<= 72 hours old"
+    assert objectives["performance"]["threshold"] == "<= 1500 ms"
+    assert objectives["security"]["threshold"] == ">= 2 core headers"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

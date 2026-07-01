@@ -760,6 +760,55 @@ def api_maintenance_windows():
     }
 
 
+def _slo_status(met: int, total: int) -> str:
+    """Return a compact status label for an SLO compliance ratio."""
+    if total == 0:
+        return "unknown"
+    ratio = met / total
+    if ratio >= 0.95:
+        return "healthy"
+    if ratio >= 0.80:
+        return "watch"
+    return "at_risk"
+
+
+def _slo_row(name: str, label: str, total: int, met: int, threshold: str) -> dict:
+    compliance_percent = round((met / total) * 100, 1) if total else 100.0
+    return {
+        "name": name,
+        "label": label,
+        "threshold": threshold,
+        "met_count": met,
+        "miss_count": max(total - met, 0),
+        "compliance_percent": compliance_percent,
+        "status": _slo_status(met, total),
+    }
+
+
+@app.get("/api/slo")
+def api_slo():
+    """Return fleet-level service objective compliance for leadership review."""
+    rows = store.latest_dashboard()
+    total = len(rows)
+    objectives = [
+        _slo_row("availability", "Sites reachable", total, sum(1 for row in rows if row["uptime_ok"]), "site reachable"),
+        _slo_row("tls", "TLS renewal buffer", total, sum(1 for row in rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
+        _slo_row("backups", "Backup freshness", total, sum(1 for row in rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
+        _slo_row("performance", "Homepage response", total, sum(1 for row in rows if row["response_ms"] <= 1500), "<= 1500 ms"),
+        _slo_row("security", "Security headers", total, sum(1 for row in rows if row["security_header_count"] >= 2), ">= 2 core headers"),
+    ]
+    objectives.sort(key=lambda objective: (objective["compliance_percent"], objective["name"]))
+    worst_objective = objectives[0] if objectives else None
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": total,
+        "objective_count": len(objectives),
+        "at_risk_count": sum(1 for objective in objectives if objective["status"] == "at_risk"),
+        "worst_objective": worst_objective,
+        "objectives": objectives,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
