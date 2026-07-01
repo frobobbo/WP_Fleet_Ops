@@ -721,6 +721,64 @@ def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp
     assert "Plan a routine maintenance window" in payload["sites"][1]["recommended_action"]
 
 
+def test_api_maintenance_calendar_groups_work_by_window(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Emergency Storefront",
+            url="https://emergency.example",
+            client="Client Emergency",
+            uptime_ok="false",
+            ssl_days="5",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2600",
+            security_header_count="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Routine Blog",
+            url="https://routine.example",
+            client="Client Routine",
+            wp_updates="2",
+            response_ms="900",
+            security_header_count="2",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy Site", url="https://healthy-calendar.example", client="Client Healthy"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/maintenance-calendar")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 3
+    assert payload["window_count"] == 2
+    assert [window["window"] for window in payload["windows"]] == ["immediate", "scheduled"]
+    immediate = payload["windows"][0]
+    assert immediate["label"] == "Immediate maintenance"
+    assert immediate["site_count"] == 1
+    assert immediate["client_count"] == 1
+    assert immediate["total_risk_count"] >= 5
+    assert immediate["top_site"] == "Emergency Storefront"
+    assert immediate["recommended_action"].startswith("Take a verified backup")
+    assert immediate["sites"][0]["reasons"][0] == "site availability incident"
+    scheduled = payload["windows"][1]
+    assert scheduled["label"] == "Scheduled maintenance"
+    assert scheduled["site_count"] == 1
+    assert scheduled["top_site"] == "Routine Blog"
+    assert scheduled["recommended_action"].startswith("Plan a routine maintenance window")
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

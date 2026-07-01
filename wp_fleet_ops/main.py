@@ -785,6 +785,66 @@ def _slo_row(name: str, label: str, total: int, met: int, threshold: str) -> dic
     }
 
 
+def _maintenance_calendar_windows() -> list[dict]:
+    """Summarize maintenance work by timing window for planning views."""
+    labels = {"immediate": "Immediate maintenance", "scheduled": "Scheduled maintenance"}
+    urgency_rank = {"immediate": 0, "scheduled": 1}
+    windows: dict[str, dict] = {}
+    for row in store.latest_dashboard():
+        reasons = _maintenance_reasons(row)
+        window = _maintenance_window(row, reasons)
+        if window == "none":
+            continue
+        site = {
+            "name": row["name"],
+            "url": row["url"],
+            "client": row.get("client") or "Unassigned",
+            "score": row["score"],
+            "risk_count": len(reasons),
+            "reasons": reasons,
+            "latest_snapshot_at": row["captured_at"],
+        }
+        summary = windows.setdefault(
+            window,
+            {
+                "window": window,
+                "label": labels[window],
+                "site_count": 0,
+                "client_names": set(),
+                "total_risk_count": 0,
+                "recommended_action": _maintenance_recommended_action(window),
+                "sites": [],
+            },
+        )
+        summary["site_count"] += 1
+        summary["client_names"].add(site["client"])
+        summary["total_risk_count"] += site["risk_count"]
+        summary["sites"].append(site)
+
+    rows = []
+    for summary in windows.values():
+        summary["sites"].sort(key=lambda site: (-site["risk_count"], site["score"], site["client"].lower(), site["name"].lower()))
+        summary["client_count"] = len(summary.pop("client_names"))
+        summary["top_site"] = summary["sites"][0]["name"] if summary["sites"] else None
+        rows.append(summary)
+    rows.sort(key=lambda row: (urgency_rank[row["window"]], -row["total_risk_count"], row["window"]))
+    return rows
+
+
+@app.get("/api/maintenance-calendar")
+def api_maintenance_calendar():
+    """Return maintenance work grouped by immediate vs scheduled windows."""
+    windows = _maintenance_calendar_windows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(store.latest_dashboard()),
+        "window_count": len(windows),
+        "immediate_site_count": sum(window["site_count"] for window in windows if window["window"] == "immediate"),
+        "scheduled_site_count": sum(window["site_count"] for window in windows if window["window"] == "scheduled"),
+        "windows": windows,
+    }
+
+
 @app.get("/api/slo")
 def api_slo():
     """Return fleet-level service objective compliance for leadership review."""
