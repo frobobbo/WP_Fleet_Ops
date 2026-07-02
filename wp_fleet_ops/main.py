@@ -278,6 +278,58 @@ def api_actions():
     return {"action_count": len(actions), "actions": actions}
 
 
+def _site_watchlist_rows() -> list[dict]:
+    """Return latest snapshot rows that need operator attention."""
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    sites = []
+    for row in store.latest_dashboard():
+        alerts = row["alerts"]
+        if row["score"] >= 85 and not alerts:
+            continue
+        top_alert = min(alerts, key=lambda alert: severity_rank.get(alert.get("severity", "info"), 99)) if alerts else None
+        watch_status = "critical" if row["score"] < 70 else "warning"
+        if top_alert and top_alert.get("severity") == "critical":
+            watch_status = "critical"
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "score": row["score"],
+                "watch_status": watch_status,
+                "alert_count": len(alerts),
+                "top_alert": top_alert.get("message") if top_alert else "Score is below target.",
+                "top_alert_severity": top_alert.get("severity") if top_alert else watch_status,
+                "recommended_action": _recommended_action(top_alert or {}),
+                "latest_snapshot_at": row["captured_at"],
+            }
+        )
+
+    sites.sort(
+        key=lambda site: (
+            severity_rank.get(site["watch_status"], 99),
+            site["score"],
+            -site["alert_count"],
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    return sites
+
+
+@app.get("/api/site-watchlist")
+def api_site_watchlist():
+    """Return sites that need operator attention, excluding healthy green sites."""
+    sites = _site_watchlist_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(store.latest_dashboard()),
+        "watchlist_count": len(sites),
+        "critical_watch_count": sum(1 for site in sites if site["watch_status"] == "critical"),
+        "sites": sites,
+    }
+
+
 def _client_workload_rows() -> list[dict]:
     """Group current open fleet actions by client for account-level triage."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}

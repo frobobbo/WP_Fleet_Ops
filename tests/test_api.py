@@ -301,6 +301,54 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     assert actions[0]["score"] < warning_actions[0]["score"]
 
 
+def test_api_site_watchlist_returns_only_attention_sites(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Watch Site",
+            url="https://critical-watch.example",
+            client="Client Watch",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="5",
+            backup_age_hours="120",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Watch Site",
+            url="https://warning-watch.example",
+            client="Client Watch",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy Watch Site", url="https://healthy-watch.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-watchlist")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 3
+    assert payload["watchlist_count"] == 2
+    assert payload["critical_watch_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Critical Watch Site", "Warning Watch Site"]
+    assert payload["sites"][0]["watch_status"] == "critical"
+    assert payload["sites"][0]["top_alert"]
+    assert payload["sites"][0]["recommended_action"]
+    assert payload["sites"][1]["watch_status"] == "warning"
+
+
 def test_api_client_workload_groups_open_actions_by_account(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
