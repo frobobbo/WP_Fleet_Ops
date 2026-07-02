@@ -1007,6 +1007,71 @@ def api_client_digest():
     }
 
 
+def _client_escalation_rows() -> list[dict]:
+    """Group current critical incidents by client for escalation handoffs."""
+    escalations: dict[str, dict] = {}
+    for incident in (action for action in _current_actions() if action["severity"] == "critical"):
+        client_name = incident.get("client") or "Unassigned"
+        row = escalations.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "critical_incident_count": 0,
+                "affected_sites": set(),
+                "lowest_score": incident["score"],
+                "latest_snapshot_at": None,
+                "top_incident": incident,
+                "incidents": [],
+            },
+        )
+        row["critical_incident_count"] += 1
+        row["affected_sites"].add(incident["site"])
+        row["lowest_score"] = min(row["lowest_score"], incident["score"])
+        captured_at = incident.get("latest_snapshot_at")
+        if captured_at and (row["latest_snapshot_at"] is None or captured_at > row["latest_snapshot_at"]):
+            row["latest_snapshot_at"] = captured_at
+        if (incident["score"], incident["site"].lower(), incident["message"].lower()) < (
+            row["top_incident"]["score"],
+            row["top_incident"]["site"].lower(),
+            row["top_incident"]["message"].lower(),
+        ):
+            row["top_incident"] = incident
+        row["incidents"].append(incident)
+
+    rows = []
+    for row in escalations.values():
+        row["affected_site_count"] = len(row.pop("affected_sites"))
+        row["top_site"] = row["top_incident"]["site"]
+        row["top_message"] = row["top_incident"]["message"]
+        row["top_recommended_action"] = row["top_incident"]["recommended_action"]
+        del row["top_incident"]
+        row["incidents"].sort(key=lambda incident: (incident["score"], incident["site"].lower(), incident["message"].lower()))
+        rows.append(row)
+
+    rows.sort(
+        key=lambda row: (
+            -row["critical_incident_count"],
+            -row["affected_site_count"],
+            row["lowest_score"],
+            row["client"].lower(),
+        )
+    )
+    return rows
+
+
+@app.get("/api/client-escalations")
+def api_client_escalations():
+    """Return client-level critical incident escalations for urgent follow-up."""
+    clients = _client_escalation_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "critical_incident_count": sum(client["critical_incident_count"] for client in clients),
+        "affected_site_count": sum(client["affected_site_count"] for client in clients),
+        "clients": clients,
+    }
+
+
 def _parse_captured_at(value: str | None) -> datetime | None:
     """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
     if not value:

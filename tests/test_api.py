@@ -927,6 +927,63 @@ def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
     assert healthy["top_message"] == "No open fleet actions."
 
 
+def test_api_client_escalations_groups_critical_incidents_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Storefront",
+            url="https://critical-storefront.example",
+            client="Client Escalate",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Second Critical",
+            url="https://second-critical.example",
+            client="Client Escalate",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Only",
+            url="https://warning-only-escalation.example",
+            client="Client Warning",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-escalations")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 1
+    assert payload["affected_site_count"] == 2
+    assert payload["critical_incident_count"] >= 4
+    escalation = payload["clients"][0]
+    assert escalation["client"] == "Client Escalate"
+    assert escalation["affected_site_count"] == 2
+    assert escalation["critical_incident_count"] >= 4
+    assert escalation["lowest_score"] < 70
+    assert escalation["top_site"] == "Critical Storefront"
+    assert escalation["top_recommended_action"]
+    assert all(incident["severity"] == "critical" for incident in escalation["incidents"])
+    assert {incident["site"] for incident in escalation["incidents"]} == {"Critical Storefront", "Second Critical"}
+
+
 def test_api_stale_snapshots_flags_missing_and_old_snapshots(tmp_path):
     client = make_test_client(tmp_path)
     db_path = tmp_path / "test.sqlite3"
