@@ -1007,6 +1007,68 @@ def api_client_digest():
     }
 
 
+def _parse_captured_at(value: str | None) -> datetime | None:
+    """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+@app.get("/api/stale-snapshots")
+def api_stale_snapshots(threshold_hours: int = 168):
+    """Return sites whose latest fleet snapshot is missing or older than the threshold."""
+    threshold_hours = max(threshold_hours, 1)
+    now = datetime.now(timezone.utc)
+    all_sites = store.list_sites()
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    sites = []
+    for site in all_sites:
+        row = latest_by_url.get(site["url"])
+        captured_at = row.get("captured_at") if row else None
+        captured_dt = _parse_captured_at(captured_at)
+        age_hours = round((now - captured_dt).total_seconds() / 3600, 1) if captured_dt else None
+        if age_hours is not None and age_hours <= threshold_hours:
+            continue
+        sites.append(
+            {
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "latest_snapshot_at": captured_at,
+                "snapshot_age_hours": age_hours,
+                "staleness_status": "missing" if row is None else "stale",
+                "recommended_action": "Capture a fresh fleet snapshot and verify site health.",
+            }
+        )
+
+    sites.sort(
+        key=lambda site: (
+            site["staleness_status"] != "missing",
+            -(site["snapshot_age_hours"] or 10**9),
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    return {
+        "generated_at": now.isoformat(),
+        "threshold_hours": threshold_hours,
+        "site_count": len(all_sites),
+        "stale_count": len(sites),
+        "missing_snapshot_count": sum(1 for site in sites if site["staleness_status"] == "missing"),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

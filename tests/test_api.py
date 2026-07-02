@@ -1,5 +1,7 @@
 import os
+import sqlite3
 import warnings
+from datetime import datetime, timedelta, timezone
 
 
 def make_test_client(tmp_path):
@@ -923,6 +925,61 @@ def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
     assert healthy["status"] == "green"
     assert healthy["open_action_count"] == 0
     assert healthy["top_message"] == "No open fleet actions."
+
+
+def test_api_stale_snapshots_flags_missing_and_old_snapshots(tmp_path):
+    client = make_test_client(tmp_path)
+    db_path = tmp_path / "test.sqlite3"
+    client.post("/sites", data={"name": "No Snapshot", "url": "https://missing.example", "client": "Client Missing"}, follow_redirects=False)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Fresh Snapshot", url="https://fresh-snapshot.example", client="Client Fresh"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Old Snapshot", url="https://old-snapshot.example", client="Client Old"),
+        follow_redirects=False,
+    )
+    old_captured_at = (datetime.now(timezone.utc) - timedelta(hours=240)).strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            "update snapshots set captured_at=? where site_id=(select id from sites where url=?)",
+            (old_captured_at, "https://old-snapshot.example"),
+        )
+
+    response = client.get("/api/stale-snapshots?threshold_hours=168")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["threshold_hours"] == 168
+    assert payload["site_count"] == 3
+    assert payload["stale_count"] == 2
+    assert payload["missing_snapshot_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["No Snapshot", "Old Snapshot"]
+    missing = payload["sites"][0]
+    assert missing["client"] == "Client Missing"
+    assert missing["staleness_status"] == "missing"
+    assert missing["snapshot_age_hours"] is None
+    old = payload["sites"][1]
+    assert old["staleness_status"] == "stale"
+    assert old["snapshot_age_hours"] >= 239
+    assert old["recommended_action"] == "Capture a fresh fleet snapshot and verify site health."
+
+
+def test_api_stale_snapshots_clamps_non_positive_threshold(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Fresh Snapshot", url="https://fresh-threshold.example"),
+        follow_redirects=False,
+    )
+
+    payload = client.get("/api/stale-snapshots?threshold_hours=0").json()
+
+    assert payload["threshold_hours"] == 1
+    assert payload["stale_count"] == 0
 
 
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
