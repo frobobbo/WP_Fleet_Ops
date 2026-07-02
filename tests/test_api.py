@@ -1039,6 +1039,71 @@ def test_api_stale_snapshots_clamps_non_positive_threshold(tmp_path):
     assert payload["stale_count"] == 0
 
 
+def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Executive Site",
+            url="https://critical-executive.example",
+            client="Client Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Elevated Executive Site",
+            url="https://elevated-executive.example",
+            client="Client Elevated",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stable Executive Site",
+            url="https://stable-executive.example",
+            client="Client Stable",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/executive-risks")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 3
+    assert payload["critical_client_count"] == 1
+    assert payload["elevated_client_count"] == 1
+    assert payload["stable_client_count"] == 1
+    assert [client_row["client"] for client_row in payload["clients"]] == [
+        "Client Critical",
+        "Client Elevated",
+        "Client Stable",
+    ]
+    critical = payload["clients"][0]
+    assert critical["risk_level"] == "critical"
+    assert critical["critical_action_count"] >= 1
+    assert critical["critical_site_count"] == 1
+    assert critical["lowest_score"] < 70
+    elevated = payload["clients"][1]
+    assert elevated["risk_level"] == "elevated"
+    assert elevated["warning_action_count"] >= 1
+    stable = payload["clients"][2]
+    assert stable["risk_level"] == "stable"
+    assert stable["open_action_count"] == 0
+    assert stable["average_score"] >= 85
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

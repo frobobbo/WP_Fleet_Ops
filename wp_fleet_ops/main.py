@@ -1134,6 +1134,86 @@ def api_stale_snapshots(threshold_hours: int = 168):
     }
 
 
+def _executive_risk_rows() -> list[dict]:
+    """Return compact account-level risk rows for leadership review."""
+    action_counts: dict[str, dict[str, int]] = {}
+    for action in _current_actions():
+        client_name = action.get("client") or "Unassigned"
+        counts = action_counts.setdefault(client_name, {"critical": 0, "warning": 0, "info": 0})
+        severity = action.get("severity", "info")
+        counts[severity] = counts.get(severity, 0) + 1
+
+    clients: dict[str, dict] = {}
+    for row in store.latest_dashboard():
+        client_name = row.get("client") or "Unassigned"
+        summary = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "site_count": 0,
+                "score_total": 0,
+                "lowest_score": row["score"],
+                "critical_site_count": 0,
+                "latest_snapshot_at": None,
+            },
+        )
+        summary["site_count"] += 1
+        summary["score_total"] += row["score"] or 0
+        summary["lowest_score"] = min(summary["lowest_score"], row["score"])
+        summary["critical_site_count"] += 1 if any(alert.get("severity") == "critical" for alert in row["alerts"]) else 0
+        captured_at = row.get("captured_at")
+        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
+            summary["latest_snapshot_at"] = captured_at
+
+    rows = []
+    for client_name, summary in clients.items():
+        counts = action_counts.get(client_name, {"critical": 0, "warning": 0, "info": 0})
+        average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
+        open_action_count = sum(counts.values())
+        if counts.get("critical", 0) or summary["critical_site_count"]:
+            risk_level = "critical"
+        elif counts.get("warning", 0) or average_score < 85:
+            risk_level = "elevated"
+        else:
+            risk_level = "stable"
+        summary.update(
+            {
+                "average_score": average_score,
+                "risk_level": risk_level,
+                "open_action_count": open_action_count,
+                "critical_action_count": counts.get("critical", 0),
+                "warning_action_count": counts.get("warning", 0),
+            }
+        )
+        rows.append(summary)
+
+    risk_rank = {"critical": 0, "elevated": 1, "stable": 2}
+    rows.sort(
+        key=lambda row: (
+            risk_rank.get(row["risk_level"], 99),
+            -row["critical_action_count"],
+            -row["warning_action_count"],
+            row["lowest_score"],
+            row["client"].lower(),
+        )
+    )
+    return rows
+
+
+@app.get("/api/executive-risks")
+def api_executive_risks():
+    """Return a leadership-friendly client risk summary."""
+    clients = _executive_risk_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "critical_client_count": sum(1 for client in clients if client["risk_level"] == "critical"),
+        "elevated_client_count": sum(1 for client in clients if client["risk_level"] == "elevated"),
+        "stable_client_count": sum(1 for client in clients if client["risk_level"] == "stable"),
+        "clients": clients,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
