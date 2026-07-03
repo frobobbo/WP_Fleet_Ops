@@ -599,6 +599,67 @@ def api_certificates():
     }
 
 
+def _certificate_renewal_window(ssl_days: int) -> str:
+    """Map a certificate expiry horizon into an operator renewal window."""
+    if ssl_days <= 0:
+        return "overdue"
+    if ssl_days <= 7:
+        return "immediate"
+    if ssl_days <= 30:
+        return "scheduled"
+    return "healthy"
+
+
+def _certificate_renewal_action(window: str) -> str:
+    if window == "overdue":
+        return "Replace the expired certificate and verify HTTPS immediately."
+    if window == "immediate":
+        return "Renew the certificate this week and confirm post-renewal expiry."
+    if window == "scheduled":
+        return "Schedule certificate renewal before the 7-day critical window."
+    return "No renewal action is needed in the next 30 days."
+
+
+@app.get("/api/certificate-renewal-calendar")
+def api_certificate_renewal_calendar():
+    """Return TLS renewals grouped into overdue/immediate/scheduled windows."""
+    window_rank = {"overdue": 0, "immediate": 1, "scheduled": 2, "healthy": 3}
+    sites = []
+    for row in store.latest_dashboard():
+        window = _certificate_renewal_window(row["ssl_days"])
+        if window == "healthy":
+            continue
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "ssl_days_remaining": row["ssl_days"],
+                "renewal_window": window,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _certificate_renewal_action(window),
+            }
+        )
+
+    sites.sort(
+        key=lambda site: (
+            window_rank[site["renewal_window"]],
+            site["ssl_days_remaining"],
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(store.latest_dashboard()),
+        "renewal_count": len(sites),
+        "overdue_count": sum(1 for site in sites if site["renewal_window"] == "overdue"),
+        "immediate_count": sum(1 for site in sites if site["renewal_window"] == "immediate"),
+        "scheduled_count": sum(1 for site in sites if site["renewal_window"] == "scheduled"),
+        "sites": sites,
+    }
+
+
 def _update_status(pending_updates: int) -> str:
     if pending_updates >= 5:
         return "critical"

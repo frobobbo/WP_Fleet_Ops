@@ -626,6 +626,61 @@ def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     assert payload["sites"][2]["certificate_status"] == "healthy"
 
 
+def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Cert",
+            url="https://expired-renewal.example",
+            client="Client TLS",
+            ssl_days="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Immediate Cert",
+            url="https://immediate-renewal.example",
+            client="Client TLS",
+            ssl_days="5",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Scheduled Cert",
+            url="https://scheduled-renewal.example",
+            client="Client TLS",
+            ssl_days="21",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Healthy Cert", url="https://healthy-renewal.example", ssl_days="90"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/certificate-renewal-calendar")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 4
+    assert payload["renewal_count"] == 3
+    assert payload["overdue_count"] == 1
+    assert payload["immediate_count"] == 1
+    assert payload["scheduled_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Expired Cert", "Immediate Cert", "Scheduled Cert"]
+    assert [site["renewal_window"] for site in payload["sites"]] == ["overdue", "immediate", "scheduled"]
+    assert payload["sites"][0]["recommended_action"] == "Replace the expired certificate and verify HTTPS immediately."
+    assert payload["sites"][1]["recommended_action"] == "Renew the certificate this week and confirm post-renewal expiry."
+    assert payload["sites"][2]["recommended_action"] == "Schedule certificate renewal before the 7-day critical window."
+
+
 def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
