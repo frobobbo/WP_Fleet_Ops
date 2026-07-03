@@ -1252,6 +1252,59 @@ def test_api_fleet_brief_returns_operator_summary(tmp_path):
     assert payload["top_actions"][0]["site"] == "Critical Brief Site"
 
 
+def test_api_site_scorecards_returns_compact_per_site_status_cards(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Scorecard",
+            url="https://critical-scorecard.example",
+            client="Client Scorecard",
+            uptime_ok="false",
+            ssl_days="4",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Healthy Scorecard",
+            url="https://healthy-scorecard.example",
+            client="Client Scorecard",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-scorecards")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 2
+    assert payload["critical_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["healthy_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Critical Scorecard", "Healthy Scorecard"]
+    critical = payload["sites"][0]
+    assert critical["status"] == "critical"
+    assert critical["next_action"] == "Confirm site availability, hosting status, and recent deploys."
+    assert critical["badges"] == {
+        "availability": "critical",
+        "tls": "critical",
+        "updates": "critical",
+        "backups": "critical",
+        "performance": "slow",
+        "security": "critical",
+    }
+    assert critical["alert_count"] >= 5
+    assert payload["sites"][1]["status"] == "healthy"
+    assert payload["sites"][1]["next_action"] == "Continue normal maintenance cadence."
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

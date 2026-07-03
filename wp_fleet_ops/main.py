@@ -1359,6 +1359,69 @@ def api_fleet_brief():
     }
 
 
+def _site_scorecard_status(row: dict, badges: dict[str, str]) -> str:
+    """Return a concise status for a site scorecard row."""
+    if not row["uptime_ok"] or any(value == "critical" for value in badges.values()) or row["score"] < 70:
+        return "critical"
+    if row["score"] < 85 or any(value in {"warning", "slow"} for value in badges.values()):
+        return "warning"
+    return "healthy"
+
+
+def _site_scorecard_next_action(row: dict) -> str:
+    """Return the highest-priority next step for a site's latest alert state."""
+    if not row["alerts"]:
+        return "Continue normal maintenance cadence."
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    top_alert = min(row["alerts"], key=lambda alert: (severity_rank.get(alert.get("severity", "info"), 99), alert.get("message", "")))
+    return _recommended_action(top_alert)
+
+
+def _site_scorecard_rows() -> list[dict]:
+    """Build compact per-site cards for dashboards and external status surfaces."""
+    status_rank = {"critical": 0, "warning": 1, "healthy": 2}
+    rows = []
+    for row in store.latest_dashboard():
+        badges = {
+            "availability": "healthy" if row["uptime_ok"] else "critical",
+            "tls": _certificate_status(row["ssl_days"]),
+            "updates": _update_status(row["wp_updates"]),
+            "backups": _backup_status(row["backup_age_hours"]),
+            "performance": _performance_status(row["response_ms"]),
+            "security": _security_status(row["security_header_count"]),
+        }
+        status = _site_scorecard_status(row, badges)
+        rows.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "score": row["score"],
+                "status": status,
+                "badges": badges,
+                "alert_count": len(row["alerts"]),
+                "next_action": _site_scorecard_next_action(row),
+                "latest_snapshot_at": row["captured_at"],
+            }
+        )
+    rows.sort(key=lambda site: (status_rank.get(site["status"], 99), site["score"], -site["alert_count"], site["client"].lower(), site["name"].lower()))
+    return rows
+
+
+@app.get("/api/site-scorecards")
+def api_site_scorecards():
+    """Return compact per-site operational status cards for portals and widgets."""
+    sites = _site_scorecard_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "critical_count": sum(1 for site in sites if site["status"] == "critical"),
+        "warning_count": sum(1 for site in sites if site["status"] == "warning"),
+        "healthy_count": sum(1 for site in sites if site["status"] == "healthy"),
+        "sites": sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
