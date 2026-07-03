@@ -187,6 +187,47 @@ def test_api_clients_rolls_up_account_health(tmp_path):
     assert clients[1]["site_count"] == 1
 
 
+def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Checkout Down",
+            url="https://checkout-down.example",
+            client="Commerce Co",
+            uptime_ok="false",
+            ssl_days="4",
+            wp_updates="6",
+            backup_age_hours="96",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Stable Blog", url="https://stable-blog.example", client="Content Co"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/operator-handoff")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 2
+    assert payload["client_count"] == 2
+    assert payload["critical_client_count"] == 1
+    assert payload["immediate_action_count"] >= 1
+    assert payload["open_action_count"] >= payload["immediate_action_count"]
+    assert payload["headline"] == "Red: 1 critical client and active immediate actions require operator follow-up."
+    assert payload["top_clients"][0]["client"] == "Commerce Co"
+    assert payload["top_actions"][0]["client"] == "Commerce Co"
+    assert payload["top_actions"][0]["urgency"] == "immediate"
+    assert payload["handoff_notes"][0].startswith("Prioritize Commerce Co")
+
+
 def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

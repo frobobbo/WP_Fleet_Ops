@@ -1359,6 +1359,60 @@ def api_fleet_brief():
     }
 
 
+def _operator_handoff_headline(status: str, critical_clients: int, immediate_actions: int) -> str:
+    """Return a concise human-readable summary for shift handoff."""
+    if status == "red":
+        client_label = "client" if critical_clients == 1 else "clients"
+        return f"Red: {critical_clients} critical {client_label} and active immediate actions require operator follow-up."
+    if status == "yellow":
+        return "Yellow: scheduled maintenance items remain open; review during the next maintenance window."
+    return "Green: no open fleet actions are currently blocking the maintenance queue."
+
+
+@app.get("/api/operator-handoff")
+def api_operator_handoff():
+    """Return a shift-handoff summary with top clients, actions, and next notes."""
+    client_risks = _executive_risk_rows()
+    actions = []
+    for action in _current_actions():
+        urgency = _remediation_bucket(action)
+        actions.append({**action, "urgency": urgency, "due": _remediation_due(urgency)})
+    slo = api_slo()
+    critical_clients = sum(1 for client in client_risks if client["risk_level"] == "critical")
+    immediate_actions = sum(1 for action in actions if action["urgency"] == "immediate")
+    status = _fleet_brief_status(critical_clients, immediate_actions, len(actions))
+    top_clients = client_risks[:3]
+    top_actions = actions[:5]
+    handoff_notes = (
+        [
+            f"Prioritize {top_clients[0]['client']} due to "
+            f"{top_clients[0]['critical_action_count']} critical actions and a "
+            f"lowest score of {top_clients[0]['lowest_score']}."
+        ]
+        if top_clients
+        else ["No client-level risks require handoff at this time."]
+    )
+    if top_actions:
+        handoff_notes.append(f"Next action: {top_actions[0]['recommended_action']}")
+    if slo.get("worst_objective"):
+        handoff_notes.append(f"Watch SLO objective: {slo['worst_objective']}.")
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "headline": _operator_handoff_headline(status, critical_clients, immediate_actions),
+        "site_count": slo["site_count"],
+        "client_count": len(client_risks),
+        "critical_client_count": critical_clients,
+        "immediate_action_count": immediate_actions,
+        "open_action_count": len(actions),
+        "at_risk_objective_count": slo["at_risk_count"],
+        "worst_objective": slo["worst_objective"],
+        "top_clients": top_clients,
+        "top_actions": top_actions,
+        "handoff_notes": handoff_notes,
+    }
+
+
 def _site_scorecard_status(row: dict, badges: dict[str, str]) -> str:
     """Return a concise status for a site scorecard row."""
     if not row["uptime_ok"] or any(value == "critical" for value in badges.values()) or row["score"] < 70:
