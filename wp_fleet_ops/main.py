@@ -1266,6 +1266,38 @@ def api_executive_risks():
     }
 
 
+def _fleet_brief_status(critical_clients: int, immediate_actions: int, open_actions: int) -> str:
+    """Return a single operating status for the current fleet brief."""
+    if critical_clients or immediate_actions:
+        return "red"
+    if open_actions:
+        return "yellow"
+    return "green"
+
+
+@app.get("/api/fleet-brief")
+def api_fleet_brief():
+    """Return an operator-ready brief with risk, action, and SLO highlights."""
+    client_risks = _executive_risk_rows()
+    actions = _current_actions()
+    slo = api_slo()
+    critical_clients = sum(1 for client in client_risks if client["risk_level"] == "critical")
+    immediate_actions = sum(1 for action in actions if _remediation_bucket(action) == "immediate")
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": _fleet_brief_status(critical_clients, immediate_actions, len(actions)),
+        "site_count": slo["site_count"],
+        "client_count": len(client_risks),
+        "critical_client_count": critical_clients,
+        "immediate_action_count": immediate_actions,
+        "open_action_count": len(actions),
+        "at_risk_objective_count": slo["at_risk_count"],
+        "worst_objective": slo["worst_objective"],
+        "top_clients": client_risks[:5],
+        "top_actions": actions[:5],
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

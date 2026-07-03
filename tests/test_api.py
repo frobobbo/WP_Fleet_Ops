@@ -1152,6 +1152,51 @@ def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     assert stable["average_score"] >= 85
 
 
+def test_api_fleet_brief_returns_operator_summary(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Brief Site",
+            url="https://critical-brief.example",
+            client="Client Brief Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stable Brief Site",
+            url="https://stable-brief.example",
+            client="Client Brief Stable",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/fleet-brief")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 2
+    assert payload["client_count"] == 2
+    assert payload["critical_client_count"] == 1
+    assert payload["immediate_action_count"] >= 1
+    assert payload["open_action_count"] >= payload["immediate_action_count"]
+    assert payload["at_risk_objective_count"] >= 1
+    assert payload["worst_objective"]["name"] in {"availability", "tls", "backups", "performance", "security"}
+    assert payload["top_clients"][0]["client"] == "Client Brief Critical"
+    assert payload["top_clients"][0]["risk_level"] == "critical"
+    assert payload["top_actions"][0]["site"] == "Critical Brief Site"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
