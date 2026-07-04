@@ -1385,6 +1385,67 @@ def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
     assert latest["alerts"][0]["severity"] == "critical"
 
 
+def test_api_action_matrix_groups_open_actions_by_client_and_site(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Matrix Store",
+            url="https://critical-matrix.example",
+            client="Client Matrix",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Matrix Blog",
+            url="https://warning-matrix.example",
+            client="Client Matrix",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Other Warning",
+            url="https://other-warning-matrix.example",
+            client="Other Client",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/action-matrix")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 2
+    assert payload["site_count"] == 3
+    assert payload["open_action_count"] >= 4
+    assert payload["critical_action_count"] >= 1
+    assert payload["warning_action_count"] >= 2
+    assert [row["client"] for row in payload["clients"]] == ["Client Matrix", "Other Client"]
+    matrix = payload["clients"][0]
+    assert matrix["site_count"] == 2
+    assert matrix["critical_action_count"] >= 1
+    assert matrix["warning_action_count"] >= 1
+    assert matrix["lowest_score"] < 70
+    assert matrix["latest_snapshot_at"]
+    assert [site["site"] for site in matrix["sites"]] == ["Critical Matrix Store", "Warning Matrix Blog"]
+    assert matrix["sites"][0]["top_severity"] == "critical"
+    assert matrix["sites"][0]["top_recommended_action"] == "Confirm site availability, hosting status, and recent deploys."
+    assert matrix["sites"][1]["top_severity"] == "warning"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

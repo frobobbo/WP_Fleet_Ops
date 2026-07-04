@@ -1507,6 +1507,96 @@ def api_snapshot_history(limit: int = 25):
     }
 
 
+def _action_matrix_rows() -> list[dict]:
+    """Group open actions by client and site for dispatch planning."""
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    clients: dict[str, dict] = {}
+    for action in _current_actions():
+        client_name = action.get("client") or "Unassigned"
+        client = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "open_action_count": 0,
+                "critical_action_count": 0,
+                "warning_action_count": 0,
+                "info_action_count": 0,
+                "lowest_score": action["score"],
+                "latest_snapshot_at": None,
+                "sites": {},
+            },
+        )
+        severity = action.get("severity", "info")
+        client["open_action_count"] += 1
+        client[f"{severity}_action_count"] += 1
+        client["lowest_score"] = min(client["lowest_score"], action["score"])
+        captured_at = action.get("latest_snapshot_at")
+        if captured_at and (client["latest_snapshot_at"] is None or captured_at > client["latest_snapshot_at"]):
+            client["latest_snapshot_at"] = captured_at
+
+        site = client["sites"].setdefault(
+            action["site"],
+            {
+                "site": action["site"],
+                "url": action["url"],
+                "score": action["score"],
+                "open_action_count": 0,
+                "critical_action_count": 0,
+                "warning_action_count": 0,
+                "info_action_count": 0,
+                "top_severity": severity,
+                "top_message": action["message"],
+                "top_recommended_action": action["recommended_action"],
+            },
+        )
+        site["open_action_count"] += 1
+        site[f"{severity}_action_count"] += 1
+        if severity_rank.get(severity, 99) < severity_rank.get(site["top_severity"], 99):
+            site["top_severity"] = severity
+            site["top_message"] = action["message"]
+            site["top_recommended_action"] = action["recommended_action"]
+
+    rows = []
+    for client in clients.values():
+        sites = list(client.pop("sites").values())
+        sites.sort(
+            key=lambda site: (
+                severity_rank.get(site["top_severity"], 99),
+                -site["open_action_count"],
+                site["score"],
+                site["site"].lower(),
+            )
+        )
+        client["site_count"] = len(sites)
+        client["sites"] = sites
+        rows.append(client)
+    rows.sort(
+        key=lambda row: (
+            -row["critical_action_count"],
+            -row["warning_action_count"],
+            -row["open_action_count"],
+            row["lowest_score"],
+            row["client"].lower(),
+        )
+    )
+    return rows
+
+
+@app.get("/api/action-matrix")
+def api_action_matrix():
+    """Return open actions grouped by client and site for dispatch planning."""
+    clients = _action_matrix_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "site_count": sum(client["site_count"] for client in clients),
+        "open_action_count": sum(client["open_action_count"] for client in clients),
+        "critical_action_count": sum(client["critical_action_count"] for client in clients),
+        "warning_action_count": sum(client["warning_action_count"] for client in clients),
+        "clients": clients,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
