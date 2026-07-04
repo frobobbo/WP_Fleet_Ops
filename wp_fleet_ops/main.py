@@ -1476,6 +1476,37 @@ def api_site_scorecards():
     }
 
 
+@app.get("/api/snapshot-history")
+def api_snapshot_history(limit: int = 25):
+    """Return recent raw fleet snapshots for trend widgets and audit handoffs."""
+    bounded_limit = max(1, min(limit, 100))
+    snapshots = [
+        {
+            "name": row["name"],
+            "url": row["url"],
+            "client": row.get("client") or "Unassigned",
+            "score": row["score"],
+            "status": _dashboard_status(row["score"]),
+            "captured_at": row["captured_at"],
+            "uptime_ok": bool(row["uptime_ok"]),
+            "ssl_days": row["ssl_days"],
+            "wp_updates": row["wp_updates"],
+            "backup_age_hours": row["backup_age_hours"],
+            "response_ms": row["response_ms"],
+            "security_header_count": row["security_header_count"],
+            "alert_count": len(row["alerts"]),
+            "alerts": row["alerts"],
+        }
+        for row in store.recent_snapshots(bounded_limit)
+    ]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "limit": bounded_limit,
+        "snapshot_count": len(snapshots),
+        "snapshots": snapshots,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

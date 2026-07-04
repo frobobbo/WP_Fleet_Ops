@@ -1346,6 +1346,45 @@ def test_api_site_scorecards_returns_compact_per_site_status_cards(tmp_path):
     assert payload["sites"][1]["next_action"] == "Continue normal maintenance cadence."
 
 
+def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="History Site", url="https://history.example", client="Client History", response_ms="200"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="History Site",
+            url="https://history.example",
+            client="Client History",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="7",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/snapshot-history?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["limit"] == 1
+    assert payload["snapshot_count"] == 1
+    latest = payload["snapshots"][0]
+    assert latest["name"] == "History Site"
+    assert latest["client"] == "Client History"
+    assert latest["status"] == "red"
+    assert latest["uptime_ok"] is False
+    assert latest["alert_count"] >= 5
+    assert latest["alerts"][0]["severity"] == "critical"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

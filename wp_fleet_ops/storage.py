@@ -175,3 +175,19 @@ class FleetOpsStore:
                 d["alerts"] = json.loads(d.pop("alerts_json"))
                 rows.append(d)
             return rows
+
+    def recent_snapshots(self, limit: int = 25) -> list[dict]:
+        """Return recent fleet snapshots across all sites, newest first."""
+        sql = """
+        select s.name,s.url,s.client, sn.* from snapshots sn
+        join sites s on s.id=sn.site_id
+        order by sn.id desc
+        limit ?
+        """
+        with self._connect() as con:
+            rows = []
+            for r in con.execute(sql, (limit,)):
+                d = dict(r)
+                d["alerts"] = json.loads(d.pop("alerts_json"))
+                rows.append(d)
+            return rows
