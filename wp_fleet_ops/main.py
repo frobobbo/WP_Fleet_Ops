@@ -459,6 +459,65 @@ def api_backups():
     }
 
 
+def _restore_drill_priority(backup_age_hours: int) -> str:
+    """Return restore-drill priority based on backup freshness."""
+    if backup_age_hours > 168:
+        return "urgent"
+    if backup_age_hours > 72:
+        return "high"
+    if backup_age_hours > 24:
+        return "watch"
+    return "routine"
+
+
+def _restore_drill_recommended_action(priority: str) -> str:
+    if priority == "urgent":
+        return "Run an immediate restore drill and verify a recent usable backup exists."
+    if priority == "high":
+        return "Schedule a restore drill after creating and validating a fresh backup."
+    if priority == "watch":
+        return "Confirm the next scheduled backup and include the site in the next drill rotation."
+    return "Keep the site in the normal quarterly restore-drill rotation."
+
+
+@app.get("/api/restore-drill-queue")
+def api_restore_drill_queue():
+    """Return backup restore-drill priorities for operational planning."""
+    priority_rank = {"urgent": 0, "high": 1, "watch": 2, "routine": 3}
+    sites = []
+    for row in store.latest_dashboard():
+        priority = _restore_drill_priority(row["backup_age_hours"])
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "backup_age_hours": row["backup_age_hours"],
+                "restore_drill_priority": priority,
+                "latest_snapshot_at": row["captured_at"],
+                "recommended_action": _restore_drill_recommended_action(priority),
+            }
+        )
+
+    sites.sort(
+        key=lambda site: (
+            priority_rank.get(site["restore_drill_priority"], 99),
+            -site["backup_age_hours"],
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "urgent_count": sum(1 for site in sites if site["restore_drill_priority"] == "urgent"),
+        "high_count": sum(1 for site in sites if site["restore_drill_priority"] == "high"),
+        "watch_count": sum(1 for site in sites if site["restore_drill_priority"] == "watch"),
+        "routine_count": sum(1 for site in sites if site["restore_drill_priority"] == "routine"),
+        "sites": sites,
+    }
+
+
 def _security_status(security_header_count: int) -> str:
     if security_header_count >= 3:
         return "covered"

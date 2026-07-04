@@ -533,6 +533,65 @@ def test_api_backups_highlights_stale_backup_queue(tmp_path):
     assert payload["sites"][2]["backup_status"] == "fresh"
 
 
+def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Overdue Restore Drill",
+            url="https://overdue-restore.example",
+            client="Client DR",
+            backup_age_hours="240",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="High Restore Drill",
+            url="https://high-restore.example",
+            client="Client DR",
+            backup_age_hours="96",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Watch Restore Drill",
+            url="https://watch-restore.example",
+            backup_age_hours="36",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Routine Restore Drill", url="https://routine-restore.example", backup_age_hours="12"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/restore-drill-queue")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 4
+    assert payload["urgent_count"] == 1
+    assert payload["high_count"] == 1
+    assert payload["watch_count"] == 1
+    assert payload["routine_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == [
+        "Overdue Restore Drill",
+        "High Restore Drill",
+        "Watch Restore Drill",
+        "Routine Restore Drill",
+    ]
+    assert payload["sites"][0]["restore_drill_priority"] == "urgent"
+    assert payload["sites"][0]["recommended_action"] == "Run an immediate restore drill and verify a recent usable backup exists."
+    assert payload["sites"][1]["restore_drill_priority"] == "high"
+    assert payload["sites"][2]["restore_drill_priority"] == "watch"
+    assert payload["sites"][3]["restore_drill_priority"] == "routine"
+
+
 def test_api_security_highlights_header_coverage_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
