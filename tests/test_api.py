@@ -1505,6 +1505,58 @@ def test_api_action_matrix_groups_open_actions_by_client_and_site(tmp_path):
     assert matrix["sites"][1]["top_severity"] == "warning"
 
 
+def test_api_site_priorities_returns_bounded_dispatch_queue(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Priority Critical Store",
+            url="https://priority-critical.example",
+            client="Client Priority",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Priority Warning Blog",
+            url="https://priority-warning.example",
+            client="Client Priority",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Priority Healthy Site", url="https://priority-healthy.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-priorities?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["limit"] == 1
+    assert payload["site_count"] == 3
+    assert payload["priority_site_count"] == 2
+    assert payload["returned_site_count"] == 1
+    top_site = payload["sites"][0]
+    assert top_site["name"] == "Priority Critical Store"
+    assert top_site["client"] == "Client Priority"
+    assert top_site["priority_score"] > 100
+    assert top_site["critical_alert_count"] >= 1
+    assert top_site["warning_alert_count"] >= 1
+    assert top_site["top_severity"] == "critical"
+    assert top_site["next_action"] == "Confirm site availability, hosting status, and recent deploys."
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

@@ -1656,6 +1656,65 @@ def api_action_matrix():
     }
 
 
+def _site_priority_score(row: dict) -> int:
+    """Return a dispatch score that favors urgent, multi-signal site risk."""
+    critical_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
+    warning_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "warning")
+    info_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "info")
+    score_gap = max(0, 85 - (row["score"] or 0))
+    freshness_penalty = 20 if row["backup_age_hours"] > 72 else (10 if row["backup_age_hours"] > 36 else 0)
+    update_penalty = 15 if row["wp_updates"] >= 5 else (5 if row["wp_updates"] > 0 else 0)
+    return critical_alerts * 100 + warning_alerts * 25 + info_alerts * 5 + score_gap + freshness_penalty + update_penalty
+
+
+@app.get("/api/site-priorities")
+def api_site_priorities(limit: int = 10):
+    """Return a bounded dispatch list of the highest-priority sites to inspect next."""
+    bounded_limit = max(1, min(limit, 50))
+    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    sites = []
+    for row in store.latest_dashboard():
+        critical_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
+        warning_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "warning")
+        top_alert = (
+            min(
+                enumerate(row["alerts"]),
+                key=lambda item: (severity_rank.get(item[1].get("severity", "info"), 99), item[0]),
+            )[1]
+            if row["alerts"]
+            else None
+        )
+        priority_score = _site_priority_score(row)
+        if priority_score <= 0:
+            continue
+        sites.append(
+            {
+                "name": row["name"],
+                "url": row["url"],
+                "client": row.get("client") or "Unassigned",
+                "score": row["score"],
+                "priority_score": priority_score,
+                "critical_alert_count": critical_alerts,
+                "warning_alert_count": warning_alerts,
+                "top_alert": top_alert.get("message") if top_alert else "Score is below target.",
+                "top_severity": top_alert.get("severity") if top_alert else "info",
+                "next_action": _recommended_action(top_alert or {}),
+                "latest_snapshot_at": row["captured_at"],
+            }
+        )
+
+    sites.sort(key=lambda site: (-site["priority_score"], severity_rank.get(site["top_severity"], 99), site["score"], site["client"].lower(), site["name"].lower()))
+    selected = sites[:bounded_limit]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "limit": bounded_limit,
+        "site_count": len(store.latest_dashboard()),
+        "priority_site_count": len(sites),
+        "returned_site_count": len(selected),
+        "sites": selected,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
