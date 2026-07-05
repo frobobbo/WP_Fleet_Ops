@@ -1715,6 +1715,65 @@ def api_site_priorities(limit: int = 10):
     }
 
 
+@app.get("/api/client-priorities")
+def api_client_priorities(limit: int = 10):
+    """Return clients ranked by cumulative site priority for account dispatch."""
+    bounded_limit = max(1, min(limit, 50))
+    clients: dict[str, dict] = {}
+    for row in store.latest_dashboard():
+        priority_score = _site_priority_score(row)
+        if priority_score <= 0:
+            continue
+        client_name = row.get("client") or "Unassigned"
+        critical_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
+        warning_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "warning")
+        summary = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "priority_score": 0,
+                "priority_site_count": 0,
+                "critical_alert_count": 0,
+                "warning_alert_count": 0,
+                "lowest_score": row["score"],
+                "latest_snapshot_at": None,
+                "top_site": None,
+                "top_site_priority_score": 0,
+            },
+        )
+        summary["priority_score"] += priority_score
+        summary["priority_site_count"] += 1
+        summary["critical_alert_count"] += critical_alerts
+        summary["warning_alert_count"] += warning_alerts
+        summary["lowest_score"] = min(summary["lowest_score"], row["score"])
+        captured_at = row.get("captured_at")
+        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
+            summary["latest_snapshot_at"] = captured_at
+        if priority_score > summary["top_site_priority_score"]:
+            summary["top_site"] = row["name"]
+            summary["top_site_priority_score"] = priority_score
+
+    rows = list(clients.values())
+    rows.sort(
+        key=lambda client: (
+            -client["priority_score"],
+            -client["critical_alert_count"],
+            -client["warning_alert_count"],
+            client["lowest_score"],
+            client["client"].lower(),
+        )
+    )
+    selected = rows[:bounded_limit]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "limit": bounded_limit,
+        "client_count": len(rows),
+        "returned_client_count": len(selected),
+        "total_priority_score": sum(client["priority_score"] for client in rows),
+        "clients": selected,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

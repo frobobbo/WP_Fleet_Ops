@@ -1557,6 +1557,70 @@ def test_api_site_priorities_returns_bounded_dispatch_queue(tmp_path):
     assert top_site["next_action"] == "Confirm site availability, hosting status, and recent deploys."
 
 
+def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Client A Critical",
+            url="https://client-a-critical.example",
+            client="Client A",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Client A Warning",
+            url="https://client-a-warning.example",
+            client="Client A",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Client B Warning",
+            url="https://client-b-warning.example",
+            client="Client B",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Client C Healthy", url="https://client-c-healthy.example", client="Client C"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-priorities?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["limit"] == 1
+    assert payload["client_count"] == 2
+    assert payload["returned_client_count"] == 1
+    assert payload["total_priority_score"] > 0
+    assert len(payload["clients"]) == 1
+    client_a = payload["clients"][0]
+    assert client_a["client"] == "Client A"
+    assert client_a["priority_site_count"] == 2
+    assert client_a["priority_score"] > client_a["top_site_priority_score"] > 100
+    assert client_a["critical_alert_count"] >= 1
+    assert client_a["warning_alert_count"] >= 1
+    assert client_a["lowest_score"] < 70
+    assert client_a["top_site"] == "Client A Critical"
+    assert client_a["latest_snapshot_at"]
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
