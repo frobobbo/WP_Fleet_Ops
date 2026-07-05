@@ -1774,6 +1774,88 @@ def api_client_priorities(limit: int = 10):
     }
 
 
+def _client_update_brief_rows() -> list[dict]:
+    """Return client-facing status briefs with current wins, risks, and next steps."""
+    status_rank = {"red": 0, "yellow": 1, "green": 2}
+    actions_by_client: dict[str, list[dict]] = {}
+    for action in _current_actions():
+        actions_by_client.setdefault(action.get("client") or "Unassigned", []).append(action)
+
+    clients: dict[str, dict] = {}
+    for row in store.latest_dashboard():
+        client_name = row.get("client") or "Unassigned"
+        summary = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "site_count": 0,
+                "score_total": 0,
+                "healthy_site_count": 0,
+                "latest_snapshot_at": None,
+            },
+        )
+        summary["site_count"] += 1
+        summary["score_total"] += row["score"] or 0
+        summary["healthy_site_count"] += 1 if row["score"] >= 85 and not row["alerts"] else 0
+        captured_at = row.get("captured_at")
+        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
+            summary["latest_snapshot_at"] = captured_at
+
+    briefs = []
+    for client_name, summary in clients.items():
+        actions = actions_by_client.get(client_name, [])
+        immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
+        scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
+        average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
+        status = _client_digest_status(len(immediate_actions), len(scheduled_actions), average_score)
+        top_action = actions[0] if actions else None
+        summary.update(
+            {
+                "average_score": average_score,
+                "status": status,
+                "open_action_count": len(actions),
+                "immediate_action_count": len(immediate_actions),
+                "scheduled_action_count": len(scheduled_actions),
+                "headline": (
+                    f"{client_name}: {status.upper()} status across {summary['site_count']} tracked site"
+                    f"{'s' if summary['site_count'] != 1 else ''}."
+                ),
+                "client_message": (
+                    f"{summary['healthy_site_count']} site{'s' if summary['healthy_site_count'] != 1 else ''} are healthy; "
+                    f"{len(actions)} open action{'s' if len(actions) != 1 else ''} remain in the work queue."
+                ),
+                "next_action": top_action["recommended_action"] if top_action else "Continue normal monitoring cadence.",
+                "top_site": top_action["site"] if top_action else None,
+            }
+        )
+        briefs.append(summary)
+
+    briefs.sort(
+        key=lambda row: (
+            status_rank.get(row["status"], 99),
+            -row["immediate_action_count"],
+            -row["scheduled_action_count"],
+            row["average_score"],
+            row["client"].lower(),
+        )
+    )
+    return briefs
+
+
+@app.get("/api/client-update-briefs")
+def api_client_update_briefs():
+    """Return client-facing account updates for emails, calls, and ticket notes."""
+    clients = _client_update_brief_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "red_count": sum(1 for client in clients if client["status"] == "red"),
+        "yellow_count": sum(1 for client in clients if client["status"] == "yellow"),
+        "green_count": sum(1 for client in clients if client["status"] == "green"),
+        "clients": clients,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

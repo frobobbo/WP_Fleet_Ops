@@ -1621,6 +1621,59 @@ def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
     assert client_a["latest_snapshot_at"]
 
 
+def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Client Update",
+            url="https://critical-update.example",
+            client="Client Update Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Healthy Client Update",
+            url="https://healthy-update.example",
+            client="Client Update Healthy",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-update-briefs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 2
+    assert payload["red_count"] == 1
+    assert payload["green_count"] == 1
+    assert [row["client"] for row in payload["clients"]] == ["Client Update Critical", "Client Update Healthy"]
+    critical = payload["clients"][0]
+    assert critical["status"] == "red"
+    assert critical["headline"] == "Client Update Critical: RED status across 1 tracked site."
+    assert critical["open_action_count"] >= 5
+    assert critical["immediate_action_count"] >= 1
+    assert critical["scheduled_action_count"] >= 1
+    assert critical["healthy_site_count"] == 0
+    assert critical["top_site"] == "Critical Client Update"
+    assert critical["next_action"] == "Confirm site availability, hosting status, and recent deploys."
+    assert "0 sites are healthy" in critical["client_message"]
+    healthy = payload["clients"][1]
+    assert healthy["status"] == "green"
+    assert healthy["healthy_site_count"] == 1
+    assert healthy["open_action_count"] == 0
+    assert healthy["next_action"] == "Continue normal monitoring cadence."
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
