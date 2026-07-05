@@ -1796,7 +1796,7 @@ def _client_update_brief_rows() -> list[dict]:
         )
         summary["site_count"] += 1
         summary["score_total"] += row["score"] or 0
-        summary["healthy_site_count"] += 1 if row["score"] >= 85 and not row["alerts"] else 0
+        summary["healthy_site_count"] += 1 if row["score"] >= 85 else 0
         captured_at = row.get("captured_at")
         if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
             summary["latest_snapshot_at"] = captured_at
@@ -1809,6 +1809,10 @@ def _client_update_brief_rows() -> list[dict]:
         average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
         status = _client_digest_status(len(immediate_actions), len(scheduled_actions), average_score)
         top_action = actions[0] if actions else None
+        healthy_site_label = "site" if summary["healthy_site_count"] == 1 else "sites"
+        healthy_site_verb = "is" if summary["healthy_site_count"] == 1 else "are"
+        action_label = "action" if len(actions) == 1 else "actions"
+        action_verb = "remains" if len(actions) == 1 else "remain"
         summary.update(
             {
                 "average_score": average_score,
@@ -1821,8 +1825,8 @@ def _client_update_brief_rows() -> list[dict]:
                     f"{'s' if summary['site_count'] != 1 else ''}."
                 ),
                 "client_message": (
-                    f"{summary['healthy_site_count']} site{'s' if summary['healthy_site_count'] != 1 else ''} are healthy; "
-                    f"{len(actions)} open action{'s' if len(actions) != 1 else ''} remain in the work queue."
+                    f"{summary['healthy_site_count']} {healthy_site_label} {healthy_site_verb} healthy; "
+                    f"{len(actions)} open {action_label} {action_verb} in the work queue."
                 ),
                 "next_action": top_action["recommended_action"] if top_action else "Continue normal monitoring cadence.",
                 "top_site": top_action["site"] if top_action else None,

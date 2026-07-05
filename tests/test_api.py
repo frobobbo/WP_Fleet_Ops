@@ -1641,6 +1641,16 @@ def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     client.post(
         "/snapshot",
         data=valid_snapshot_payload(
+            name="Warning Client Update",
+            url="https://warning-update.example",
+            client="Client Update Warning",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
             name="Healthy Client Update",
             url="https://healthy-update.example",
             client="Client Update Healthy",
@@ -1653,10 +1663,15 @@ def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["generated_at"].endswith("+00:00")
-    assert payload["client_count"] == 2
+    assert payload["client_count"] == 3
     assert payload["red_count"] == 1
+    assert payload["yellow_count"] == 1
     assert payload["green_count"] == 1
-    assert [row["client"] for row in payload["clients"]] == ["Client Update Critical", "Client Update Healthy"]
+    assert [row["client"] for row in payload["clients"]] == [
+        "Client Update Critical",
+        "Client Update Warning",
+        "Client Update Healthy",
+    ]
     critical = payload["clients"][0]
     assert critical["status"] == "red"
     assert critical["headline"] == "Client Update Critical: RED status across 1 tracked site."
@@ -1667,7 +1682,11 @@ def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     assert critical["top_site"] == "Critical Client Update"
     assert critical["next_action"] == "Confirm site availability, hosting status, and recent deploys."
     assert "0 sites are healthy" in critical["client_message"]
-    healthy = payload["clients"][1]
+    warning = payload["clients"][1]
+    assert warning["status"] == "yellow"
+    assert warning["open_action_count"] == 1
+    assert warning["client_message"] == "1 site is healthy; 1 open action remains in the work queue."
+    healthy = payload["clients"][2]
     assert healthy["status"] == "green"
     assert healthy["healthy_site_count"] == 1
     assert healthy["open_action_count"] == 0
