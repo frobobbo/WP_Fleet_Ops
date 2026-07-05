@@ -1693,6 +1693,70 @@ def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     assert healthy["next_action"] == "Continue normal monitoring cadence."
 
 
+def test_api_client_service_reviews_prioritizes_account_checkins(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Urgent Review Store",
+            url="https://urgent-review.example",
+            client="Client Urgent",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Scheduled Review Blog",
+            url="https://scheduled-review.example",
+            client="Client Scheduled",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Routine Review Site",
+            url="https://routine-review.example",
+            client="Client Routine",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-service-reviews")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 3
+    assert payload["urgent_review_count"] == 1
+    assert payload["scheduled_review_count"] == 1
+    assert payload["routine_review_count"] == 1
+    assert [row["client"] for row in payload["clients"]] == ["Client Urgent", "Client Scheduled", "Client Routine"]
+    urgent = payload["clients"][0]
+    assert urgent["status"] == "red"
+    assert urgent["review_priority"] == "urgent"
+    assert urgent["top_site"] == "Urgent Review Store"
+    assert urgent["talking_point"] == "Review urgent incidents, backup readiness, and maintenance approvals."
+    assert urgent["next_action"] == "Confirm site availability, hosting status, and recent deploys."
+    scheduled = payload["clients"][1]
+    assert scheduled["status"] == "yellow"
+    assert scheduled["review_priority"] == "scheduled"
+    assert scheduled["talking_point"] == "Review scheduled maintenance timing and open work queue ownership."
+    routine = payload["clients"][2]
+    assert routine["status"] == "green"
+    assert routine["review_priority"] == "routine"
+    assert routine["open_action_count"] == 0
+    assert routine["talking_point"] == "Review monitoring coverage, recent wins, and upcoming maintenance cadence."
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

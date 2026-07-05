@@ -1860,6 +1860,66 @@ def api_client_update_briefs():
     }
 
 
+def _client_service_review_rows() -> list[dict]:
+    """Return account review rows with meeting-ready talking points."""
+    topic_map = {
+        "red": "Review urgent incidents, backup readiness, and maintenance approvals.",
+        "yellow": "Review scheduled maintenance timing and open work queue ownership.",
+        "green": "Review monitoring coverage, recent wins, and upcoming maintenance cadence.",
+    }
+    rows = []
+    for brief in _client_update_brief_rows():
+        action_count = brief["open_action_count"]
+        if brief["immediate_action_count"]:
+            review_priority = "urgent"
+        elif brief["scheduled_action_count"] or brief["average_score"] < 85:
+            review_priority = "scheduled"
+        else:
+            review_priority = "routine"
+
+        rows.append(
+            {
+                "client": brief["client"],
+                "status": brief["status"],
+                "review_priority": review_priority,
+                "site_count": brief["site_count"],
+                "average_score": brief["average_score"],
+                "healthy_site_count": brief["healthy_site_count"],
+                "open_action_count": action_count,
+                "immediate_action_count": brief["immediate_action_count"],
+                "scheduled_action_count": brief["scheduled_action_count"],
+                "top_site": brief["top_site"],
+                "talking_point": topic_map.get(brief["status"], topic_map["yellow"]),
+                "next_action": brief["next_action"],
+                "latest_snapshot_at": brief["latest_snapshot_at"],
+            }
+        )
+    priority_rank = {"urgent": 0, "scheduled": 1, "routine": 2}
+    rows.sort(
+        key=lambda row: (
+            priority_rank.get(row["review_priority"], 99),
+            -row["open_action_count"],
+            row["average_score"],
+            row["client"].lower(),
+        )
+    )
+    return rows
+
+
+@app.get("/api/client-service-reviews")
+def api_client_service_reviews():
+    """Return account-service review priorities for recurring client check-ins."""
+    clients = _client_service_review_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "urgent_review_count": sum(1 for client in clients if client["review_priority"] == "urgent"),
+        "scheduled_review_count": sum(1 for client in clients if client["review_priority"] == "scheduled"),
+        "routine_review_count": sum(1 for client in clients if client["review_priority"] == "routine"),
+        "clients": clients,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
