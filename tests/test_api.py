@@ -1892,6 +1892,53 @@ def test_api_maintenance_approval_packets_summarizes_client_approvals(tmp_path):
     assert routine["approval_summary"] == "No maintenance approval packet is needed for Client Approval Routine right now."
 
 
+def test_api_maintenance_ticket_drafts_returns_ticket_ready_approval_requests(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Ticket Urgent Store",
+            url="https://ticket-urgent.example",
+            client="Client Ticket Urgent",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="96",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Ticket Routine Site",
+            url="https://ticket-routine.example",
+            client="Client Ticket Routine",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/maintenance-ticket-drafts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["draft_count"] == 1
+    assert payload["urgent_count"] == 1
+    assert payload["scheduled_count"] == 0
+    draft = payload["drafts"][0]
+    assert draft["client"] == "Client Ticket Urgent"
+    assert draft["priority"] == "urgent"
+    assert draft["approval_window"] == "same-day approval"
+    assert draft["subject"] == "Client Ticket Urgent: Urgent maintenance approval request"
+    assert "Request urgent maintenance approval" in draft["body"]
+    assert "Top site: Ticket Urgent Store" in draft["body"]
+    assert "Suggested timing: same-day approval" in draft["body"]
+    assert draft["top_site"] == "Ticket Urgent Store"
+    assert draft["open_action_count"] >= 1
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

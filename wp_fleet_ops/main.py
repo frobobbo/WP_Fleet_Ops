@@ -2026,6 +2026,44 @@ def api_maintenance_approval_packets():
     }
 
 
+def _approval_ticket_body(packet: dict) -> str:
+    """Return a concise client-ticket body for maintenance approval requests."""
+    top_site = packet["top_site"] or "the monitored site portfolio"
+    return (
+        f"{packet['approval_summary']} Top site: {top_site}. "
+        f"Recommended next step: {packet['next_action']} "
+        f"Suggested timing: {packet['approval_window']}."
+    )
+
+
+@app.get("/api/maintenance-ticket-drafts")
+def api_maintenance_ticket_drafts():
+    """Return ticket-ready maintenance approval drafts for account managers."""
+    drafts = []
+    for packet in _maintenance_approval_packet_rows():
+        if not packet["packet_needed"]:
+            continue
+        drafts.append(
+            {
+                "client": packet["client"],
+                "priority": packet["approval_priority"],
+                "approval_window": packet["approval_window"],
+                "subject": f"{packet['client']}: {packet['approval_priority'].title()} maintenance approval request",
+                "body": _approval_ticket_body(packet),
+                "top_site": packet["top_site"],
+                "open_action_count": packet["open_action_count"],
+                "latest_snapshot_at": packet["latest_snapshot_at"],
+            }
+        )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "draft_count": len(drafts),
+        "urgent_count": sum(1 for draft in drafts if draft["priority"] == "urgent"),
+        "scheduled_count": sum(1 for draft in drafts if draft["priority"] == "scheduled"),
+        "drafts": drafts,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
