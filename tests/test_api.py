@@ -1757,6 +1757,74 @@ def test_api_client_service_reviews_prioritizes_account_checkins(tmp_path):
     assert routine["talking_point"] == "Review monitoring coverage, recent wins, and upcoming maintenance cadence."
 
 
+def test_api_client_follow_ups_adds_due_dates_and_channels(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Urgent Follow Up Store",
+            url="https://urgent-follow-up.example",
+            client="Client Follow Urgent",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Scheduled Follow Up Blog",
+            url="https://scheduled-follow-up.example",
+            client="Client Follow Scheduled",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Routine Follow Up Site",
+            url="https://routine-follow-up.example",
+            client="Client Follow Routine",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/client-follow-ups")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["follow_up_count"] == 3
+    assert payload["urgent_count"] == 1
+    assert payload["scheduled_count"] == 1
+    assert payload["routine_count"] == 1
+    assert [row["client"] for row in payload["follow_ups"]] == [
+        "Client Follow Urgent",
+        "Client Follow Scheduled",
+        "Client Follow Routine",
+    ]
+    urgent = payload["follow_ups"][0]
+    assert urgent["priority"] == "urgent"
+    assert urgent["due"] == "today"
+    assert urgent["channel"] == "phone"
+    assert urgent["top_site"] == "Urgent Follow Up Store"
+    assert urgent["next_action"] == "Confirm site availability, hosting status, and recent deploys."
+    scheduled = payload["follow_ups"][1]
+    assert scheduled["priority"] == "scheduled"
+    assert scheduled["due"] == "this week"
+    assert scheduled["channel"] == "ticket"
+    routine = payload["follow_ups"][2]
+    assert routine["priority"] == "routine"
+    assert routine["due"] == "next account review"
+    assert routine["channel"] == "email"
+    assert routine["open_action_count"] == 0
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 

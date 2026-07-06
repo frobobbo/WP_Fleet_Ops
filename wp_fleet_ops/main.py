@@ -1920,6 +1920,55 @@ def api_client_service_reviews():
     }
 
 
+def _follow_up_channel(priority: str, open_action_count: int) -> str:
+    """Return the suggested client touchpoint channel for a follow-up item."""
+    if priority == "urgent":
+        return "phone"
+    if priority == "scheduled" or open_action_count:
+        return "ticket"
+    return "email"
+
+
+def _follow_up_due(priority: str) -> str:
+    """Return a human-friendly due bucket for client follow-up planning."""
+    if priority == "urgent":
+        return "today"
+    if priority == "scheduled":
+        return "this week"
+    return "next account review"
+
+
+@app.get("/api/client-follow-ups")
+def api_client_follow_ups():
+    """Return client follow-up prompts with channel and due-date guidance."""
+    follow_ups = []
+    for review in _client_service_review_rows():
+        priority = review["review_priority"]
+        follow_ups.append(
+            {
+                "client": review["client"],
+                "priority": priority,
+                "status": review["status"],
+                "due": _follow_up_due(priority),
+                "channel": _follow_up_channel(priority, review["open_action_count"]),
+                "site_count": review["site_count"],
+                "open_action_count": review["open_action_count"],
+                "top_site": review["top_site"],
+                "talking_point": review["talking_point"],
+                "next_action": review["next_action"],
+                "latest_snapshot_at": review["latest_snapshot_at"],
+            }
+        )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "follow_up_count": len(follow_ups),
+        "urgent_count": sum(1 for item in follow_ups if item["priority"] == "urgent"),
+        "scheduled_count": sum(1 for item in follow_ups if item["priority"] == "scheduled"),
+        "routine_count": sum(1 for item in follow_ups if item["priority"] == "routine"),
+        "follow_ups": follow_ups,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(
