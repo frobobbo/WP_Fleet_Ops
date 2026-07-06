@@ -1566,6 +1566,77 @@ def api_snapshot_history(limit: int = 25):
     }
 
 
+def _site_trend_status(score_delta: int | None) -> str:
+    """Return a compact trend label from a latest-vs-previous score delta."""
+    if score_delta is None:
+        return "new"
+    if score_delta >= 5:
+        return "improving"
+    if score_delta <= -5:
+        return "regressing"
+    return "stable"
+
+
+def _site_trend_rows(limit: int) -> list[dict]:
+    """Compare each site's latest snapshot with its prior snapshot for trend triage."""
+    history_by_url: dict[str, list[dict]] = {}
+    for snapshot in store.recent_snapshots(limit):
+        history_by_url.setdefault(snapshot["url"], []).append(snapshot)
+
+    rows = []
+    for snapshots in history_by_url.values():
+        latest = snapshots[0]
+        previous = snapshots[1] if len(snapshots) > 1 else None
+        score_delta = latest["score"] - previous["score"] if previous else None
+        status = _site_trend_status(score_delta)
+        rows.append(
+            {
+                "name": latest["name"],
+                "url": latest["url"],
+                "client": latest.get("client") or "Unassigned",
+                "latest_score": latest["score"],
+                "previous_score": previous["score"] if previous else None,
+                "score_delta": score_delta,
+                "trend_status": status,
+                "latest_snapshot_at": latest["captured_at"],
+                "previous_snapshot_at": previous["captured_at"] if previous else None,
+                "recommended_action": (
+                    "Review recent changes and open a remediation task for the regression."
+                    if status == "regressing"
+                    else "Continue monitoring the site trend."
+                ),
+            }
+        )
+
+    trend_rank = {"regressing": 0, "new": 1, "stable": 2, "improving": 3}
+    rows.sort(
+        key=lambda row: (
+            trend_rank.get(row["trend_status"], 99),
+            row["score_delta"] if row["score_delta"] is not None else 0,
+            row["latest_score"],
+            row["client"].lower(),
+            row["name"].lower(),
+        )
+    )
+    return rows
+
+
+@app.get("/api/site-trends")
+def api_site_trends(limit: int = 100):
+    """Return latest-vs-previous site score trends for dispatch planning."""
+    bounded_limit = max(2, min(limit, 500))
+    trends = _site_trend_rows(bounded_limit)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "snapshot_limit": bounded_limit,
+        "site_count": len(trends),
+        "regressing_count": sum(1 for trend in trends if trend["trend_status"] == "regressing"),
+        "improving_count": sum(1 for trend in trends if trend["trend_status"] == "improving"),
+        "new_count": sum(1 for trend in trends if trend["trend_status"] == "new"),
+        "trends": trends,
+    }
+
+
 def _action_matrix_rows() -> list[dict]:
     """Group open actions by client and site for dispatch planning."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}

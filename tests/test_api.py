@@ -1444,6 +1444,76 @@ def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
     assert latest["alerts"][0]["severity"] == "critical"
 
 
+def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Trend Regressing", url="https://trend-regressing.example", client="Client Trend"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Trend Regressing",
+            url="https://trend-regressing.example",
+            client="Client Trend",
+            uptime_ok="false",
+            ssl_days="5",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Trend Improving",
+            url="https://trend-improving.example",
+            client="Client Trend",
+            uptime_ok="false",
+            ssl_days="5",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Trend Improving", url="https://trend-improving.example", client="Client Trend"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Trend New", url="https://trend-new.example", client="Client New"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-trends?limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["snapshot_limit"] == 10
+    assert payload["site_count"] == 3
+    assert payload["regressing_count"] == 1
+    assert payload["improving_count"] == 1
+    assert payload["new_count"] == 1
+    assert [trend["trend_status"] for trend in payload["trends"]] == ["regressing", "new", "improving"]
+    regressing = payload["trends"][0]
+    assert regressing["name"] == "Trend Regressing"
+    assert regressing["score_delta"] < 0
+    assert regressing["previous_score"] > regressing["latest_score"]
+    assert regressing["recommended_action"] == "Review recent changes and open a remediation task for the regression."
+    improving = payload["trends"][2]
+    assert improving["name"] == "Trend Improving"
+    assert improving["score_delta"] > 0
+    assert improving["recommended_action"] == "Continue monitoring the site trend."
+
+
 def test_api_action_matrix_groups_open_actions_by_client_and_site(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
