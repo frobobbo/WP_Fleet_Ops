@@ -1969,6 +1969,63 @@ def api_client_follow_ups():
     }
 
 
+def _approval_packet_window(priority: str) -> str:
+    """Return the safest approval timing window for client-facing maintenance work."""
+    if priority == "urgent":
+        return "same-day approval"
+    if priority == "scheduled":
+        return "next maintenance window"
+    return "next account review"
+
+
+def _maintenance_approval_packet_rows() -> list[dict]:
+    """Return concise maintenance approval packets for account managers."""
+    packets = []
+    for review in _client_service_review_rows():
+        priority = review["review_priority"]
+        packet_needed = priority != "routine" or review["open_action_count"] > 0
+        if packet_needed:
+            approval_summary = (
+                f"Request {priority} maintenance approval for {review['client']} covering "
+                f"{review['open_action_count']} open action"
+                f"{'s' if review['open_action_count'] != 1 else ''}."
+            )
+        else:
+            approval_summary = f"No maintenance approval packet is needed for {review['client']} right now."
+        packets.append(
+            {
+                "client": review["client"],
+                "approval_priority": priority,
+                "approval_window": _approval_packet_window(priority),
+                "packet_needed": packet_needed,
+                "site_count": review["site_count"],
+                "top_site": review["top_site"],
+                "open_action_count": review["open_action_count"],
+                "immediate_action_count": review["immediate_action_count"],
+                "scheduled_action_count": review["scheduled_action_count"],
+                "talking_point": review["talking_point"],
+                "approval_summary": approval_summary,
+                "next_action": review["next_action"],
+                "latest_snapshot_at": review["latest_snapshot_at"],
+            }
+        )
+    return packets
+
+
+@app.get("/api/maintenance-approval-packets")
+def api_maintenance_approval_packets():
+    """Return client maintenance approval packets for account-manager handoff."""
+    packets = _maintenance_approval_packet_rows()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "packet_count": len(packets),
+        "needed_count": sum(1 for packet in packets if packet["packet_needed"]),
+        "urgent_count": sum(1 for packet in packets if packet["approval_priority"] == "urgent"),
+        "scheduled_count": sum(1 for packet in packets if packet["approval_priority"] == "scheduled"),
+        "packets": packets,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

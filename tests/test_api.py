@@ -1825,6 +1825,73 @@ def test_api_client_follow_ups_adds_due_dates_and_channels(tmp_path):
     assert routine["open_action_count"] == 0
 
 
+def test_api_maintenance_approval_packets_summarizes_client_approvals(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Urgent Approval Store",
+            url="https://urgent-approval.example",
+            client="Client Approval Urgent",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Scheduled Approval Blog",
+            url="https://scheduled-approval.example",
+            client="Client Approval Scheduled",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Routine Approval Site",
+            url="https://routine-approval.example",
+            client="Client Approval Routine",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/maintenance-approval-packets")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["packet_count"] == 3
+    assert payload["needed_count"] == 2
+    assert payload["urgent_count"] == 1
+    assert payload["scheduled_count"] == 1
+    assert [packet["client"] for packet in payload["packets"]] == [
+        "Client Approval Urgent",
+        "Client Approval Scheduled",
+        "Client Approval Routine",
+    ]
+    urgent = payload["packets"][0]
+    assert urgent["approval_priority"] == "urgent"
+    assert urgent["approval_window"] == "same-day approval"
+    assert urgent["packet_needed"] is True
+    assert urgent["top_site"] == "Urgent Approval Store"
+    assert urgent["approval_summary"].startswith("Request urgent maintenance approval")
+    scheduled = payload["packets"][1]
+    assert scheduled["approval_window"] == "next maintenance window"
+    assert scheduled["packet_needed"] is True
+    routine = payload["packets"][2]
+    assert routine["approval_priority"] == "routine"
+    assert routine["approval_window"] == "next account review"
+    assert routine["packet_needed"] is False
+    assert routine["approval_summary"] == "No maintenance approval packet is needed for Client Approval Routine right now."
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
