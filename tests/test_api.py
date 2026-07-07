@@ -146,6 +146,38 @@ def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     assert sites[0]["latest_snapshot_at"]
 
 
+def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post("/sites", data={"name": "Needs First Snapshot", "url": "https://needs-first.example", "client": "Client Missing"}, follow_redirects=False)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Tracked Site", url="https://tracked.example", client="Client Tracked"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-directory")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["site_count"] == 2
+    assert payload["monitored_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Needs First Snapshot", "Tracked Site"]
+    missing = payload["sites"][0]
+    assert missing["client"] == "Client Missing"
+    assert missing["monitoring_status"] == "missing_snapshot"
+    assert missing["status"] == "unknown"
+    assert missing["score"] is None
+    assert missing["latest_snapshot_at"] is None
+    assert missing["recommended_action"] == "Capture an initial fleet snapshot for this site."
+    tracked = payload["sites"][1]
+    assert tracked["monitoring_status"] == "monitored"
+    assert tracked["status"] == "green"
+    assert tracked["score"] >= 85
+    assert tracked["latest_snapshot_at"]
+
+
 def test_api_clients_rolls_up_account_health(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

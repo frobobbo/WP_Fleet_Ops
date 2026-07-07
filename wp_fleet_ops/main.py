@@ -115,6 +115,52 @@ def api_sites():
     }
 
 
+@app.get("/api/site-directory")
+def api_site_directory():
+    """Return every tracked site, including sites not yet covered by a snapshot."""
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    sites = []
+    for site in store.list_sites():
+        latest = latest_by_url.get(site["url"])
+        if latest:
+            score = latest["score"]
+            sites.append(
+                {
+                    "name": site["name"],
+                    "url": site["url"],
+                    "client": site["client"] or "Unassigned",
+                    "monitoring_status": "monitored",
+                    "score": score,
+                    "status": _dashboard_status(score),
+                    "latest_snapshot_at": latest["captured_at"],
+                    "recommended_action": "Continue normal monitoring cadence."
+                    if score >= 85
+                    else "Review the latest snapshot and open remediation tasks.",
+                }
+            )
+        else:
+            sites.append(
+                {
+                    "name": site["name"],
+                    "url": site["url"],
+                    "client": site["client"] or "Unassigned",
+                    "monitoring_status": "missing_snapshot",
+                    "score": None,
+                    "status": "unknown",
+                    "latest_snapshot_at": None,
+                    "recommended_action": "Capture an initial fleet snapshot for this site.",
+                }
+            )
+    sites.sort(key=lambda row: (row["monitoring_status"] != "missing_snapshot", row["client"], row["name"]))
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "site_count": len(sites),
+        "monitored_count": sum(1 for site in sites if site["monitoring_status"] == "monitored"),
+        "missing_snapshot_count": sum(1 for site in sites if site["monitoring_status"] == "missing_snapshot"),
+        "sites": sites,
+    }
+
+
 @app.get("/api/clients")
 def api_clients():
     """Return account-level health rollups for client review and automation."""
