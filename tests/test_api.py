@@ -221,7 +221,10 @@ def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
     assert payload["critical_client_count"] == 1
     assert payload["immediate_action_count"] >= 1
     assert payload["open_action_count"] >= payload["immediate_action_count"]
-    assert payload["headline"] == "Red: 1 critical client and active immediate actions require operator follow-up."
+    assert payload["headline"] == (
+        f"Red: 1 critical client and {payload['immediate_action_count']} immediate "
+        f"{'action' if payload['immediate_action_count'] == 1 else 'actions'} require operator follow-up."
+    )
     assert payload["top_clients"][0]["client"] == "Commerce Co"
     assert payload["top_actions"][0]["client"] == "Commerce Co"
     assert payload["top_actions"][0]["urgency"] == "immediate"

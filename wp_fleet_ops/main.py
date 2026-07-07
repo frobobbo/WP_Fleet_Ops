@@ -1422,7 +1422,11 @@ def _operator_handoff_headline(status: str, critical_clients: int, immediate_act
     """Return a concise human-readable summary for shift handoff."""
     if status == "red":
         client_label = "client" if critical_clients == 1 else "clients"
-        return f"Red: {critical_clients} critical {client_label} and active immediate actions require operator follow-up."
+        action_label = "action" if immediate_actions == 1 else "actions"
+        return (
+            f"Red: {critical_clients} critical {client_label} and "
+            f"{immediate_actions} immediate {action_label} require operator follow-up."
+        )
     if status == "yellow":
         return "Yellow: scheduled maintenance items remain open; review during the next maintenance window."
     return "Green: no open fleet actions are currently blocking the maintenance queue."
