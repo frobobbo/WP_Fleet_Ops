@@ -1342,12 +1342,15 @@ def api_stale_snapshots(threshold_hours: int = 168):
             site["name"].lower(),
         )
     )
+    current_snapshot_count = len(all_sites) - len(sites)
     return {
         "generated_at": now.isoformat(),
         "threshold_hours": threshold_hours,
         "site_count": len(all_sites),
         "stale_count": len(sites),
         "missing_snapshot_count": sum(1 for site in sites if site["staleness_status"] == "missing"),
+        "current_snapshot_count": current_snapshot_count,
+        "snapshot_coverage_percent": round((current_snapshot_count / len(all_sites)) * 100) if all_sites else 100,
         "sites": sites,
     }
 

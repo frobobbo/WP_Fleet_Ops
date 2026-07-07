@@ -1252,6 +1252,8 @@ def test_api_stale_snapshots_flags_missing_and_old_snapshots(tmp_path):
     assert payload["site_count"] == 3
     assert payload["stale_count"] == 2
     assert payload["missing_snapshot_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["snapshot_coverage_percent"] == 33
     assert [site["name"] for site in payload["sites"]] == ["No Snapshot", "Old Snapshot"]
     missing = payload["sites"][0]
     assert missing["client"] == "Client Missing"
@@ -1275,6 +1277,8 @@ def test_api_stale_snapshots_clamps_non_positive_threshold(tmp_path):
 
     assert payload["threshold_hours"] == 1
     assert payload["stale_count"] == 0
+    assert payload["current_snapshot_count"] == 1
+    assert payload["snapshot_coverage_percent"] == 100
 
 
 def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
