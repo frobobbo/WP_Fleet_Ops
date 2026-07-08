@@ -1730,6 +1730,61 @@ def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
     assert client_a["latest_snapshot_at"]
 
 
+def test_api_operations_kpis_returns_management_rollup(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="KPI Critical Store",
+            url="https://kpi-critical.example",
+            client="Client KPI Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="KPI Warning Blog",
+            url="https://kpi-warning.example",
+            client="Client KPI Warning",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="KPI Healthy Site",
+            url="https://kpi-healthy.example",
+            client="Client KPI Healthy",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/operations-kpis")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 3
+    assert payload["red_site_count"] == 1
+    assert payload["green_site_count"] == 2
+    assert payload["open_action_count"] >= 6
+    assert payload["immediate_action_count"] >= 1
+    assert payload["scheduled_action_count"] >= 1
+    assert payload["approval_needed_count"] == 2
+    assert payload["priority_site_count"] == 2
+    assert payload["top_priority_site"] == "KPI Critical Store"
+    assert payload["recommended_focus"] == "Confirm site availability, hosting status, and recent deploys."
+
+
 def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

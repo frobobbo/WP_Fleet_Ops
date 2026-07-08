@@ -1898,6 +1898,47 @@ def api_client_priorities(limit: int = 10):
     }
 
 
+def _operations_kpi_status(immediate_actions: int, scheduled_actions: int, average_score: int) -> str:
+    """Return a fleet KPI status for management dashboards."""
+    if immediate_actions:
+        return "red"
+    if scheduled_actions or average_score < 85:
+        return "yellow"
+    return "green"
+
+
+@app.get("/api/operations-kpis")
+def api_operations_kpis():
+    """Return compact fleet KPIs for status pages and recurring ops reports."""
+    rows = store.latest_dashboard()
+    actions = _current_actions()
+    average_score = round(sum(row["score"] or 0 for row in rows) / len(rows)) if rows else 100
+    immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
+    scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
+    watch_actions = [action for action in actions if _remediation_bucket(action) == "watch"]
+    approval_packets = _maintenance_approval_packet_rows()
+    priority_sites = [row for row in rows if _site_priority_score(row) > 0]
+    priority_sites.sort(key=lambda row: (-_site_priority_score(row), row["score"], row["name"].lower()))
+    status = _operations_kpi_status(len(immediate_actions), len(scheduled_actions), average_score)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "site_count": len(rows),
+        "average_score": average_score,
+        "green_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "green"),
+        "yellow_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "yellow"),
+        "red_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "red"),
+        "open_action_count": len(actions),
+        "immediate_action_count": len(immediate_actions),
+        "scheduled_action_count": len(scheduled_actions),
+        "watch_action_count": len(watch_actions),
+        "approval_needed_count": sum(1 for packet in approval_packets if packet["packet_needed"]),
+        "priority_site_count": len(priority_sites),
+        "top_priority_site": priority_sites[0]["name"] if priority_sites else None,
+        "recommended_focus": immediate_actions[0]["recommended_action"] if immediate_actions else (scheduled_actions[0]["recommended_action"] if scheduled_actions else "Continue normal monitoring cadence."),
+    }
+
+
 def _client_update_brief_rows() -> list[dict]:
     """Return client-facing status briefs with current wins, risks, and next steps."""
     status_rank = {"red": 0, "yellow": 1, "green": 2}
