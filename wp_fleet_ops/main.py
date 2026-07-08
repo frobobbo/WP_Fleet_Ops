@@ -2229,6 +2229,44 @@ def api_maintenance_ticket_drafts():
     }
 
 
+def _dispatch_summary_status(immediate_count: int, scheduled_count: int) -> str:
+    """Return a compact dispatch status for queue-level routing."""
+    if immediate_count:
+        return "red"
+    if scheduled_count:
+        return "yellow"
+    return "green"
+
+
+@app.get("/api/dispatch-summary")
+def api_dispatch_summary():
+    """Return a queue-level dispatch summary for daily operator routing."""
+    actions = _current_actions()
+    immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
+    scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
+    watch_actions = [action for action in actions if _remediation_bucket(action) == "watch"]
+    priority_payload = api_site_priorities(limit=50)
+    priority_sites = priority_payload["sites"][:5]
+    client_workload = _client_workload_rows()
+    top_client = client_workload[0] if client_workload else None
+    top_action = actions[0] if actions else None
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": _dispatch_summary_status(len(immediate_actions), len(scheduled_actions)),
+        "open_action_count": len(actions),
+        "immediate_action_count": len(immediate_actions),
+        "scheduled_action_count": len(scheduled_actions),
+        "watch_action_count": len(watch_actions),
+        "priority_site_count": priority_payload["priority_site_count"],
+        "top_client": top_client["client"] if top_client else None,
+        "top_client_open_action_count": top_client["open_action_count"] if top_client else 0,
+        "top_site": priority_sites[0]["name"] if priority_sites else None,
+        "top_action": top_action["recommended_action"] if top_action else "Continue normal monitoring cadence.",
+        "next_queue": "immediate" if immediate_actions else ("scheduled" if scheduled_actions else "watch" if watch_actions else "none"),
+        "priority_sites": priority_sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

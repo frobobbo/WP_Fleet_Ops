@@ -2103,6 +2103,57 @@ def test_api_maintenance_ticket_drafts_returns_ticket_ready_approval_requests(tm
     assert draft["open_action_count"] >= 1
 
 
+def test_api_dispatch_summary_returns_queue_level_operator_routing(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Dispatch Critical Store",
+            url="https://dispatch-critical.example",
+            client="Client Dispatch Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Dispatch Warning Blog",
+            url="https://dispatch-warning.example",
+            client="Client Dispatch Warning",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Dispatch Healthy Site", url="https://dispatch-healthy.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/dispatch-summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["open_action_count"] >= 6
+    assert payload["immediate_action_count"] >= 1
+    assert payload["scheduled_action_count"] >= 1
+    assert payload["priority_site_count"] == 2
+    assert payload["top_client"] == "Client Dispatch Critical"
+    assert payload["top_client_open_action_count"] >= 5
+    assert payload["top_site"] == "Dispatch Critical Store"
+    assert payload["top_action"] == "Confirm site availability, hosting status, and recent deploys."
+    assert payload["next_queue"] == "immediate"
+    assert [site["name"] for site in payload["priority_sites"]] == ["Dispatch Critical Store", "Dispatch Warning Blog"]
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
