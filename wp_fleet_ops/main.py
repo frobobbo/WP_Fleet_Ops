@@ -2395,6 +2395,60 @@ def api_daily_ops_brief():
     }
 
 
+def _account_agenda_focus(review: dict) -> str:
+    """Return the primary agenda theme for an account follow-up."""
+    if review["immediate_action_count"]:
+        return "incident response"
+    if review["scheduled_action_count"]:
+        return "maintenance planning"
+    if review["average_score"] < 85:
+        return "health improvement"
+    return "routine review"
+
+
+@app.get("/api/account-agenda")
+def api_account_agenda(limit: int = 10):
+    """Return a bounded account agenda for weekly service planning."""
+    bounded_limit = max(1, min(limit, 50))
+    priority_rank = {"urgent": 0, "scheduled": 1, "routine": 2}
+    agenda = []
+    for review in _client_service_review_rows():
+        agenda.append(
+            {
+                "client": review["client"],
+                "priority": review["review_priority"],
+                "status": review["status"],
+                "focus": _account_agenda_focus(review),
+                "site_count": review["site_count"],
+                "open_action_count": review["open_action_count"],
+                "immediate_action_count": review["immediate_action_count"],
+                "scheduled_action_count": review["scheduled_action_count"],
+                "top_site": review["top_site"],
+                "talking_point": review["talking_point"],
+                "next_action": review["next_action"],
+                "latest_snapshot_at": review["latest_snapshot_at"],
+            }
+        )
+    agenda.sort(
+        key=lambda item: (
+            priority_rank.get(item["priority"], 99),
+            -item["open_action_count"],
+            item["client"].lower(),
+        )
+    )
+    selected = agenda[:bounded_limit]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "limit": bounded_limit,
+        "account_count": len(agenda),
+        "returned_account_count": len(selected),
+        "urgent_count": sum(1 for item in agenda if item["priority"] == "urgent"),
+        "scheduled_count": sum(1 for item in agenda if item["priority"] == "scheduled"),
+        "routine_count": sum(1 for item in agenda if item["priority"] == "routine"),
+        "agenda": selected,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

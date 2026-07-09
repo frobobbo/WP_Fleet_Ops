@@ -2263,6 +2263,67 @@ def test_api_daily_ops_brief_returns_shift_ready_summary(tmp_path):
     assert payload["priority_sites"][0]["name"] == "Brief Critical Store"
 
 
+def test_api_account_agenda_returns_bounded_weekly_service_plan(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Agenda Critical Store",
+            url="https://agenda-critical.example",
+            client="Client Agenda Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Agenda Scheduled Blog",
+            url="https://agenda-scheduled.example",
+            client="Client Agenda Scheduled",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Agenda Routine Site",
+            url="https://agenda-routine.example",
+            client="Client Agenda Routine",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/account-agenda?limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["limit"] == 2
+    assert payload["account_count"] == 3
+    assert payload["returned_account_count"] == 2
+    assert payload["urgent_count"] == 1
+    assert payload["scheduled_count"] == 1
+    assert payload["routine_count"] == 1
+    assert [item["client"] for item in payload["agenda"]] == ["Client Agenda Critical", "Client Agenda Scheduled"]
+    urgent = payload["agenda"][0]
+    assert urgent["priority"] == "urgent"
+    assert urgent["focus"] == "incident response"
+    assert urgent["top_site"] == "Agenda Critical Store"
+    assert urgent["next_action"] == "Confirm site availability, hosting status, and recent deploys."
+    scheduled = payload["agenda"][1]
+    assert scheduled["priority"] == "scheduled"
+    assert scheduled["focus"] == "maintenance planning"
+    assert scheduled["talking_point"] == "Review scheduled maintenance timing and open work queue ownership."
+
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
