@@ -2267,6 +2267,48 @@ def api_dispatch_summary():
     }
 
 
+def _daily_ops_headline(status: str, immediate_count: int, scheduled_count: int, top_site: str | None) -> str:
+    """Return a short shift headline for operator briefings."""
+    if immediate_count:
+        site_fragment = f" Start with {top_site}." if top_site else ""
+        return f"Red shift brief: {immediate_count} immediate action{'s' if immediate_count != 1 else ''} need follow-up.{site_fragment}"
+    if scheduled_count:
+        return f"Yellow shift brief: {scheduled_count} scheduled action{'s' if scheduled_count != 1 else ''} should be planned."
+    if status == "green":
+        return "Green shift brief: no urgent or scheduled FleetOps actions are open."
+    return "FleetOps shift brief: review current monitoring status and open work."
+
+
+@app.get("/api/daily-ops-brief")
+def api_daily_ops_brief():
+    """Return a shift-ready FleetOps brief combining health, dispatch, and focus items."""
+    summary = api_summary()
+    dispatch = api_dispatch_summary()
+    priority_sites = dispatch["priority_sites"][:3]
+    status = dispatch["status"] if dispatch["status"] != "green" else summary["overall_status"]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "headline": _daily_ops_headline(
+            status,
+            dispatch["immediate_action_count"],
+            dispatch["scheduled_action_count"],
+            dispatch["top_site"],
+        ),
+        "site_count": summary["sites"],
+        "average_score": summary["average_score"],
+        "critical_alerts": summary["critical_alerts"],
+        "open_action_count": dispatch["open_action_count"],
+        "immediate_action_count": dispatch["immediate_action_count"],
+        "scheduled_action_count": dispatch["scheduled_action_count"],
+        "next_queue": dispatch["next_queue"],
+        "top_client": dispatch["top_client"],
+        "top_site": dispatch["top_site"],
+        "recommended_focus": dispatch["top_action"],
+        "priority_sites": priority_sites,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(

@@ -2154,6 +2154,50 @@ def test_api_dispatch_summary_returns_queue_level_operator_routing(tmp_path):
     assert [site["name"] for site in payload["priority_sites"]] == ["Dispatch Critical Store", "Dispatch Warning Blog"]
 
 
+def test_api_daily_ops_brief_returns_shift_ready_summary(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Brief Critical Store",
+            url="https://brief-critical.example",
+            client="Client Brief Critical",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Brief Scheduled Blog",
+            url="https://brief-scheduled.example",
+            client="Client Brief Scheduled",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/daily-ops-brief")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["headline"].startswith("Red shift brief:")
+    assert payload["site_count"] == 2
+    assert payload["critical_alerts"] >= 1
+    assert payload["next_queue"] == "immediate"
+    assert payload["top_client"] == "Client Brief Critical"
+    assert payload["top_site"] == "Brief Critical Store"
+    assert payload["recommended_focus"] == "Confirm site availability, hosting status, and recent deploys."
+    assert payload["priority_sites"][0]["name"] == "Brief Critical Store"
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
