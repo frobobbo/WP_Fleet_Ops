@@ -568,6 +568,71 @@ def test_api_backups_highlights_stale_backup_queue(tmp_path):
     assert payload["sites"][2]["backup_status"] == "fresh"
 
 
+def test_api_backup_remediation_groups_stale_backup_work_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Client Backup",
+            url="https://critical-client-backup.example",
+            client="Client Backup",
+            backup_age_hours="144",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Client Backup",
+            url="https://warning-client-backup.example",
+            client="Client Backup",
+            backup_age_hours="48",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Fresh Client Backup",
+            url="https://fresh-client-backup.example",
+            client="Client Backup",
+            backup_age_hours="12",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unassigned Critical Backup",
+            url="https://unassigned-critical-backup.example",
+            client="",
+            backup_age_hours="96",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/backup-remediation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["client_count"] == 2
+    assert payload["site_count"] == 4
+    assert payload["stale_site_count"] == 3
+    assert payload["critical_site_count"] == 2
+    assert [client_row["client"] for client_row in payload["clients"]] == ["Client Backup", "Unassigned"]
+    primary = payload["clients"][0]
+    assert primary["site_count"] == 3
+    assert primary["stale_site_count"] == 2
+    assert primary["critical_site_count"] == 1
+    assert primary["oldest_backup_age_hours"] == 144
+    assert primary["backup_status"] == "critical"
+    assert primary["recommended_action"] == "Run immediate backups for critical sites, then verify schedules for warning sites."
+    assert [site["name"] for site in primary["sites"]] == ["Critical Client Backup", "Warning Client Backup"]
+    assert payload["clients"][1]["client"] == "Unassigned"
+    assert payload["clients"][1]["backup_status"] == "critical"
+
+
 def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

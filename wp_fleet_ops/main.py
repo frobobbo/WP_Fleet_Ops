@@ -505,6 +505,92 @@ def api_backups():
     }
 
 
+def _backup_remediation_recommended_action(critical_count: int, warning_count: int) -> str:
+    if critical_count and warning_count:
+        return "Run immediate backups for critical sites, then verify schedules for warning sites."
+    if critical_count:
+        return "Run immediate backups for every critical site and verify restore points."
+    if warning_count:
+        return "Confirm the next scheduled backup completes successfully for warning sites."
+    return "Continue normal backup monitoring."
+
+
+@app.get("/api/backup-remediation")
+def api_backup_remediation():
+    """Group stale backup remediation work by client for dispatch planning."""
+    client_rows: dict[str, dict] = {}
+    site_count = 0
+    for row in store.latest_dashboard():
+        site_count += 1
+        client_name = row.get("client") or "Unassigned"
+        status = _backup_status(row["backup_age_hours"])
+        summary = client_rows.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "site_count": 0,
+                "fresh_site_count": 0,
+                "warning_site_count": 0,
+                "critical_site_count": 0,
+                "stale_site_count": 0,
+                "oldest_backup_age_hours": 0,
+                "backup_status": "fresh",
+                "sites": [],
+            },
+        )
+        summary["site_count"] += 1
+        summary["oldest_backup_age_hours"] = max(summary["oldest_backup_age_hours"], row["backup_age_hours"])
+        if status == "critical":
+            summary["critical_site_count"] += 1
+            summary["stale_site_count"] += 1
+            summary["backup_status"] = "critical"
+        elif status == "warning":
+            summary["warning_site_count"] += 1
+            summary["stale_site_count"] += 1
+            if summary["backup_status"] != "critical":
+                summary["backup_status"] = "warning"
+        else:
+            summary["fresh_site_count"] += 1
+
+        if status != "fresh":
+            summary["sites"].append(
+                {
+                    "name": row["name"],
+                    "url": row["url"],
+                    "backup_age_hours": row["backup_age_hours"],
+                    "backup_status": status,
+                    "latest_snapshot_at": row["captured_at"],
+                    "recommended_action": _backup_recommended_action(status),
+                }
+            )
+
+    clients = []
+    for summary in client_rows.values():
+        summary["sites"].sort(key=lambda site: (-site["backup_age_hours"], site["name"].lower()))
+        summary["recommended_action"] = _backup_remediation_recommended_action(
+            summary["critical_site_count"], summary["warning_site_count"]
+        )
+        clients.append(summary)
+
+    clients.sort(
+        key=lambda row: (
+            row["backup_status"] != "critical",
+            row["backup_status"] != "warning",
+            -row["stale_site_count"],
+            -row["oldest_backup_age_hours"],
+            row["client"].lower(),
+        )
+    )
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client_count": len(clients),
+        "site_count": site_count,
+        "stale_site_count": sum(row["stale_site_count"] for row in clients),
+        "critical_site_count": sum(row["critical_site_count"] for row in clients),
+        "clients": clients,
+    }
+
+
 def _restore_drill_priority(backup_age_hours: int) -> str:
     """Return restore-drill priority based on backup freshness."""
     if backup_age_hours > 168:
