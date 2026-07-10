@@ -1406,8 +1406,18 @@ def api_stale_snapshots(threshold_hours: int = 168):
         captured_at = row.get("captured_at") if row else None
         captured_dt = _parse_captured_at(captured_at)
         age_hours = round((now - captured_dt).total_seconds() / 3600, 1) if captured_dt else None
-        if age_hours is not None and age_hours <= threshold_hours:
+        has_clock_skew = age_hours is not None and age_hours < 0
+        if age_hours is not None and not has_clock_skew and age_hours <= threshold_hours:
             continue
+        if row is None:
+            staleness_status = "missing"
+            recommended_action = "Capture a fresh fleet snapshot and verify site health."
+        elif has_clock_skew:
+            staleness_status = "clock_skew"
+            recommended_action = "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
+        else:
+            staleness_status = "stale"
+            recommended_action = "Capture a fresh fleet snapshot and verify site health."
         sites.append(
             {
                 "name": site["name"],
@@ -1415,14 +1425,15 @@ def api_stale_snapshots(threshold_hours: int = 168):
                 "client": site.get("client") or "Unassigned",
                 "latest_snapshot_at": captured_at,
                 "snapshot_age_hours": age_hours,
-                "staleness_status": "missing" if row is None else "stale",
-                "recommended_action": "Capture a fresh fleet snapshot and verify site health.",
+                "staleness_status": staleness_status,
+                "recommended_action": recommended_action,
             }
         )
 
+    status_rank = {"missing": 0, "clock_skew": 1, "stale": 2}
     sites.sort(
         key=lambda site: (
-            site["staleness_status"] != "missing",
+            status_rank.get(site["staleness_status"], 99),
             -(site["snapshot_age_hours"] or 10**9),
             site["client"].lower(),
             site["name"].lower(),
@@ -1435,6 +1446,7 @@ def api_stale_snapshots(threshold_hours: int = 168):
         "site_count": len(all_sites),
         "stale_count": len(sites),
         "missing_snapshot_count": sum(1 for site in sites if site["staleness_status"] == "missing"),
+        "clock_skew_count": sum(1 for site in sites if site["staleness_status"] == "clock_skew"),
         "current_snapshot_count": current_snapshot_count,
         "snapshot_coverage_percent": round((current_snapshot_count / len(all_sites)) * 100) if all_sites else 100,
         "sites": sites,

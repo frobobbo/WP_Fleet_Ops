@@ -1346,6 +1346,31 @@ def test_api_stale_snapshots_clamps_non_positive_threshold(tmp_path):
     assert payload["snapshot_coverage_percent"] == 100
 
 
+def test_api_stale_snapshots_flags_future_timestamps_as_clock_skew(tmp_path):
+    client = make_test_client(tmp_path)
+    db_path = tmp_path / "test.sqlite3"
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Future Snapshot", url="https://future-snapshot.example", client="Client Future"),
+        follow_redirects=False,
+    )
+    future_captured_at = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(db_path) as con:
+        con.execute("update snapshots set captured_at=?", (future_captured_at,))
+
+    payload = client.get("/api/stale-snapshots").json()
+
+    assert payload["stale_count"] == 1
+    assert payload["current_snapshot_count"] == 0
+    assert payload["clock_skew_count"] == 1
+    assert payload["snapshot_coverage_percent"] == 0
+    site = payload["sites"][0]
+    assert site["name"] == "Future Snapshot"
+    assert site["staleness_status"] == "clock_skew"
+    assert site["snapshot_age_hours"] <= -23
+    assert site["recommended_action"] == "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
+
+
 def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
