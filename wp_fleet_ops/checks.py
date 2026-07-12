@@ -28,7 +28,13 @@ def normalize_site_url(url: str) -> str:
         parsed_port = parsed.port
     except ValueError as exc:
         raise ValueError(error) from exc
-    if scheme not in {"http", "https"} or not parsed.hostname or any(char.isspace() for char in netloc):
+    if (
+        scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or any(char.isspace() for char in netloc)
+    ):
         raise ValueError(error)
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
         raise ValueError(error)

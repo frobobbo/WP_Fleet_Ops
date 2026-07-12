@@ -3,6 +3,8 @@ import sqlite3
 import warnings
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 
 def make_test_client(tmp_path):
     os.environ["WP_FLEET_OPS_DB"] = str(tmp_path / "test.sqlite3")
@@ -2391,12 +2393,13 @@ def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     assert client.post("/snapshot", data=valid_snapshot_payload(url="javascript:alert(1)"), follow_redirects=False).status_code == 422
 
 
-def test_fetch_check_rejects_non_http_urls_before_persisting(tmp_path):
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "https://admin:secret@example.com"])
+def test_fetch_check_rejects_unsafe_urls_before_persisting(tmp_path, url):
     client = make_test_client(tmp_path)
 
     response = client.post(
         "/care/fetch-check",
-        data={"name": "Local File", "url": "file:///etc/passwd"},
+        data={"name": "Unsafe Site", "url": url},
         follow_redirects=False,
     )
 
