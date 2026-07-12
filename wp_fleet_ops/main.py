@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .checks import evaluate_site, fetch_basic_site_check, summarize_care_report
@@ -34,6 +34,12 @@ def template_dir() -> Path:
 app = FastAPI(title="WP FleetOps", version="0.1.0")
 templates = Jinja2Templates(directory=str(template_dir()))
 store = FleetOpsStore(DB_PATH)
+
+
+@app.exception_handler(ValueError)
+async def invalid_input_error(_request: Request, exc: ValueError):
+    """Return a client error for invalid normalized inputs instead of a server error."""
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 @app.get("/health")

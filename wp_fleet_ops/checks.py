@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import re
 import socket
 import ssl
 import time
@@ -11,11 +12,26 @@ from urllib.parse import urlparse, urlunparse
 
 def normalize_site_url(url: str) -> str:
     candidate = url.strip()
+    error = "Site URL must be a valid HTTP or HTTPS URL."
+    if not candidate:
+        raise ValueError(error)
     if "://" not in candidate:
+        explicit_scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate)
+        host_with_port = re.match(r"^[^/:\s]+:\d+(?:/|$)", candidate)
+        if explicit_scheme and not host_with_port:
+            raise ValueError(error)
         candidate = f"https://{candidate}"
     parsed = urlparse(candidate)
     scheme = parsed.scheme.lower()
     netloc = parsed.netloc.lower()
+    try:
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ValueError(error) from exc
+    if scheme not in {"http", "https"} or not parsed.hostname or any(char.isspace() for char in netloc):
+        raise ValueError(error)
+    if parsed_port is not None and not 1 <= parsed_port <= 65535:
+        raise ValueError(error)
     path = "" if parsed.path == "/" and not parsed.query and not parsed.fragment else parsed.path
     return urlunparse((scheme, netloc, path, "", parsed.query, parsed.fragment))
 

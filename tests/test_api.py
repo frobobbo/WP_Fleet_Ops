@@ -2391,6 +2391,20 @@ def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     assert client.post("/snapshot", data=valid_snapshot_payload(url="javascript:alert(1)"), follow_redirects=False).status_code == 422
 
 
+def test_fetch_check_rejects_non_http_urls_before_persisting(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": "Local File", "url": "file:///etc/passwd"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Site URL must be a valid HTTP or HTTPS URL."}
+    assert client.get("/api/site-directory").json()["site_count"] == 0
+
+
 def test_manual_care_check_rejects_invalid_operational_metrics(tmp_path):
     client = make_test_client(tmp_path)
     payload = {"name": "Bad Metrics", "url": "https://bad.example", "latency_ms": "-25"}

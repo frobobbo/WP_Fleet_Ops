@@ -1,3 +1,5 @@
+import pytest
+
 from wp_fleet_ops.checks import evaluate_site, normalize_site_url, summarize_care_report
 from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from wp_fleet_ops.storage import FleetOpsStore
@@ -40,3 +42,9 @@ def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
 
 def test_normalize_site_url_deduplicates_bare_domains():
     assert normalize_site_url("Example.COM/") == "https://example.com"
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "javascript:alert(1)", "https://"])
+def test_normalize_site_url_rejects_non_http_and_hostless_urls(url):
+    with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
+        normalize_site_url(url)
