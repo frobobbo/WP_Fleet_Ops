@@ -2387,6 +2387,27 @@ def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     assert "2 WordPress updates pending" in report
 
 
+def test_manual_check_and_snapshot_share_canonical_url_handling(tmp_path):
+    client = make_test_client(tmp_path)
+
+    manual = client.post(
+        "/care/manual-check",
+        data={"name": "Canonical Site", "url": "Example.COM/", "client": "Canonical Client"},
+        follow_redirects=False,
+    )
+    snapshot = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Canonical Site", url="HTTPS://example.com/", client="Canonical Client"),
+        follow_redirects=False,
+    )
+
+    assert manual.status_code == 303
+    assert snapshot.status_code == 303
+    directory = client.get("/api/site-directory").json()
+    assert directory["site_count"] == 1
+    assert directory["sites"][0]["url"] == "https://example.com"
+
+
 def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post("/snapshot", data=valid_snapshot_payload(ssl_days="-1"), follow_redirects=False).status_code == 422

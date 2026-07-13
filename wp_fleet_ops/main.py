@@ -8,7 +8,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .checks import evaluate_site, fetch_basic_site_check, summarize_care_report
+from .checks import evaluate_site, fetch_basic_site_check, normalize_site_url, summarize_care_report
 from .fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from .storage import FleetOpsStore
 
@@ -2485,7 +2485,7 @@ def add_site(name: str = Form(...), url: str = Form(...), client: str = Form("")
 @app.post("/care/manual-check")
 def manual_care_check(
     name: str = Form(..., min_length=1),
-    url: str = Form(..., min_length=1, pattern=r"^https?://"),
+    url: str = Form(..., min_length=1),
     client: str = Form(""),
     http_status: int = Form(200, ge=100, le=599),
     latency_ms: int = Form(250, ge=0),
@@ -2494,6 +2494,7 @@ def manual_care_check(
     update_count: int = Form(0, ge=0),
     backup_age_hours: int = Form(24, ge=0),
 ):
+    url = normalize_site_url(url)
     site_id = store.upsert_site(name, url, client)
     check = evaluate_site(
         name,
@@ -2539,7 +2540,7 @@ def fetch_care_check(name: str = Form(...), url: str = Form(...), client: str = 
 @app.post("/snapshot")
 def snapshot(
     name: str = Form(..., min_length=1),
-    url: str = Form(..., min_length=1, pattern=r"^https?://"),
+    url: str = Form(..., min_length=1),
     client: str = Form(""),
     uptime_ok: bool = Form(True),
     ssl_days: int = Form(60, ge=0),
@@ -2548,6 +2549,7 @@ def snapshot(
     response_ms: int = Form(250, ge=0),
     security_header_count: int = Form(3, ge=0),
 ):
+    url = normalize_site_url(url)
     site = FleetSite(name, url, uptime_ok, ssl_days, wp_updates, backup_age_hours, response_ms, security_header_count)
     site_id = store.upsert_site(name, url, client)
     store.save_snapshot(site_id, site, calculate_health_score(site), generate_alerts(site))
