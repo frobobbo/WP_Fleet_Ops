@@ -27,7 +27,7 @@ def test_fleet_alerts_and_report_group_operational_risk():
 
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
-    site_id = store.upsert_site("Church", "HTTPS://Church.Example/", "Church Client")
+    site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")
     duplicate_id = store.upsert_site("Church", "https://church.example", "Church Client")
     check = evaluate_site("Church", "https://church.example", 200, 180, 90, "6.6.1", 1, 20, {})
     fleet_site = FleetSite("Church", "https://church.example", True, 90, 1, 20, 180, 3)
@@ -42,6 +42,11 @@ def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
 
 def test_normalize_site_url_deduplicates_bare_domains():
     assert normalize_site_url("Example.COM/") == "https://example.com"
+
+
+def test_normalize_site_url_strips_client_only_fragments():
+    assert normalize_site_url("HTTPS://Example.COM/#dashboard") == "https://example.com"
+    assert normalize_site_url("https://example.com/status?view=full#summary") == "https://example.com/status?view=full"
 
 
 def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):

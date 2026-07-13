@@ -38,8 +38,10 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
         raise ValueError(error)
-    path = "" if parsed.path == "/" and not parsed.query and not parsed.fragment else parsed.path
-    return urlunparse((scheme, netloc, path, "", parsed.query, parsed.fragment))
+    # URL fragments are resolved by browsers and never sent to the monitored
+    # server, so retaining one would create duplicate records for one site.
+    path = "" if parsed.path == "/" and not parsed.query else parsed.path
+    return urlunparse((scheme, netloc, path, "", parsed.query, ""))
 
 
 @dataclass(frozen=True)
