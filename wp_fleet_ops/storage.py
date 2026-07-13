@@ -77,6 +77,10 @@ class FleetOpsStore:
         return any(row[1] == column for row in con.execute(f"pragma table_info({table})"))
 
     def upsert_site(self, name: str, url: str, client: str = "") -> int:
+        name = name.strip()
+        client = client.strip()
+        if not name:
+            raise ValueError("Site name must not be blank.")
         url = normalize_site_url(url)
         with self._connect() as con:
             cur = con.execute("insert or ignore into sites(name,url,client) values(?,?,?)", (name, url, client))

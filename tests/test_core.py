@@ -44,6 +44,18 @@ def test_normalize_site_url_deduplicates_bare_domains():
     assert normalize_site_url("Example.COM/") == "https://example.com"
 
 
+def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    store.upsert_site("  Church Site  ", "church.example", "  Church Client  ")
+
+    site = store.list_sites()[0]
+    assert site["name"] == "Church Site"
+    assert site["client"] == "Church Client"
+    with pytest.raises(ValueError, match="Site name must not be blank"):
+        store.upsert_site(" \t ", "blank.example", "Client")
+
+
 @pytest.mark.parametrize(
     "url",
     [
