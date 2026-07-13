@@ -263,6 +263,7 @@ def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
     assert payload["top_actions"][0]["client"] == "Commerce Co"
     assert payload["top_actions"][0]["urgency"] == "immediate"
     assert payload["handoff_notes"][0].startswith("Prioritize Commerce Co")
+    assert payload["handoff_notes"][-1] == "Watch SLO objective: Sites reachable at 50.0% compliance."
 
 
 def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):

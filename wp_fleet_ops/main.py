@@ -1611,7 +1611,10 @@ def api_operator_handoff():
     if top_actions:
         handoff_notes.append(f"Next action: {top_actions[0]['recommended_action']}")
     if slo.get("worst_objective"):
-        handoff_notes.append(f"Watch SLO objective: {slo['worst_objective']}.")
+        objective = slo["worst_objective"]
+        handoff_notes.append(
+            f"Watch SLO objective: {objective['label']} at {objective['compliance_percent']}% compliance."
+        )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": status,
