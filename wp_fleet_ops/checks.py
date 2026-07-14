@@ -23,7 +23,7 @@ def normalize_site_url(url: str) -> str:
         candidate = f"https://{candidate}"
     parsed = urlparse(candidate)
     scheme = parsed.scheme.lower()
-    netloc = parsed.netloc.lower()
+    raw_netloc = parsed.netloc
     try:
         parsed_port = parsed.port
     except ValueError as exc:
@@ -33,15 +33,20 @@ def normalize_site_url(url: str) -> str:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        or any(char.isspace() for char in netloc)
+        or any(char.isspace() for char in raw_netloc)
     ):
         raise ValueError(error)
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
         raise ValueError(error)
+    # A terminal dot marks an absolute DNS name but resolves to the same host.
+    # Canonicalize it so FQDN and ordinary spellings do not create two sites.
+    hostname = parsed.hostname.lower().removesuffix(".")
+    if not hostname:
+        raise ValueError(error)
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
     default_port = 443 if scheme == "https" else 80
-    if parsed_port == default_port:
-        hostname = parsed.hostname.lower()
-        netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if parsed_port is not None and parsed_port != default_port:
+        netloc = f"{netloc}:{parsed_port}"
     # URL fragments are resolved by browsers and never sent to the monitored
     # server, so retaining one would create duplicate records for one site.
     path = "" if parsed.path == "/" and not parsed.query else parsed.path

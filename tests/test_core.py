@@ -72,6 +72,21 @@ def test_store_deduplicates_default_port_urls(tmp_path):
     assert len(store.list_sites()) == 1
 
 
+def test_normalize_site_url_deduplicates_fully_qualified_hostnames():
+    assert normalize_site_url("HTTPS://Example.COM./") == "https://example.com"
+    assert normalize_site_url("https://Example.COM.:8443/status") == "https://example.com:8443/status"
+
+
+def test_store_deduplicates_trailing_dot_hostnames(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("FQDN Site", "https://example.com.")
+    duplicate_id = store.upsert_site("FQDN Site", "https://example.com")
+
+    assert duplicate_id == first_id
+    assert len(store.list_sites()) == 1
+
+
 def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 
