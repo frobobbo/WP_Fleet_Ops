@@ -85,7 +85,12 @@ def api_summary():
     critical_alerts = sum(1 for row in fleet_rows for alert in row["alerts"] if alert.get("severity") == "critical")
     last_snapshot_at = max((row["captured_at"] for row in fleet_rows if row.get("captured_at")), default=None)
     average_score = round(score_total / len(fleet_rows)) if fleet_rows else 100
-    overall_status = "green" if average_score >= 85 and critical_alerts == 0 else ("yellow" if average_score >= 65 else "red")
+    if critical_alerts or average_score < 65:
+        overall_status = "red"
+    elif average_score < 85:
+        overall_status = "yellow"
+    else:
+        overall_status = "green"
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "overall_status": overall_status,

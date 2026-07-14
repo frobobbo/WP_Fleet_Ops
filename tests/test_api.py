@@ -116,6 +116,25 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
     assert summary["critical_alerts"] >= 1
 
 
+def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expiring Certificate",
+            url="https://certificate.example",
+            ssl_days="5",
+        ),
+        follow_redirects=False,
+    )
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["average_score"] == 75
+    assert summary["critical_alerts"] == 1
+    assert summary["overall_status"] == "red"
+
+
 def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
