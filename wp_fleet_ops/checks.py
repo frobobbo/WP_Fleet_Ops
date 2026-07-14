@@ -38,6 +38,10 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
         raise ValueError(error)
+    default_port = 443 if scheme == "https" else 80
+    if parsed_port == default_port:
+        hostname = parsed.hostname.lower()
+        netloc = f"[{hostname}]" if ":" in hostname else hostname
     # URL fragments are resolved by browsers and never sent to the monitored
     # server, so retaining one would create duplicate records for one site.
     path = "" if parsed.path == "/" and not parsed.query else parsed.path

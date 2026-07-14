@@ -49,6 +49,29 @@ def test_normalize_site_url_strips_client_only_fragments():
     assert normalize_site_url("https://example.com/status?view=full#summary") == "https://example.com/status?view=full"
 
 
+@pytest.mark.parametrize(
+    ("url", "normalized"),
+    [
+        ("https://Example.COM:443/", "https://example.com"),
+        ("http://Example.COM:80/status", "http://example.com/status"),
+        ("https://[2001:DB8::1]:443/", "https://[2001:db8::1]"),
+        ("https://Example.COM:8443/", "https://example.com:8443"),
+    ],
+)
+def test_normalize_site_url_strips_only_default_ports(url, normalized):
+    assert normalize_site_url(url) == normalized
+
+
+def test_store_deduplicates_default_port_urls(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Default HTTPS", "https://example.com:443")
+    duplicate_id = store.upsert_site("Default HTTPS", "https://example.com")
+
+    assert duplicate_id == first_id
+    assert len(store.list_sites()) == 1
+
+
 def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 
