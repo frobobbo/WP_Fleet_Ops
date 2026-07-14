@@ -92,6 +92,8 @@ def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
         "https://",
         "https://admin@example.com",
         "https://admin:secret@example.com",
+        "https://example.com/path with space",
+        "https://example.com/search?q=hello world",
     ],
 )
 def test_normalize_site_url_rejects_unsafe_or_hostless_urls(url):

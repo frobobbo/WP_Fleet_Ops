@@ -13,7 +13,7 @@ from urllib.parse import urlparse, urlunparse
 def normalize_site_url(url: str) -> str:
     candidate = url.strip()
     error = "Site URL must be a valid HTTP or HTTPS URL."
-    if not candidate:
+    if not candidate or any(char.isspace() for char in candidate):
         raise ValueError(error)
     if "://" not in candidate:
         explicit_scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate)
