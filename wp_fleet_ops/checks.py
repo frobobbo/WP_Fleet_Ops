@@ -40,7 +40,15 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     # A terminal dot marks an absolute DNS name but resolves to the same host.
     # Canonicalize it so FQDN and ordinary spellings do not create two sites.
-    hostname = parsed.hostname.lower().removesuffix(".")
+    hostname = parsed.hostname.lower()
+    if ":" not in hostname:
+        try:
+            # Network clients use the ASCII-compatible form of international
+            # domains. Persist it too so Unicode and punycode inputs dedupe.
+            hostname = hostname.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise ValueError(error) from exc
+    hostname = hostname.removesuffix(".")
     if not hostname:
         raise ValueError(error)
     netloc = f"[{hostname}]" if ":" in hostname else hostname
