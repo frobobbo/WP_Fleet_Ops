@@ -1603,19 +1603,20 @@ def api_operator_handoff():
     immediate_actions = sum(1 for action in actions if action["urgency"] == "immediate")
     status = _fleet_brief_status(critical_clients, immediate_actions, len(actions))
     top_clients = client_risks[:3]
+    priority_clients = [client for client in client_risks if client["risk_level"] != "stable"]
     top_actions = actions[:5]
     handoff_notes = (
         [
-            f"Prioritize {top_clients[0]['client']} due to "
-            f"{top_clients[0]['critical_action_count']} critical actions and a "
-            f"lowest score of {top_clients[0]['lowest_score']}."
+            f"Prioritize {priority_clients[0]['client']} due to "
+            f"{priority_clients[0]['critical_action_count']} critical actions and a "
+            f"lowest score of {priority_clients[0]['lowest_score']}."
         ]
-        if top_clients
+        if priority_clients
         else ["No client-level risks require handoff at this time."]
     )
     if top_actions:
         handoff_notes.append(f"Next action: {top_actions[0]['recommended_action']}")
-    if slo.get("worst_objective"):
+    if slo.get("worst_objective") and slo["worst_objective"]["status"] in {"watch", "at_risk"}:
         objective = slo["worst_objective"]
         handoff_notes.append(
             f"Watch SLO objective: {objective['label']} at {objective['compliance_percent']}% compliance."

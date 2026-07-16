@@ -285,6 +285,29 @@ def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
     assert payload["handoff_notes"][-1] == "Watch SLO objective: Sites reachable at 50.0% compliance."
 
 
+def test_api_operator_handoff_does_not_escalate_healthy_clients(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Healthy Handoff Site",
+            url="https://healthy-handoff.example",
+            client="Healthy Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/operator-handoff")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "green"
+    assert payload["critical_client_count"] == 0
+    assert payload["immediate_action_count"] == 0
+    assert payload["open_action_count"] == 0
+    assert payload["handoff_notes"] == ["No client-level risks require handoff at this time."]
+
+
 def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
