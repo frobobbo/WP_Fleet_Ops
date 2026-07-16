@@ -1,6 +1,9 @@
+from email.message import Message
+from urllib.error import HTTPError
+
 import pytest
 
-from wp_fleet_ops.checks import evaluate_site, normalize_site_url, summarize_care_report
+from wp_fleet_ops.checks import evaluate_site, fetch_basic_site_check, normalize_site_url, summarize_care_report
 from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from wp_fleet_ops.storage import FleetOpsStore
 
@@ -139,3 +142,19 @@ def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
 def test_normalize_site_url_rejects_unsafe_or_hostless_urls(url):
     with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
         normalize_site_url(url)
+
+
+def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypatch):
+    headers = Message()
+    headers["Strict-Transport-Security"] = "max-age=31536000"
+
+    def unavailable(*_args, **_kwargs):
+        raise HTTPError("http://unavailable.example", 503, "Service Unavailable", headers, None)
+
+    monkeypatch.setattr("wp_fleet_ops.checks.urllib.request.urlopen", unavailable)
+
+    check = fetch_basic_site_check("Unavailable", "http://unavailable.example")
+
+    assert check.http_status == 503
+    assert check.security_headers["strict-transport-security"] == "max-age=31536000"
+    assert "HTTP status is 503" in check.actions[0]

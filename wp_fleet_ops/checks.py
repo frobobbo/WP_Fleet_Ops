@@ -6,6 +6,7 @@ import re
 import socket
 import ssl
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import urlparse, urlunparse
 
@@ -184,6 +185,11 @@ def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.status
             headers = dict(resp.headers.items())
+    except urllib.error.HTTPError as exc:
+        # HTTPError still represents a completed HTTP response. Preserve its
+        # status and headers so operators see the actual server-side failure.
+        status = exc.code
+        headers = dict(exc.headers.items()) if exc.headers else {}
     except Exception:
         status = 0
     latency_ms = int((time.monotonic() - started) * 1000)
