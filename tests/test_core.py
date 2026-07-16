@@ -1,4 +1,5 @@
 from email.message import Message
+import sqlite3
 from urllib.error import HTTPError
 
 import pytest
@@ -41,6 +42,17 @@ def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     assert store.save_snapshot(site_id, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site)) > 0
     assert store.latest_care_checks()[0]["client"] == "Church Client"
     assert store.latest_dashboard()[0]["name"] == "Church"
+
+
+def test_store_rejects_orphan_check_and_snapshot_rows(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+    check = evaluate_site("Missing", "missing.example", 200, 180, 90, "6.6.1", 0, 20, {})
+    fleet_site = FleetSite("Missing", "https://missing.example", True, 90, 0, 20, 180, 3)
+
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY constraint failed"):
+        store.save_care_check(999, check)
+    with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY constraint failed"):
+        store.save_snapshot(999, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site))
 
 
 def test_normalize_site_url_deduplicates_bare_domains():

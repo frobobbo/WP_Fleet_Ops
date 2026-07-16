@@ -14,9 +14,13 @@ class FleetOpsStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
-    def _connect(self):
+    def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path)
         con.row_factory = sqlite3.Row
+        # SQLite declares foreign keys in the schema but does not enforce them
+        # unless every connection opts in. Keep checks and snapshots tied to a
+        # real site so orphan history cannot silently disappear from reports.
+        con.execute("pragma foreign_keys = on")
         return con
 
     def _init(self):
