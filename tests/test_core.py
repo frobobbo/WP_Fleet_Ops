@@ -49,6 +49,20 @@ def test_normalize_site_url_strips_client_only_fragments():
     assert normalize_site_url("https://example.com/status?view=full#summary") == "https://example.com/status?view=full"
 
 
+def test_normalize_site_url_deduplicates_root_query_paths():
+    assert normalize_site_url("https://Example.COM/?view=full") == "https://example.com?view=full"
+
+
+def test_store_deduplicates_root_query_paths(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Query Site", "https://example.com/?view=full")
+    duplicate_id = store.upsert_site("Query Site", "https://example.com?view=full")
+
+    assert duplicate_id == first_id
+    assert len(store.list_sites()) == 1
+
+
 @pytest.mark.parametrize(
     ("url", "normalized"),
     [

@@ -57,7 +57,9 @@ def normalize_site_url(url: str) -> str:
         netloc = f"{netloc}:{parsed_port}"
     # URL fragments are resolved by browsers and never sent to the monitored
     # server, so retaining one would create duplicate records for one site.
-    path = "" if parsed.path == "/" and not parsed.query else parsed.path
+    # A root path is implicit even when a query string is present. Both URL
+    # spellings produce the same HTTP request target, so persist one form.
+    path = "" if parsed.path == "/" else parsed.path
     return urlunparse((scheme, netloc, path, "", parsed.query, ""))
 
 
