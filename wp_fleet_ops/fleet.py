@@ -52,7 +52,9 @@ def generate_alerts(site: FleetSite) -> list[Alert]:
     if not site.uptime_ok:
         alerts.append(Alert(site.name, "critical", f"{site.name} appears down or unreachable."))
     if site.ssl_days < 14:
-        alerts.append(Alert(site.name, "critical" if site.ssl_days < 7 else "warning", f"SSL expires in {site.ssl_days} day(s)."))
+        # Keep the incident feed aligned with the certificate inventory and
+        # SLA APIs: seven days remaining is already inside the critical window.
+        alerts.append(Alert(site.name, "critical" if site.ssl_days <= 7 else "warning", f"SSL expires in {site.ssl_days} day(s)."))
     if site.wp_updates:
         alerts.append(Alert(site.name, "warning", f"{site.wp_updates} WordPress updates pending."))
     if site.backup_age_hours > 72:

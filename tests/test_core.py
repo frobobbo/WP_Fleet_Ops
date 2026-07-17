@@ -29,6 +29,14 @@ def test_fleet_alerts_and_report_group_operational_risk():
     assert "WP FleetOps Maintenance Report" in generate_maintenance_report([site])
 
 
+def test_fleet_alerts_treat_seven_day_certificate_as_critical():
+    site = FleetSite("Renewal", "https://renewal.example", True, 7, 0, 24, 250, 3)
+
+    certificate_alert = next(alert for alert in generate_alerts(site) if "SSL expires" in alert.message)
+
+    assert certificate_alert.severity == "critical"
+
+
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")
