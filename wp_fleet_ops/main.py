@@ -2546,6 +2546,17 @@ def fetch_care_check(name: str = Form(...), url: str = Form(...), client: str = 
     return RedirectResponse("/", status_code=303)
 
 
+def _security_headers_from_count(security_header_count: int) -> dict[str, str]:
+    """Represent count-only snapshots in care reports without losing coverage."""
+    monitored_headers = (
+        "strict-transport-security",
+        "x-frame-options",
+        "content-security-policy",
+    )
+    bounded_count = max(0, min(security_header_count, len(monitored_headers)))
+    return {header: "reported present" for header in monitored_headers[:bounded_count]}
+
+
 @app.post("/snapshot")
 def snapshot(
     name: str = Form(..., min_length=1),
@@ -2562,7 +2573,17 @@ def snapshot(
     site = FleetSite(name, url, uptime_ok, ssl_days, wp_updates, backup_age_hours, response_ms, security_header_count)
     site_id = store.upsert_site(name, url, client)
     store.save_snapshot(site_id, site, calculate_health_score(site), generate_alerts(site))
-    check = evaluate_site(name, url, 200 if uptime_ok else 0, response_ms, ssl_days, "unknown", wp_updates, backup_age_hours, {})
+    check = evaluate_site(
+        name,
+        url,
+        200 if uptime_ok else 0,
+        response_ms,
+        ssl_days,
+        "unknown",
+        wp_updates,
+        backup_age_hours,
+        _security_headers_from_count(security_header_count),
+    )
     store.save_care_check(site_id, check)
     return RedirectResponse("/", status_code=303)
 

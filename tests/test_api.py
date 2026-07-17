@@ -2489,6 +2489,27 @@ def test_manual_check_and_snapshot_share_canonical_url_handling(tmp_path):
     assert directory["sites"][0]["url"] == "https://example.com"
 
 
+def test_snapshot_report_preserves_security_header_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Secure Snapshot",
+            url="https://secure-snapshot.example",
+            security_header_count="3",
+        ),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    report = client.get("/report").text
+    assert "Secure Snapshot" in report
+    assert "Score: 100/100" in report
+    assert "Add or verify HSTS security header." not in report
+    assert "Add clickjacking protection header." not in report
+
+
 def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post("/snapshot", data=valid_snapshot_payload(ssl_days="-1"), follow_redirects=False).status_code == 422
