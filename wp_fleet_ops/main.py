@@ -8,7 +8,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from .checks import evaluate_site, fetch_basic_site_check, normalize_site_url, summarize_care_report
+from .checks import SiteCheck, evaluate_site, fetch_basic_site_check, normalize_site_url, summarize_care_report
 from .fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from .storage import FleetOpsStore
 
@@ -2569,16 +2569,21 @@ def snapshot(
 
 def _build_text_report() -> tuple[str, int, int]:
     care_checks = [
-        evaluate_site(
-            r["name"],
-            r["url"],
-            r["http_status"],
-            r["latency_ms"],
-            r["ssl_days_remaining"],
-            r["wordpress_version"],
-            r["update_count"],
-            r["backup_age_hours"],
-            {},
+        SiteCheck(
+            name=r["name"],
+            url=r["url"],
+            http_status=r["http_status"],
+            latency_ms=r["latency_ms"],
+            ssl_days_remaining=r["ssl_days_remaining"],
+            wordpress_version=r["wordpress_version"],
+            update_count=r["update_count"],
+            backup_age_hours=r["backup_age_hours"],
+            security_headers=r["security_headers"],
+            score=r["score"],
+            status=r["status"],
+            summary=r["summary"],
+            actions=r["actions"],
+            checked_at=r["checked_at"],
         )
         for r in store.latest_care_checks()
     ]

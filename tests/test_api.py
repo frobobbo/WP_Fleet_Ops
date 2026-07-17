@@ -2430,6 +2430,44 @@ def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     assert "2 WordPress updates pending" in report
 
 
+def test_report_preserves_fetched_security_header_coverage(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+
+    def fake_fetch(name, url):
+        from wp_fleet_ops.checks import evaluate_site
+
+        return evaluate_site(
+            name,
+            url,
+            200,
+            180,
+            60,
+            "6.6.2",
+            0,
+            12,
+            {
+                "Strict-Transport-Security": "max-age=31536000",
+                "Content-Security-Policy": "frame-ancestors 'self'",
+            },
+        )
+
+    import wp_fleet_ops.main as main
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fake_fetch)
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": "Secure Site", "url": "https://secure.example", "client": "Secure Client"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    report = client.get("/report").text
+    assert "Secure Site" in report
+    assert "Score: 100/100" in report
+    assert "Add or verify HSTS security header." not in report
+    assert "Add clickjacking protection header." not in report
+
+
 def test_manual_check_and_snapshot_share_canonical_url_handling(tmp_path):
     client = make_test_client(tmp_path)
 

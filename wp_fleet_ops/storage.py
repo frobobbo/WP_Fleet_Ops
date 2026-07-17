@@ -144,6 +144,7 @@ class FleetOpsStore:
             for r in con.execute(sql):
                 d = dict(r)
                 d["actions"] = json.loads(d.pop("actions_json"))
+                d["security_headers"] = json.loads(d["raw_json"]).get("security_headers", {})
                 rows.append(d)
             return rows
 
