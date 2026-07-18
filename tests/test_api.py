@@ -871,6 +871,37 @@ def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     assert payload["sites"][2]["certificate_status"] == "healthy"
 
 
+def test_api_actions_include_thirty_day_certificate_renewals(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Thirty Day Renewal",
+            url="https://thirty-day-renewal.example",
+            client="Client TLS",
+            ssl_days="30",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/actions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action_count"] == 1
+    assert payload["actions"][0] == {
+        "site": "Thirty Day Renewal",
+        "url": "https://thirty-day-renewal.example",
+        "client": "Client TLS",
+        "score": 90,
+        "severity": "warning",
+        "message": "SSL expires in 30 day(s).",
+        "recommended_action": "Renew or replace the TLS certificate before it expires.",
+        "latest_snapshot_at": payload["actions"][0]["latest_snapshot_at"],
+    }
+    assert "Plan SSL renewal: 30 day(s) remaining." in client.get("/report").text
+
+
 def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

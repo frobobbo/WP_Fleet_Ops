@@ -32,7 +32,7 @@ def calculate_health_score(site: FleetSite) -> int:
         score -= 45
     if site.ssl_days < 14:
         score -= 25
-    elif site.ssl_days < 30:
+    elif site.ssl_days <= 30:
         score -= 10
     if site.wp_updates:
         score -= min(20, site.wp_updates * 3)
@@ -55,6 +55,8 @@ def generate_alerts(site: FleetSite) -> list[Alert]:
         # Keep the incident feed aligned with the certificate inventory and
         # SLA APIs: seven days remaining is already inside the critical window.
         alerts.append(Alert(site.name, "critical" if site.ssl_days <= 7 else "warning", f"SSL expires in {site.ssl_days} day(s)."))
+    elif site.ssl_days <= 30:
+        alerts.append(Alert(site.name, "warning", f"SSL expires in {site.ssl_days} day(s)."))
     if site.wp_updates:
         alerts.append(Alert(site.name, "warning", f"{site.wp_updates} WordPress updates pending."))
     if site.backup_age_hours > 72:

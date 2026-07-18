@@ -123,7 +123,7 @@ def evaluate_site(
     if ssl_days_remaining < 14:
         score -= 25
         actions.append(f"Renew SSL certificate: only {ssl_days_remaining} day(s) remaining.")
-    elif ssl_days_remaining < 30:
+    elif ssl_days_remaining <= 30:
         score -= 10
         actions.append(f"Plan SSL renewal: {ssl_days_remaining} day(s) remaining.")
     if update_count > 0:
