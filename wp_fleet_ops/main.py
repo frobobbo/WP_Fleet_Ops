@@ -2567,7 +2567,7 @@ def snapshot(
     wp_updates: int = Form(0, ge=0),
     backup_age_hours: int = Form(24, ge=0),
     response_ms: int = Form(250, ge=0),
-    security_header_count: int = Form(3, ge=0),
+    security_header_count: int = Form(3, ge=0, le=3),
 ):
     url = normalize_site_url(url)
     site = FleetSite(name, url, uptime_ok, ssl_days, wp_updates, backup_age_hours, response_ms, security_header_count)

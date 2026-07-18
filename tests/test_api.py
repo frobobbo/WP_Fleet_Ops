@@ -2516,6 +2516,19 @@ def test_snapshot_rejects_invalid_metrics_and_urls(tmp_path):
     assert client.post("/snapshot", data=valid_snapshot_payload(url="javascript:alert(1)"), follow_redirects=False).status_code == 422
 
 
+def test_snapshot_rejects_security_header_counts_above_monitored_set(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(security_header_count="4"),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert client.get("/api/site-directory").json()["site_count"] == 0
+
+
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "https://admin:secret@example.com"])
 def test_fetch_check_rejects_unsafe_urls_before_persisting(tmp_path, url):
     client = make_test_client(tmp_path)
