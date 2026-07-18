@@ -11,6 +11,14 @@ import urllib.request
 from urllib.parse import urlparse, urlunparse
 
 
+def normalize_site_name(name: str) -> str:
+    """Return a canonical non-empty site label for persisted operational data."""
+    normalized = name.strip()
+    if not normalized:
+        raise ValueError("Site name must not be blank.")
+    return normalized
+
+
 def normalize_site_url(url: str) -> str:
     candidate = url.strip()
     error = "Site URL must be a valid HTTP or HTTPS URL."
@@ -102,6 +110,7 @@ def evaluate_site(
     backup_age_hours: int,
     security_headers: dict[str, str] | None = None,
 ) -> SiteCheck:
+    name = normalize_site_name(name)
     headers = {k.lower(): v for k, v in (security_headers or {}).items()}
     score = 100
     actions: list[str] = []
@@ -175,6 +184,7 @@ def ssl_days_remaining(url: str, timeout: int = 10) -> int:
 
 
 def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
+    name = normalize_site_name(name)
     url = normalize_site_url(url)
     parsed = urlparse(url)
     started = time.monotonic()

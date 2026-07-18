@@ -2551,3 +2551,26 @@ def test_manual_care_check_rejects_invalid_operational_metrics(tmp_path):
 
     payload = {"name": "Bad Status", "url": "https://bad.example", "http_status": "700"}
     assert client.post("/care/manual-check", data=payload, follow_redirects=False).status_code == 422
+
+
+def test_snapshot_normalizes_site_name_in_alert_payloads_and_reports(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="  Padded Site  ",
+            url="https://padded.example",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    site = client.get("/api/sites").json()["sites"][0]
+    assert site["name"] == "Padded Site"
+    assert site["alerts"][0]["site"] == "Padded Site"
+    assert site["alerts"][0]["message"] == "Padded Site appears down or unreachable."
+    report = client.get("/report").text
+    assert "Padded Site needs attention" in report
+    assert "  Padded Site  " not in report
