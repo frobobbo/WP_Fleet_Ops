@@ -70,7 +70,7 @@
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:22px}.card{padding:24px}.card-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:18px}.card h3,.table-card h3{font-size:18px;letter-spacing:-.03em;margin:0}.card p,.table-card p{color:var(--muted);line-height:1.5;margin:7px 0 0;font-size:14px}
     form{display:grid;gap:12px}.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.field{display:grid;gap:7px}.field label{color:var(--soft);font-size:12px;font-weight:560}.field.full{grid-column:1/-1}
     input{width:100%;background:rgba(255,255,255,.045);border:1px solid var(--line);border-radius:13px;color:var(--text);padding:12px 13px;font:500 14px 'Inter',system-ui;outline:none;transition:.18s ease}input:focus{border-color:rgba(139,124,255,.72);box-shadow:0 0 0 4px rgba(109,106,255,.13);background:rgba(255,255,255,.065)}input::placeholder{color:#626977}.check-field{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:13px;padding:10px 12px;color:var(--soft);font-size:13px}.check-field input{width:auto;accent-color:var(--brand)}
-    button{cursor:pointer;border:0;border-radius:13px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:white;padding:12px 15px;font-weight:650;font-size:14px;box-shadow:0 14px 34px rgba(109,106,255,.22)}
+    button{cursor:pointer;border:0;border-radius:13px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:white;padding:12px 15px;font-weight:650;font-size:14px;box-shadow:0 14px 34px rgba(109,106,255,.22)}.form-actions{display:flex;gap:10px;flex-wrap:wrap}.form-actions button{flex:1 1 180px}.form-actions .secondary{background:rgba(255,255,255,.055);border:1px solid var(--line);color:var(--soft);box-shadow:none}
     .tables{display:grid;gap:18px}.table-card{padding:0}.table-header{padding:22px 24px;border-bottom:1px solid var(--line-2);display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:920px}th{color:#808797;text-transform:uppercase;letter-spacing:.08em;font-size:11px;text-align:left;font-weight:650;background:rgba(255,255,255,.018)}td,th{padding:15px 18px;border-bottom:1px solid var(--line-2);vertical-align:top}td{color:var(--soft);font-size:13px}tbody tr:hover{background:rgba(255,255,255,.026)}.site-name{color:var(--text);font-weight:650}.score{display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace}.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 18px currentColor}.tag{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;margin:2px;color:var(--soft);background:rgba(255,255,255,.035);font-size:12px}.empty{padding:34px 24px;color:var(--muted);text-align:center}.report-link{display:flex;justify-content:flex-end;margin-top:20px}.mono{font-family:'JetBrains Mono',ui-monospace,monospace}.footer-note{color:#6f7685;font-size:12px;text-align:center;margin-top:28px}
     @media (max-width:1050px){.hero,.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:repeat(2,1fr)}}
     @media (max-width:680px){.shell{padding:20px 14px 40px}.topbar{align-items:flex-start;flex-direction:column}.hero-card{padding:28px}.metrics,.form-grid{grid-template-columns:1fr}.hero h2{font-size:42px}.table-header{flex-direction:column}.nav{justify-content:flex-start}}
@@ -141,7 +141,7 @@
 
     <section class="grid">
       <div class="card" id="care-form">
-        <div class="card-head"><div><h3>Manual care check</h3><p>Capture the numbers you want clients to see in their recurring care report.</p></div><span class="tag">CarePulse</span></div>
+        <div class="card-head"><div><h3>Care check</h3><p>Capture client-report numbers manually or run a live HTTP, TLS, and security-header check.</p></div><span class="tag">CarePulse</span></div>
         <form method="post" action="/care/manual-check">
           <div class="form-grid">
             <div class="field"><label>Site name</label><input name="name" placeholder="Strategy Plus" required></div>
@@ -154,7 +154,10 @@
             <div class="field"><label>Updates</label><input name="update_count" type="number" value="0"></div>
             <div class="field"><label>Backup age hrs</label><input name="backup_age_hours" type="number" value="24"></div>
           </div>
-          <button>Save care check</button>
+          <div class="form-actions">
+            <button type="submit">Save manual check</button>
+            <button class="secondary" type="submit" formaction="/care/fetch-check" formmethod="post">Run live check</button>
+          </div>
         </form>
       </div>
 

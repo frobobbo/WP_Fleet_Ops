@@ -2425,6 +2425,16 @@ def test_api_account_agenda_returns_bounded_weekly_service_plan(tmp_path):
 
 
 
+def test_dashboard_exposes_live_care_check_action(tmp_path):
+    client = make_test_client(tmp_path)
+
+    page = client.get("/")
+
+    assert page.status_code == 200
+    assert 'formaction="/care/fetch-check"' in page.text
+    assert "Run live check" in page.text
+
+
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
