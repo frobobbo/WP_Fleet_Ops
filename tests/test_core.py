@@ -47,6 +47,15 @@ def test_fleet_alerts_surface_thirty_day_certificate_renewals():
     assert certificate_alert.message == "SSL expires in 30 day(s)."
 
 
+def test_fleet_alerts_surface_aging_backups_before_they_become_critical():
+    site = FleetSite("Backup Watch", "https://backup-watch.example", True, 60, 0, 48, 250, 3)
+
+    backup_alert = next(alert for alert in generate_alerts(site) if "backup" in alert.message.lower())
+
+    assert backup_alert.severity == "warning"
+    assert backup_alert.message == "Latest backup is 48 hours old."
+
+
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")

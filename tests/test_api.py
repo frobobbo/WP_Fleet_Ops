@@ -613,6 +613,30 @@ def test_api_backups_highlights_stale_backup_queue(tmp_path):
     assert payload["sites"][2]["backup_status"] == "fresh"
 
 
+def test_api_actions_surfaces_aging_backup_warning(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Backup Watch",
+            url="https://backup-watch.example",
+            client="Client Backup",
+            backup_age_hours="48",
+        ),
+        follow_redirects=False,
+    )
+
+    payload = client.get("/api/actions").json()
+
+    assert payload["action_count"] == 1
+    assert payload["actions"][0]["site"] == "Backup Watch"
+    assert payload["actions"][0]["severity"] == "warning"
+    assert payload["actions"][0]["message"] == "Latest backup is 48 hours old."
+    assert payload["actions"][0]["recommended_action"] == (
+        "Run and verify a fresh backup, then confirm backup scheduling."
+    )
+
+
 def test_api_backup_remediation_groups_stale_backup_work_by_client(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -61,6 +61,8 @@ def generate_alerts(site: FleetSite) -> list[Alert]:
         alerts.append(Alert(site.name, "warning", f"{site.wp_updates} WordPress updates pending."))
     if site.backup_age_hours > 72:
         alerts.append(Alert(site.name, "critical", f"Latest backup is {site.backup_age_hours} hours old."))
+    elif site.backup_age_hours > 36:
+        alerts.append(Alert(site.name, "warning", f"Latest backup is {site.backup_age_hours} hours old."))
     if site.response_ms > 1500:
         alerts.append(Alert(site.name, "warning", f"Homepage response time is {site.response_ms} ms."))
     if site.security_header_count < 2:
