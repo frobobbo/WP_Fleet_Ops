@@ -88,13 +88,17 @@ def api_summary():
     fleet_rows = store.latest_dashboard()
     care_checks = store.latest_care_checks()
     sites = store.list_sites()
+    monitored_urls = {row["url"] for row in fleet_rows}
+    monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
+    missing_snapshot_count = len(sites) - monitored_site_count
+    monitoring_coverage_percent = round((monitored_site_count / len(sites)) * 100) if sites else 100
     score_total = sum(row["score"] or 0 for row in fleet_rows)
     critical_alerts = sum(1 for row in fleet_rows for alert in row["alerts"] if alert.get("severity") == "critical")
     last_snapshot_at = max((row["captured_at"] for row in fleet_rows if row.get("captured_at")), default=None)
     average_score = round(score_total / len(fleet_rows)) if fleet_rows else 100
     if critical_alerts or average_score < 65:
         overall_status = "red"
-    elif average_score < 85:
+    elif missing_snapshot_count or average_score < 85:
         overall_status = "yellow"
     else:
         overall_status = "green"
@@ -103,6 +107,9 @@ def api_summary():
         "overall_status": overall_status,
         "sites": len(sites),
         "fleet_snapshots": len(fleet_rows),
+        "monitored_site_count": monitored_site_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "monitoring_coverage_percent": monitoring_coverage_percent,
         "care_checks": len(care_checks),
         "healthy_sites": sum(1 for row in fleet_rows if row["score"] >= 85),
         "needs_attention": sum(1 for row in fleet_rows if row["score"] < 70),

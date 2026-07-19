@@ -135,6 +135,30 @@ def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow
     assert summary["overall_status"] == "red"
 
 
+def test_api_summary_warns_when_tracked_sites_lack_snapshots(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Monitored Site", url="https://monitored.example"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={"name": "Unmonitored Site", "url": "https://unmonitored.example"},
+        follow_redirects=False,
+    )
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["sites"] == 2
+    assert summary["fleet_snapshots"] == 1
+    assert summary["monitored_site_count"] == 1
+    assert summary["missing_snapshot_count"] == 1
+    assert summary["monitoring_coverage_percent"] == 50
+    assert summary["average_score"] == 100
+    assert summary["overall_status"] == "yellow"
+
+
 def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
