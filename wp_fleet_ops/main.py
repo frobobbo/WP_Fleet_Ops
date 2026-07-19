@@ -1690,7 +1690,10 @@ def _site_scorecard_next_action(row: dict) -> str:
     if not row["alerts"]:
         return "Continue normal maintenance cadence."
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
-    top_alert = min(row["alerts"], key=lambda alert: (severity_rank.get(alert.get("severity", "info"), 99), alert.get("message", "")))
+    top_alert = min(
+        enumerate(row["alerts"]),
+        key=lambda item: (severity_rank.get(item[1].get("severity", "info"), 99), item[0]),
+    )[1]
     return _recommended_action(top_alert)
 
 

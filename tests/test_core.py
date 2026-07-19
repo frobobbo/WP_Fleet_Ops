@@ -56,6 +56,17 @@ def test_fleet_alerts_surface_aging_backups_before_they_become_critical():
     assert backup_alert.message == "Latest backup is 48 hours old."
 
 
+def test_fleet_alerts_escalate_critical_update_backlogs():
+    critical_site = FleetSite("Critical Updates", "https://critical-updates.example", True, 60, 5, 24, 250, 3)
+    warning_site = FleetSite("Routine Updates", "https://routine-updates.example", True, 60, 4, 24, 250, 3)
+
+    critical_alert = next(alert for alert in generate_alerts(critical_site) if "updates pending" in alert.message)
+    warning_alert = next(alert for alert in generate_alerts(warning_site) if "updates pending" in alert.message)
+
+    assert critical_alert.severity == "critical"
+    assert warning_alert.severity == "warning"
+
+
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")

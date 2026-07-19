@@ -58,7 +58,10 @@ def generate_alerts(site: FleetSite) -> list[Alert]:
     elif site.ssl_days <= 30:
         alerts.append(Alert(site.name, "warning", f"SSL expires in {site.ssl_days} day(s)."))
     if site.wp_updates:
-        alerts.append(Alert(site.name, "warning", f"{site.wp_updates} WordPress updates pending."))
+        # Keep alert routing aligned with the update inventory and maintenance
+        # APIs, which classify five or more pending updates as critical work.
+        severity = "critical" if site.wp_updates >= 5 else "warning"
+        alerts.append(Alert(site.name, severity, f"{site.wp_updates} WordPress updates pending."))
     if site.backup_age_hours > 72:
         alerts.append(Alert(site.name, "critical", f"Latest backup is {site.backup_age_hours} hours old."))
     elif site.backup_age_hours > 36:
