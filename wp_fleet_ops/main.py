@@ -42,6 +42,30 @@ app = FastAPI(title="WP FleetOps", version="0.1.0")
 templates = Jinja2Templates(directory=str(template_dir()))
 store = FleetOpsStore(DB_PATH)
 
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'none'; "
+    "img-src 'self' data: https://fastapi.tiangolo.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
+    "script-src 'self' https://cdn.jsdelivr.net; "
+    "connect-src 'self'"
+)
+
+
+@app.middleware("http")
+async def add_browser_security_headers(request: Request, call_next):
+    """Apply baseline browser protections to dashboard and API responses."""
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
 
 @app.exception_handler(ValueError)
 async def invalid_input_error(_request: Request, exc: ValueError):

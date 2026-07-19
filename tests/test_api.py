@@ -43,6 +43,20 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_responses_include_browser_security_headers(tmp_path):
+    client = make_test_client(tmp_path)
+
+    for path in ("/", "/api/summary"):
+        response = client.get(path)
+
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert response.headers["x-frame-options"] == "DENY"
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
+        assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+        assert "form-action 'self'" in response.headers["content-security-policy"]
+
+
 def test_api_report_returns_structured_report_export(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
