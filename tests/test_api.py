@@ -223,6 +223,26 @@ def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     assert sites[0]["score"] < sites[1]["score"]
     assert sites[0]["critical_alerts"] >= 1
     assert sites[0]["latest_snapshot_at"]
+    assert sites[0]["snapshot_freshness"] == "current"
+    assert sites[0]["snapshot_age_hours"] >= 0
+
+
+def test_api_sites_marks_old_snapshots_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Stale Site", url="https://stale-site.example"),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    site = client.get("/api/sites").json()["sites"][0]
+
+    assert site["name"] == "Stale Site"
+    assert site["status"] == "green"
+    assert site["snapshot_freshness"] == "stale"
+    assert site["snapshot_age_hours"] > 168
 
 
 def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):

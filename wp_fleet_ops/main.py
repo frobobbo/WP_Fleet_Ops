@@ -106,13 +106,28 @@ def _parse_captured_at(value: str | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _snapshot_is_current(captured_at: str | None, now: datetime, threshold_hours: int) -> bool:
-    """Return whether a snapshot timestamp is valid and inside its freshness window."""
+def _snapshot_freshness(
+    captured_at: str | None,
+    now: datetime,
+    threshold_hours: int,
+) -> tuple[str, float | None]:
+    """Return a freshness label and age for a persisted snapshot timestamp."""
     captured_dt = _parse_captured_at(captured_at)
     if captured_dt is None:
-        return False
-    age_hours = (now - captured_dt).total_seconds() / 3600
-    return 0 <= age_hours <= threshold_hours
+        return "invalid", None
+    raw_age_hours = (now - captured_dt).total_seconds() / 3600
+    age_hours = round(raw_age_hours, 1)
+    if raw_age_hours < 0:
+        return "clock_skew", age_hours
+    if raw_age_hours > threshold_hours:
+        return "stale", age_hours
+    return "current", age_hours
+
+
+def _snapshot_is_current(captured_at: str | None, now: datetime, threshold_hours: int) -> bool:
+    """Return whether a snapshot timestamp is valid and inside its freshness window."""
+    freshness, _ = _snapshot_freshness(captured_at, now, threshold_hours)
+    return freshness == "current"
 
 
 def _recommended_action(alert: dict) -> str:
@@ -186,8 +201,15 @@ def api_summary():
 @app.get("/api/sites")
 def api_sites():
     """Return latest per-site operational status, sorted by riskiest site first."""
-    return {
-        "sites": [
+    now = datetime.now(timezone.utc)
+    sites = []
+    for row in store.latest_dashboard():
+        freshness, age_hours = _snapshot_freshness(
+            row.get("captured_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+        sites.append(
             {
                 "name": row["name"],
                 "url": row["url"],
@@ -195,11 +217,16 @@ def api_sites():
                 "score": row["score"],
                 "status": _dashboard_status(row["score"]),
                 "latest_snapshot_at": row["captured_at"],
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
                 "critical_alerts": sum(1 for alert in row["alerts"] if alert.get("severity") == "critical"),
                 "alerts": row["alerts"],
             }
-            for row in store.latest_dashboard()
-        ]
+        )
+    return {
+        "generated_at": now.isoformat(),
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "sites": sites,
     }
 
 
