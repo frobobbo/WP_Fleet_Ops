@@ -40,7 +40,9 @@ def calculate_health_score(site: FleetSite) -> int:
         score -= 20
     elif site.backup_age_hours > 36:
         score -= 8
-    if site.response_ms > 1500:
+    # Match CarePulse scoring so one snapshot cannot be healthy in FleetOps
+    # while the paired care check already asks for performance remediation.
+    if site.response_ms > 1200:
         score -= 10
     if site.security_header_count < 2:
         score -= 6
@@ -66,7 +68,7 @@ def generate_alerts(site: FleetSite) -> list[Alert]:
         alerts.append(Alert(site.name, "critical", f"Latest backup is {site.backup_age_hours} hours old."))
     elif site.backup_age_hours > 36:
         alerts.append(Alert(site.name, "warning", f"Latest backup is {site.backup_age_hours} hours old."))
-    if site.response_ms > 1500:
+    if site.response_ms > 1200:
         alerts.append(Alert(site.name, "warning", f"Homepage response time is {site.response_ms} ms."))
     if site.security_header_count < 2:
         alerts.append(Alert(site.name, "info", "Security headers need review."))

@@ -67,6 +67,28 @@ def test_fleet_alerts_escalate_critical_update_backlogs():
     assert warning_alert.severity == "warning"
 
 
+def test_fleet_performance_threshold_matches_care_checks():
+    care_check = evaluate_site(
+        "Performance Watch",
+        "https://performance-watch.example",
+        200,
+        1201,
+        60,
+        "6.6",
+        0,
+        24,
+        {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"},
+    )
+    fleet_site = FleetSite("Performance Watch", care_check.url, True, 60, 0, 24, 1201, 3)
+
+    performance_alert = next(alert for alert in generate_alerts(fleet_site) if "response time" in alert.message.lower())
+
+    assert any("Improve performance" in action for action in care_check.actions)
+    assert calculate_health_score(fleet_site) == care_check.score == 90
+    assert performance_alert.severity == "warning"
+    assert performance_alert.message == "Homepage response time is 1201 ms."
+
+
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")
