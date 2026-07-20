@@ -2033,6 +2033,35 @@ def test_api_operations_kpis_returns_management_rollup(tmp_path):
     assert payload["recommended_focus"] == "Confirm site availability, hosting status, and recent deploys."
 
 
+def test_api_operations_kpis_warns_about_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Stale KPI Site", url="https://stale-kpi.example"),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={"name": "Missing KPI Site", "url": "https://missing-kpi.example"},
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/operations-kpis")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 2
+    assert payload["monitored_site_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    assert payload["monitoring_coverage_percent"] == 50
+    assert payload["snapshot_freshness_percent"] == 0
+    assert payload["recommended_focus"] == "Capture initial fleet snapshots for unmonitored sites."
+
+
 def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
