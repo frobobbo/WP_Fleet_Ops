@@ -53,6 +53,7 @@ CONTENT_SECURITY_POLICY = (
     "script-src 'self' https://cdn.jsdelivr.net; "
     "connect-src 'self'"
 )
+SNAPSHOT_FRESHNESS_HOURS = 168
 
 
 @app.middleware("http")
@@ -88,6 +89,32 @@ def _dashboard_status(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
 
+def _parse_captured_at(value: str | None) -> datetime | None:
+    """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _snapshot_is_current(captured_at: str | None, now: datetime, threshold_hours: int) -> bool:
+    """Return whether a snapshot timestamp is valid and inside its freshness window."""
+    captured_dt = _parse_captured_at(captured_at)
+    if captured_dt is None:
+        return False
+    age_hours = (now - captured_dt).total_seconds() / 3600
+    return 0 <= age_hours <= threshold_hours
+
+
 def _recommended_action(alert: dict) -> str:
     """Translate an alert into a concise operator next step."""
     message = (alert.get("message") or "").lower()
@@ -109,6 +136,7 @@ def _recommended_action(alert: dict) -> str:
 @app.get("/api/summary")
 def api_summary():
     """Return compact dashboard rollups for automation and lightweight checks."""
+    now = datetime.now(timezone.utc)
     fleet_rows = store.latest_dashboard()
     care_checks = store.latest_care_checks()
     sites = store.list_sites()
@@ -116,24 +144,35 @@ def api_summary():
     monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
     missing_snapshot_count = len(sites) - monitored_site_count
     monitoring_coverage_percent = round((monitored_site_count / len(sites)) * 100) if sites else 100
+    current_snapshot_count = sum(
+        1
+        for row in fleet_rows
+        if _snapshot_is_current(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+    )
+    stale_snapshot_count = len(fleet_rows) - current_snapshot_count
+    snapshot_freshness_percent = round((current_snapshot_count / len(sites)) * 100) if sites else 100
     score_total = sum(row["score"] or 0 for row in fleet_rows)
     critical_alerts = sum(1 for row in fleet_rows for alert in row["alerts"] if alert.get("severity") == "critical")
     last_snapshot_at = max((row["captured_at"] for row in fleet_rows if row.get("captured_at")), default=None)
     average_score = round(score_total / len(fleet_rows)) if fleet_rows else 100
     if critical_alerts or average_score < 65:
         overall_status = "red"
-    elif missing_snapshot_count or average_score < 85:
+    elif missing_snapshot_count or stale_snapshot_count or average_score < 85:
         overall_status = "yellow"
     else:
         overall_status = "green"
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "overall_status": overall_status,
         "sites": len(sites),
         "fleet_snapshots": len(fleet_rows),
         "monitored_site_count": monitored_site_count,
         "missing_snapshot_count": missing_snapshot_count,
         "monitoring_coverage_percent": monitoring_coverage_percent,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "current_snapshot_count": current_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "snapshot_freshness_percent": snapshot_freshness_percent,
         "care_checks": len(care_checks),
         "healthy_sites": sum(1 for row in fleet_rows if row["score"] >= 85),
         "needs_attention": sum(1 for row in fleet_rows if row["score"] < 70),
@@ -1425,25 +1464,8 @@ def api_client_escalations():
     }
 
 
-def _parse_captured_at(value: str | None) -> datetime | None:
-    """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
-    if not value:
-        return None
-    normalized = value.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        try:
-            parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
 @app.get("/api/stale-snapshots")
-def api_stale_snapshots(threshold_hours: int = 168):
+def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
     """Return sites whose latest fleet snapshot is missing or older than the threshold."""
     threshold_hours = max(threshold_hours, 1)
     now = datetime.now(timezone.utc)

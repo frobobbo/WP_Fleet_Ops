@@ -173,6 +173,26 @@ def test_api_summary_warns_when_tracked_sites_lack_snapshots(tmp_path):
     assert summary["overall_status"] == "yellow"
 
 
+def test_api_summary_warns_when_healthy_snapshot_is_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Stale Healthy Site", url="https://stale-healthy.example"),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["average_score"] == 100
+    assert summary["missing_snapshot_count"] == 0
+    assert summary["stale_snapshot_count"] == 1
+    assert summary["current_snapshot_count"] == 0
+    assert summary["snapshot_freshness_percent"] == 0
+    assert summary["overall_status"] == "yellow"
+
+
 def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
