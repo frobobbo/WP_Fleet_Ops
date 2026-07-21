@@ -233,12 +233,30 @@ def api_sites():
 @app.get("/api/site-directory")
 def api_site_directory():
     """Return every tracked site, including sites not yet covered by a snapshot."""
+    now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     sites = []
     for site in store.list_sites():
         latest = latest_by_url.get(site["url"])
         if latest:
             score = latest["score"]
+            freshness, age_hours = _snapshot_freshness(
+                latest.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if freshness == "stale":
+                recommended_action = "Capture a fresh fleet snapshot and verify site health."
+            elif freshness == "clock_skew":
+                recommended_action = "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
+            elif freshness == "invalid":
+                recommended_action = "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
+            else:
+                recommended_action = (
+                    "Continue normal monitoring cadence."
+                    if score >= 85
+                    else "Review the latest snapshot and open remediation tasks."
+                )
             sites.append(
                 {
                     "name": site["name"],
@@ -248,9 +266,9 @@ def api_site_directory():
                     "score": score,
                     "status": _dashboard_status(score),
                     "latest_snapshot_at": latest["captured_at"],
-                    "recommended_action": "Continue normal monitoring cadence."
-                    if score >= 85
-                    else "Review the latest snapshot and open remediation tasks.",
+                    "snapshot_freshness": freshness,
+                    "snapshot_age_hours": age_hours,
+                    "recommended_action": recommended_action,
                 }
             )
         else:
@@ -263,15 +281,22 @@ def api_site_directory():
                     "score": None,
                     "status": "unknown",
                     "latest_snapshot_at": None,
+                    "snapshot_freshness": "missing",
+                    "snapshot_age_hours": None,
                     "recommended_action": "Capture an initial fleet snapshot for this site.",
                 }
             )
     sites.sort(key=lambda row: (row["monitoring_status"] != "missing_snapshot", row["client"], row["name"]))
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
         "monitored_count": sum(1 for site in sites if site["monitoring_status"] == "monitored"),
         "missing_snapshot_count": sum(1 for site in sites if site["monitoring_status"] == "missing_snapshot"),
+        "current_snapshot_count": sum(1 for site in sites if site["snapshot_freshness"] == "current"),
+        "stale_snapshot_count": sum(
+            1 for site in sites if site["snapshot_freshness"] in {"stale", "clock_skew", "invalid"}
+        ),
         "sites": sites,
     }
 

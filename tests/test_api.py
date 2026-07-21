@@ -311,6 +311,30 @@ def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):
     assert tracked["latest_snapshot_at"]
 
 
+def test_api_site_directory_surfaces_stale_snapshot_freshness(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Stale Directory Site", url="https://stale-directory.example"),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/site-directory").json()
+
+    assert payload["site_count"] == 1
+    assert payload["snapshot_freshness_threshold_hours"] == 168
+    assert payload["current_snapshot_count"] == 0
+    assert payload["stale_snapshot_count"] == 1
+    site = payload["sites"][0]
+    assert site["name"] == "Stale Directory Site"
+    assert site["monitoring_status"] == "monitored"
+    assert site["snapshot_freshness"] == "stale"
+    assert site["snapshot_age_hours"] > 168
+    assert site["recommended_action"] == "Capture a fresh fleet snapshot and verify site health."
+
+
 def test_api_clients_rolls_up_account_health(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
