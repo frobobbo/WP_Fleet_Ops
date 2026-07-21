@@ -102,7 +102,15 @@
         <div><h1>WP FleetOps</h1><span>WordPress care command center</span></div>
       </a>
       <nav class="nav">
-        <span class="pill"><span class="dot green"></span> Live monitor</span>
+        {% if fleet_summary.critical_alerts %}
+        <span class="pill"><span class="dot red"></span> {{ fleet_summary.critical_alerts }} critical alert{{ '' if fleet_summary.critical_alerts == 1 else 's' }}</span>
+        {% elif fleet_summary.missing_snapshot_count %}
+        <span class="pill"><span class="dot yellow"></span> {{ fleet_summary.missing_snapshot_count }} missing snapshot{{ '' if fleet_summary.missing_snapshot_count == 1 else 's' }}</span>
+        {% elif fleet_summary.stale_snapshot_count %}
+        <span class="pill"><span class="dot yellow"></span> {{ fleet_summary.stale_snapshot_count }} stale snapshot{{ '' if fleet_summary.stale_snapshot_count == 1 else 's' }}</span>
+        {% else %}
+        <span class="pill"><span class="dot green"></span> Monitoring current</span>
+        {% endif %}
         <a class="pill" href="#fleet">Fleet</a>
         <a class="pill" href="#care">Care checks</a>
         <a class="btn primary" href="/report">View report</a>

@@ -227,6 +227,22 @@ def test_api_summary_warns_when_healthy_snapshot_is_stale(tmp_path):
     assert summary["overall_status"] == "yellow"
 
 
+def test_dashboard_replaces_live_monitor_label_when_snapshot_is_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Stale Dashboard Site", url="https://stale-dashboard.example"),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    page = client.get("/").text
+
+    assert "Live monitor" not in page
+    assert "1 stale snapshot" in page
+
+
 def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

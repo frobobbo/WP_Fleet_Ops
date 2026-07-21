@@ -2623,7 +2623,12 @@ def index(request: Request):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"fleet_rows": store.latest_dashboard(), "care_checks": store.latest_care_checks(), "sites": store.list_sites()},
+        {
+            "fleet_rows": store.latest_dashboard(),
+            "care_checks": store.latest_care_checks(),
+            "sites": store.list_sites(),
+            "fleet_summary": api_summary(),
+        },
     )
 
 
