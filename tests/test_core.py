@@ -89,6 +89,31 @@ def test_fleet_performance_threshold_matches_care_checks():
     assert performance_alert.message == "Homepage response time is 1201 ms."
 
 
+@pytest.mark.parametrize(
+    ("security_header_count", "security_headers", "expected_score"),
+    [
+        (0, {}, 92),
+        (1, {"strict-transport-security": "max-age=1"}, 96),
+        (2, {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"}, 100),
+    ],
+)
+def test_fleet_security_score_matches_care_checks(security_header_count, security_headers, expected_score):
+    care_check = evaluate_site(
+        "Security Coverage",
+        "https://security-coverage.example",
+        200,
+        250,
+        60,
+        "6.6",
+        0,
+        24,
+        security_headers,
+    )
+    fleet_site = FleetSite("Security Coverage", care_check.url, True, 60, 0, 24, 250, security_header_count)
+
+    assert calculate_health_score(fleet_site) == care_check.score == expected_score
+
+
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")

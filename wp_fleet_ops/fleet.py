@@ -44,8 +44,13 @@ def calculate_health_score(site: FleetSite) -> int:
     # while the paired care check already asks for performance remediation.
     if site.response_ms > 1200:
         score -= 10
-    if site.security_header_count < 2:
-        score -= 6
+    if site.security_header_count == 0:
+        # CarePulse deducts four points for missing HSTS and four for missing
+        # clickjacking protection. Match that breakdown so the dashboard and
+        # paired care report assign the same score to count-only snapshots.
+        score -= 8
+    elif site.security_header_count == 1:
+        score -= 4
     return max(0, min(100, score))
 
 
