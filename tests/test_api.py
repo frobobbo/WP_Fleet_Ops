@@ -149,6 +149,40 @@ def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow
     assert summary["overall_status"] == "red"
 
 
+def test_score_between_65_and_69_is_consistently_warning_not_critical(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Warning Threshold Site",
+            url="https://warning-threshold.example",
+            client="Client Warning Threshold",
+            ssl_days="20",
+            wp_updates="2",
+            backup_age_hours="48",
+            response_ms="1300",
+        ),
+        follow_redirects=False,
+    )
+
+    summary = client.get("/api/summary").json()
+    site = client.get("/api/sites").json()["sites"][0]
+    client_row = client.get("/api/clients").json()["clients"][0]
+    watch = client.get("/api/site-watchlist").json()["sites"][0]
+    scorecard = client.get("/api/site-scorecards").json()["sites"][0]
+    page = client.get("/").text
+
+    assert summary["average_score"] == 66
+    assert summary["overall_status"] == "yellow"
+    assert summary["needs_attention"] == 0
+    assert site["status"] == "yellow"
+    assert client_row["status"] == "yellow"
+    assert client_row["needs_attention"] == 0
+    assert watch["watch_status"] == "warning"
+    assert scorecard["status"] == "warning"
+    assert "below 65 score" in page
+
+
 def test_api_summary_warns_when_tracked_sites_lack_snapshots(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -190,7 +190,7 @@ def api_summary():
         "snapshot_freshness_percent": snapshot_freshness_percent,
         "care_checks": len(care_checks),
         "healthy_sites": sum(1 for row in fleet_rows if row["score"] >= 85),
-        "needs_attention": sum(1 for row in fleet_rows if row["score"] < 70),
+        "needs_attention": sum(1 for row in fleet_rows if _dashboard_status(row["score"]) == "red"),
         "client_risks": sum(1 for check in care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,
@@ -297,7 +297,7 @@ def api_clients():
         summary["site_count"] += 1
         summary["score_total"] += row["score"] or 0
         summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
-        summary["needs_attention"] += 1 if row["score"] < 70 else 0
+        summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
         summary["critical_alerts"] += sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
         captured_at = row.get("captured_at")
         if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
@@ -448,7 +448,7 @@ def _site_watchlist_rows() -> list[dict]:
         if row["score"] >= 85 and not alerts:
             continue
         top_alert = min(alerts, key=lambda alert: severity_rank.get(alert.get("severity", "info"), 99)) if alerts else None
-        watch_status = "critical" if row["score"] < 70 else "warning"
+        watch_status = "critical" if _dashboard_status(row["score"]) == "red" else "warning"
         if top_alert and top_alert.get("severity") == "critical":
             watch_status = "critical"
         sites.append(
@@ -1727,7 +1727,7 @@ def api_operator_handoff():
 
 def _site_scorecard_status(row: dict, badges: dict[str, str]) -> str:
     """Return a concise status for a site scorecard row."""
-    if not row["uptime_ok"] or any(value == "critical" for value in badges.values()) or row["score"] < 70:
+    if not row["uptime_ok"] or any(value == "critical" for value in badges.values()) or _dashboard_status(row["score"]) == "red":
         return "critical"
     if row["score"] < 85 or any(value in {"warning", "slow"} for value in badges.values()):
         return "warning"
