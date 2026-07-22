@@ -303,40 +303,81 @@ def api_site_directory():
 
 @app.get("/api/clients")
 def api_clients():
-    """Return account-level health rollups for client review and automation."""
+    """Return account-level health and monitoring coverage rollups."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     client_rows: dict[str, dict] = {}
-    for row in store.latest_dashboard():
-        client_name = row.get("client") or "Unassigned"
+    for site in store.list_sites():
+        client_name = site.get("client") or "Unassigned"
         summary = client_rows.setdefault(
             client_name,
             {
                 "client": client_name,
                 "site_count": 0,
+                "monitored_site_count": 0,
+                "current_snapshot_count": 0,
+                "missing_snapshot_count": 0,
+                "stale_snapshot_count": 0,
                 "score_total": 0,
                 "healthy_sites": 0,
                 "needs_attention": 0,
                 "critical_alerts": 0,
                 "latest_snapshot_at": None,
+                "_latest_snapshot_dt": None,
             },
         )
         summary["site_count"] += 1
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            summary["missing_snapshot_count"] += 1
+            continue
+
+        summary["monitored_site_count"] += 1
         summary["score_total"] += row["score"] or 0
         summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
         summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
         summary["critical_alerts"] += sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
-        captured_at = row.get("captured_at")
-        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
-            summary["latest_snapshot_at"] = captured_at
+        freshness, _ = _snapshot_freshness(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+        if freshness == "current":
+            summary["current_snapshot_count"] += 1
+        else:
+            summary["stale_snapshot_count"] += 1
+        captured_dt = _parse_captured_at(row.get("captured_at"))
+        if captured_dt and (summary["_latest_snapshot_dt"] is None or captured_dt > summary["_latest_snapshot_dt"]):
+            summary["_latest_snapshot_dt"] = captured_dt
+            summary["latest_snapshot_at"] = row["captured_at"]
 
     clients = []
     for summary in client_rows.values():
-        average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
+        monitored_site_count = summary["monitored_site_count"]
+        average_score = round(summary.pop("score_total") / monitored_site_count) if monitored_site_count else 100
+        summary.pop("_latest_snapshot_dt")
         summary["average_score"] = average_score
-        summary["status"] = "red" if summary["critical_alerts"] else _dashboard_status(average_score)
+        summary["monitoring_coverage_percent"] = round(
+            (monitored_site_count / summary["site_count"]) * 100
+        ) if summary["site_count"] else 100
+        summary["snapshot_freshness_percent"] = round(
+            (summary["current_snapshot_count"] / summary["site_count"]) * 100
+        ) if summary["site_count"] else 100
+        monitoring_gap_count = summary["missing_snapshot_count"] + summary["stale_snapshot_count"]
+        if summary["critical_alerts"] or average_score < 65:
+            summary["status"] = "red"
+        elif monitoring_gap_count or average_score < 85:
+            summary["status"] = "yellow"
+        else:
+            summary["status"] = "green"
         clients.append(summary)
 
-    clients.sort(key=lambda row: (row["status"] != "red", row["average_score"], row["client"].lower()))
-    return {"clients": clients}
+    status_rank = {"red": 0, "yellow": 1, "green": 2}
+    clients.sort(key=lambda row: (status_rank[row["status"]], row["average_score"], row["client"].lower()))
+    return {
+        "generated_at": now.isoformat(),
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "client_count": len(clients),
+        "missing_snapshot_count": sum(client["missing_snapshot_count"] for client in clients),
+        "stale_snapshot_count": sum(client["stale_snapshot_count"] for client in clients),
+        "clients": clients,
+    }
 
 
 def _sla_breaches(row: dict) -> list[dict]:

@@ -392,6 +392,45 @@ def test_api_clients_rolls_up_account_health(tmp_path):
     assert clients[1]["site_count"] == 1
 
 
+def test_api_clients_warns_about_account_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Client Site",
+            url="https://stale-client.example",
+            client="Client Monitoring Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Client Site",
+            "url": "https://missing-client.example",
+            "client": "Client Monitoring Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/clients").json()
+
+    assert payload["client_count"] == 1
+    account = payload["clients"][0]
+    assert account["client"] == "Client Monitoring Gap"
+    assert account["site_count"] == 2
+    assert account["monitored_site_count"] == 1
+    assert account["missing_snapshot_count"] == 1
+    assert account["current_snapshot_count"] == 0
+    assert account["stale_snapshot_count"] == 1
+    assert account["monitoring_coverage_percent"] == 50
+    assert account["snapshot_freshness_percent"] == 0
+    assert account["average_score"] == 100
+    assert account["status"] == "yellow"
+
+
 def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
