@@ -1518,7 +1518,7 @@ def api_client_escalations():
 
 @app.get("/api/stale-snapshots")
 def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
-    """Return sites whose latest fleet snapshot is missing or older than the threshold."""
+    """Return sites whose latest fleet snapshot is missing, invalid, or stale."""
     threshold_hours = max(threshold_hours, 1)
     now = datetime.now(timezone.utc)
     all_sites = store.list_sites()
@@ -1527,17 +1527,18 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
     for site in all_sites:
         row = latest_by_url.get(site["url"])
         captured_at = row.get("captured_at") if row else None
-        captured_dt = _parse_captured_at(captured_at)
-        age_hours = round((now - captured_dt).total_seconds() / 3600, 1) if captured_dt else None
-        has_clock_skew = age_hours is not None and age_hours < 0
-        if age_hours is not None and not has_clock_skew and age_hours <= threshold_hours:
+        freshness, age_hours = _snapshot_freshness(captured_at, now, threshold_hours)
+        if row is not None and freshness == "current":
             continue
         if row is None:
             staleness_status = "missing"
             recommended_action = "Capture a fresh fleet snapshot and verify site health."
-        elif has_clock_skew:
+        elif freshness == "clock_skew":
             staleness_status = "clock_skew"
             recommended_action = "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
+        elif freshness == "invalid":
+            staleness_status = "invalid"
+            recommended_action = "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
         else:
             staleness_status = "stale"
             recommended_action = "Capture a fresh fleet snapshot and verify site health."
@@ -1553,7 +1554,7 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
             }
         )
 
-    status_rank = {"missing": 0, "clock_skew": 1, "stale": 2}
+    status_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3}
     sites.sort(
         key=lambda site: (
             status_rank.get(site["staleness_status"], 99),
@@ -1569,6 +1570,7 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
         "site_count": len(all_sites),
         "stale_count": len(sites),
         "missing_snapshot_count": sum(1 for site in sites if site["staleness_status"] == "missing"),
+        "invalid_timestamp_count": sum(1 for site in sites if site["staleness_status"] == "invalid"),
         "clock_skew_count": sum(1 for site in sites if site["staleness_status"] == "clock_skew"),
         "current_snapshot_count": current_snapshot_count,
         "snapshot_coverage_percent": round((current_snapshot_count / len(all_sites)) * 100) if all_sites else 100,

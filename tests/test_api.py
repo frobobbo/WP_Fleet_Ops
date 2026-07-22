@@ -1623,6 +1623,29 @@ def test_api_stale_snapshots_flags_future_timestamps_as_clock_skew(tmp_path):
     assert site["recommended_action"] == "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
 
 
+def test_api_stale_snapshots_flags_invalid_timestamps_for_repair(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Invalid Snapshot", url="https://invalid-snapshot.example", client="Client Invalid"),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at=?", ("not-a-timestamp",))
+
+    payload = client.get("/api/stale-snapshots").json()
+
+    assert payload["stale_count"] == 1
+    assert payload["current_snapshot_count"] == 0
+    assert payload["invalid_timestamp_count"] == 1
+    assert payload["snapshot_coverage_percent"] == 0
+    site = payload["sites"][0]
+    assert site["name"] == "Invalid Snapshot"
+    assert site["staleness_status"] == "invalid"
+    assert site["snapshot_age_hours"] is None
+    assert site["recommended_action"] == "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
+
+
 def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
