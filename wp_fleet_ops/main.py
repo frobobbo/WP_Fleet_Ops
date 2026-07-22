@@ -2296,58 +2296,89 @@ def _client_update_brief_rows() -> list[dict]:
     for action in _current_actions():
         actions_by_client.setdefault(action.get("client") or "Unassigned", []).append(action)
 
-    clients: dict[str, dict] = {}
-    for row in store.latest_dashboard():
-        client_name = row.get("client") or "Unassigned"
-        summary = clients.setdefault(
-            client_name,
-            {
-                "client": client_name,
-                "site_count": 0,
-                "score_total": 0,
-                "healthy_site_count": 0,
-                "latest_snapshot_at": None,
-            },
-        )
-        summary["site_count"] += 1
-        summary["score_total"] += row["score"] or 0
-        summary["healthy_site_count"] += 1 if row["score"] >= 85 else 0
-        captured_at = row.get("captured_at")
-        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
-            summary["latest_snapshot_at"] = captured_at
-
     briefs = []
-    for client_name, summary in clients.items():
+    for digest in api_client_digest()["clients"]:
+        client_name = digest["client"]
         actions = actions_by_client.get(client_name, [])
         immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
         scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
-        average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
-        status = _client_digest_status(len(immediate_actions), len(scheduled_actions), average_score)
+        monitoring_gap_count = digest["missing_snapshot_count"] + digest["stale_snapshot_count"]
+        healthy_site_count = sum(
+            1
+            for site in digest["sites"]
+            if site["snapshot_freshness"] == "current"
+            and site["score"] is not None
+            and site["score"] >= 85
+        )
+        status = _client_digest_status(
+            len(immediate_actions),
+            len(scheduled_actions),
+            digest["average_score"],
+            monitoring_gap_count,
+        )
         top_action = actions[0] if actions else None
-        healthy_site_label = "site" if summary["healthy_site_count"] == 1 else "sites"
-        healthy_site_verb = "is" if summary["healthy_site_count"] == 1 else "are"
-        action_label = "action" if len(actions) == 1 else "actions"
-        action_verb = "remains" if len(actions) == 1 else "remain"
-        summary.update(
+        gap_site = next(
+            (site for site in digest["sites"] if site["snapshot_freshness"] != "current"),
+            None,
+        )
+        if top_action:
+            next_action = top_action["recommended_action"]
+            top_site = top_action["site"]
+        elif digest["missing_snapshot_count"]:
+            next_action = "Capture initial fleet snapshots for unmonitored sites."
+            top_site = gap_site["name"] if gap_site else None
+        elif digest["stale_snapshot_count"]:
+            next_action = "Refresh stale fleet snapshots before the next client update."
+            top_site = gap_site["name"] if gap_site else None
+        else:
+            next_action = "Continue normal monitoring cadence."
+            top_site = None
+
+        if monitoring_gap_count:
+            site_label = "site" if digest["site_count"] == 1 else "sites"
+            snapshot_verb = "has" if digest["site_count"] == 1 else "have"
+            gap_label = "gap" if monitoring_gap_count == 1 else "gaps"
+            gap_verb = "requires" if monitoring_gap_count == 1 else "require"
+            client_message = (
+                f"{digest['current_snapshot_count']} of {digest['site_count']} tracked {site_label} "
+                f"{snapshot_verb} current snapshots; {monitoring_gap_count} monitoring {gap_label} {gap_verb} follow-up."
+            )
+        else:
+            healthy_site_label = "site" if healthy_site_count == 1 else "sites"
+            healthy_site_verb = "is" if healthy_site_count == 1 else "are"
+            action_label = "action" if len(actions) == 1 else "actions"
+            action_verb = "remains" if len(actions) == 1 else "remain"
+            client_message = (
+                f"{healthy_site_count} {healthy_site_label} {healthy_site_verb} healthy; "
+                f"{len(actions)} open {action_label} {action_verb} in the work queue."
+            )
+
+        briefs.append(
             {
-                "average_score": average_score,
+                "client": client_name,
+                "site_count": digest["site_count"],
+                "monitored_site_count": digest["monitored_site_count"],
+                "current_snapshot_count": digest["current_snapshot_count"],
+                "missing_snapshot_count": digest["missing_snapshot_count"],
+                "stale_snapshot_count": digest["stale_snapshot_count"],
+                "monitoring_coverage_percent": digest["monitoring_coverage_percent"],
+                "snapshot_freshness_percent": digest["snapshot_freshness_percent"],
+                "average_score": digest["average_score"],
+                "healthy_site_count": healthy_site_count,
+                "latest_snapshot_at": digest["latest_snapshot_at"],
                 "status": status,
                 "open_action_count": len(actions),
                 "immediate_action_count": len(immediate_actions),
                 "scheduled_action_count": len(scheduled_actions),
                 "headline": (
-                    f"{client_name}: {status.upper()} status across {summary['site_count']} tracked site"
-                    f"{'s' if summary['site_count'] != 1 else ''}."
+                    f"{client_name}: {status.upper()} status across {digest['site_count']} tracked site"
+                    f"{'s' if digest['site_count'] != 1 else ''}."
                 ),
-                "client_message": (
-                    f"{summary['healthy_site_count']} {healthy_site_label} {healthy_site_verb} healthy; "
-                    f"{len(actions)} open {action_label} {action_verb} in the work queue."
-                ),
-                "next_action": top_action["recommended_action"] if top_action else "Continue normal monitoring cadence.",
-                "top_site": top_action["site"] if top_action else None,
+                "client_message": client_message,
+                "next_action": next_action,
+                "top_site": top_site,
             }
         )
-        briefs.append(summary)
 
     briefs.sort(
         key=lambda row: (
@@ -2371,6 +2402,8 @@ def api_client_update_briefs():
         "red_count": sum(1 for client in clients if client["status"] == "red"),
         "yellow_count": sum(1 for client in clients if client["status"] == "yellow"),
         "green_count": sum(1 for client in clients if client["status"] == "green"),
+        "missing_snapshot_count": sum(client["missing_snapshot_count"] for client in clients),
+        "stale_snapshot_count": sum(client["stale_snapshot_count"] for client in clients),
         "clients": clients,
     }
 

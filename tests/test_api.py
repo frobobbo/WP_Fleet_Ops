@@ -2335,6 +2335,54 @@ def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     assert healthy["next_action"] == "Continue normal monitoring cadence."
 
 
+def test_api_client_update_briefs_warn_about_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Update Site",
+            url="https://stale-update-brief.example",
+            client="Client Update Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Update Site",
+            "url": "https://missing-update-brief.example",
+            "client": "Client Update Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/client-update-briefs").json()
+
+    assert payload["client_count"] == 1
+    assert payload["yellow_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    brief = payload["clients"][0]
+    assert brief["client"] == "Client Update Gap"
+    assert brief["status"] == "yellow"
+    assert brief["site_count"] == 2
+    assert brief["monitored_site_count"] == 1
+    assert brief["current_snapshot_count"] == 0
+    assert brief["missing_snapshot_count"] == 1
+    assert brief["stale_snapshot_count"] == 1
+    assert brief["monitoring_coverage_percent"] == 50
+    assert brief["snapshot_freshness_percent"] == 0
+    assert brief["healthy_site_count"] == 0
+    assert brief["open_action_count"] == 0
+    assert brief["top_site"] == "Missing Update Site"
+    assert brief["next_action"] == "Capture initial fleet snapshots for unmonitored sites."
+    assert brief["client_message"] == (
+        "0 of 2 tracked sites have current snapshots; 2 monitoring gaps require follow-up."
+    )
+
+
 def test_api_client_service_reviews_prioritizes_account_checkins(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
