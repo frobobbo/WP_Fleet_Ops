@@ -1404,11 +1404,16 @@ def api_remediation_plan():
     }
 
 
-def _client_digest_status(immediate_count: int, scheduled_count: int, average_score: int) -> str:
+def _client_digest_status(
+    immediate_count: int,
+    scheduled_count: int,
+    average_score: int,
+    monitoring_gap_count: int = 0,
+) -> str:
     """Return a client-friendly status for an account digest."""
     if immediate_count:
         return "red"
-    if scheduled_count or average_score < 85:
+    if scheduled_count or monitoring_gap_count or average_score < 85:
         return "yellow"
     return "green"
 
@@ -1416,25 +1421,55 @@ def _client_digest_status(immediate_count: int, scheduled_count: int, average_sc
 @app.get("/api/client-digest")
 def api_client_digest():
     """Return client-level executive summaries for account check-ins."""
+    now = datetime.now(timezone.utc)
     actions_by_client: dict[str, list[dict]] = {}
     for action in _current_actions():
         actions_by_client.setdefault(action.get("client") or "Unassigned", []).append(action)
 
-    clients: dict[str, dict] = {}
-    for row in store.latest_dashboard():
-        client_name = row.get("client") or "Unassigned"
-        digest = clients.setdefault(
-            client_name,
-            {
-                "client": client_name,
-                "site_count": 0,
-                "score_total": 0,
-                "sites": [],
-                "latest_snapshot_at": None,
-            },
+    account_summaries = api_clients()["clients"]
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    clients = {
+        account["client"]: {
+            "client": account["client"],
+            "site_count": account["site_count"],
+            "monitored_site_count": account["monitored_site_count"],
+            "current_snapshot_count": account["current_snapshot_count"],
+            "missing_snapshot_count": account["missing_snapshot_count"],
+            "stale_snapshot_count": account["stale_snapshot_count"],
+            "monitoring_coverage_percent": account["monitoring_coverage_percent"],
+            "snapshot_freshness_percent": account["snapshot_freshness_percent"],
+            "average_score": account["average_score"],
+            "latest_snapshot_at": account["latest_snapshot_at"],
+            "sites": [],
+        }
+        for account in account_summaries
+    }
+
+    for site in store.list_sites():
+        client_name = site.get("client") or "Unassigned"
+        digest = clients[client_name]
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            digest["sites"].append(
+                {
+                    "name": site["name"],
+                    "url": site["url"],
+                    "score": None,
+                    "status": "unknown",
+                    "critical_alerts": 0,
+                    "monitoring_status": "missing_snapshot",
+                    "snapshot_freshness": "missing",
+                    "snapshot_age_hours": None,
+                    "latest_snapshot_at": None,
+                }
+            )
+            continue
+
+        freshness, age_hours = _snapshot_freshness(
+            row.get("captured_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
         )
-        digest["site_count"] += 1
-        digest["score_total"] += row["score"] or 0
         digest["sites"].append(
             {
                 "name": row["name"],
@@ -1442,22 +1477,28 @@ def api_client_digest():
                 "score": row["score"],
                 "status": _dashboard_status(row["score"]),
                 "critical_alerts": sum(1 for alert in row["alerts"] if alert.get("severity") == "critical"),
+                "monitoring_status": "monitored",
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": row["captured_at"],
             }
         )
-        captured_at = row.get("captured_at")
-        if captured_at and (digest["latest_snapshot_at"] is None or captured_at > digest["latest_snapshot_at"]):
-            digest["latest_snapshot_at"] = captured_at
 
     digest_rows = []
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     for client_name, digest in clients.items():
         actions = actions_by_client.get(client_name, [])
         immediate_count = sum(1 for action in actions if _remediation_bucket(action) == "immediate")
         scheduled_count = sum(1 for action in actions if _remediation_bucket(action) == "scheduled")
         watch_count = sum(1 for action in actions if _remediation_bucket(action) == "watch")
-        average_score = round(digest.pop("score_total") / digest["site_count"]) if digest["site_count"] else 100
+        monitoring_gap_count = digest["missing_snapshot_count"] + digest["stale_snapshot_count"]
         top_action = actions[0] if actions else None
-        status = _client_digest_status(immediate_count, scheduled_count, average_score)
-        digest["average_score"] = average_score
+        status = _client_digest_status(
+            immediate_count,
+            scheduled_count,
+            digest["average_score"],
+            monitoring_gap_count,
+        )
         digest["status"] = status
         digest["immediate_action_count"] = immediate_count
         digest["scheduled_action_count"] = scheduled_count
@@ -1465,12 +1506,21 @@ def api_client_digest():
         digest["open_action_count"] = len(actions)
         digest["top_site"] = top_action["site"] if top_action else None
         digest["top_message"] = top_action["message"] if top_action else "No open fleet actions."
+        site_label = "site" if digest["site_count"] == 1 else "sites"
+        snapshot_verb = "has" if digest["site_count"] == 1 else "have"
         digest["executive_summary"] = (
-            f"{client_name} has {digest['site_count']} tracked site"
-            f"{'s' if digest['site_count'] != 1 else ''}, an average score of {average_score}, "
-            f"and {len(actions)} open action{'s' if len(actions) != 1 else ''}."
+            f"{client_name} has {digest['site_count']} tracked {site_label}; "
+            f"{digest['monitored_site_count']} of {digest['site_count']} tracked {site_label} {snapshot_verb} snapshots, "
+            f"with an average score of {digest['average_score']} and "
+            f"{len(actions)} open action{'s' if len(actions) != 1 else ''}."
         )
-        digest["sites"].sort(key=lambda site: (site["score"], site["name"].lower()))
+        digest["sites"].sort(
+            key=lambda site: (
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                site["score"] if site["score"] is not None else -1,
+                site["name"].lower(),
+            )
+        )
         digest_rows.append(digest)
 
     digest_rows.sort(
@@ -1483,11 +1533,13 @@ def api_client_digest():
         )
     )
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "client_count": len(digest_rows),
         "red_count": sum(1 for client in digest_rows if client["status"] == "red"),
         "yellow_count": sum(1 for client in digest_rows if client["status"] == "yellow"),
         "green_count": sum(1 for client in digest_rows if client["status"] == "green"),
+        "missing_snapshot_count": sum(client["missing_snapshot_count"] for client in digest_rows),
+        "stale_snapshot_count": sum(client["stale_snapshot_count"] for client in digest_rows),
         "clients": digest_rows,
     }
 

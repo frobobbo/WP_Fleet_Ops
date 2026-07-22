@@ -1521,6 +1521,51 @@ def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
     assert healthy["top_message"] == "No open fleet actions."
 
 
+def test_api_client_digest_warns_about_account_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Digest Site",
+            url="https://stale-digest.example",
+            client="Client Digest Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Digest Site",
+            "url": "https://missing-digest.example",
+            "client": "Client Digest Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/client-digest").json()
+
+    assert payload["client_count"] == 1
+    assert payload["yellow_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    digest = payload["clients"][0]
+    assert digest["client"] == "Client Digest Gap"
+    assert digest["status"] == "yellow"
+    assert digest["site_count"] == 2
+    assert digest["monitored_site_count"] == 1
+    assert digest["missing_snapshot_count"] == 1
+    assert digest["current_snapshot_count"] == 0
+    assert digest["stale_snapshot_count"] == 1
+    assert digest["monitoring_coverage_percent"] == 50
+    assert digest["snapshot_freshness_percent"] == 0
+    assert digest["average_score"] == 100
+    assert digest["open_action_count"] == 0
+    assert [site["snapshot_freshness"] for site in digest["sites"]] == ["missing", "stale"]
+    assert "1 of 2 tracked sites have snapshots" in digest["executive_summary"]
+
+
 def test_api_client_escalations_groups_critical_incidents_by_client(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
