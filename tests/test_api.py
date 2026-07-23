@@ -2914,6 +2914,55 @@ def test_api_account_agenda_returns_bounded_weekly_service_plan(tmp_path):
     assert scheduled["talking_point"] == "Review scheduled maintenance timing and open work queue ownership."
 
 
+def test_api_account_agenda_prioritizes_monitoring_restoration(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/sites",
+        data={
+            "name": "Single Gap Site",
+            "url": "https://single-agenda-gap.example",
+            "client": "A Single Gap Client",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "First Multi Gap Site",
+            "url": "https://first-multi-agenda-gap.example",
+            "client": "Z Multi Gap Client",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Second Multi Gap Site",
+            "url": "https://second-multi-agenda-gap.example",
+            "client": "Z Multi Gap Client",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/account-agenda?limit=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["account_count"] == 2
+    assert payload["returned_account_count"] == 1
+    assert payload["monitoring_gap_account_count"] == 2
+    assert payload["monitoring_gap_count"] == 3
+    item = payload["agenda"][0]
+    assert item["client"] == "Z Multi Gap Client"
+    assert item["priority"] == "scheduled"
+    assert item["focus"] == "monitoring restoration"
+    assert item["current_snapshot_count"] == 0
+    assert item["missing_snapshot_count"] == 2
+    assert item["stale_snapshot_count"] == 0
+    assert item["monitoring_gap_count"] == 2
+    assert item["top_site"] == "First Multi Gap Site"
+    assert item["next_action"] == "Capture initial fleet snapshots for unmonitored sites."
+
 
 def test_dashboard_exposes_live_care_check_action(tmp_path):
     client = make_test_client(tmp_path)

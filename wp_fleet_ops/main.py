@@ -2770,6 +2770,8 @@ def _account_agenda_focus(review: dict) -> str:
         return "incident response"
     if review["scheduled_action_count"]:
         return "maintenance planning"
+    if review["monitoring_gap_count"]:
+        return "monitoring restoration"
     if review["average_score"] < 85:
         return "health improvement"
     return "routine review"
@@ -2789,6 +2791,10 @@ def api_account_agenda(limit: int = 10):
                 "status": review["status"],
                 "focus": _account_agenda_focus(review),
                 "site_count": review["site_count"],
+                "current_snapshot_count": review["current_snapshot_count"],
+                "missing_snapshot_count": review["missing_snapshot_count"],
+                "stale_snapshot_count": review["stale_snapshot_count"],
+                "monitoring_gap_count": review["monitoring_gap_count"],
                 "open_action_count": review["open_action_count"],
                 "immediate_action_count": review["immediate_action_count"],
                 "scheduled_action_count": review["scheduled_action_count"],
@@ -2802,6 +2808,7 @@ def api_account_agenda(limit: int = 10):
         key=lambda item: (
             priority_rank.get(item["priority"], 99),
             -item["open_action_count"],
+            -item["monitoring_gap_count"],
             item["client"].lower(),
         )
     )
@@ -2814,6 +2821,8 @@ def api_account_agenda(limit: int = 10):
         "urgent_count": sum(1 for item in agenda if item["priority"] == "urgent"),
         "scheduled_count": sum(1 for item in agenda if item["priority"] == "scheduled"),
         "routine_count": sum(1 for item in agenda if item["priority"] == "routine"),
+        "monitoring_gap_account_count": sum(1 for item in agenda if item["monitoring_gap_count"]),
+        "monitoring_gap_count": sum(item["monitoring_gap_count"] for item in agenda),
         "agenda": selected,
     }
 
