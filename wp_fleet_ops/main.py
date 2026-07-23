@@ -2627,11 +2627,15 @@ def api_maintenance_ticket_drafts():
     }
 
 
-def _dispatch_summary_status(immediate_count: int, scheduled_count: int) -> str:
+def _dispatch_summary_status(
+    immediate_count: int,
+    scheduled_count: int,
+    monitoring_gap_count: int = 0,
+) -> str:
     """Return a compact dispatch status for queue-level routing."""
     if immediate_count:
         return "red"
-    if scheduled_count:
+    if scheduled_count or monitoring_gap_count:
         return "yellow"
     return "green"
 
@@ -2648,30 +2652,78 @@ def api_dispatch_summary():
     client_workload = _client_workload_rows()
     top_client = client_workload[0] if client_workload else None
     top_action = actions[0] if actions else None
+    monitoring_payload = api_stale_snapshots()
+    monitoring_sites = monitoring_payload["sites"][:5]
+    top_monitoring_site = monitoring_sites[0] if monitoring_sites else None
+    monitoring_gap_count = monitoring_payload["stale_count"]
+    missing_snapshot_count = monitoring_payload["missing_snapshot_count"]
+    stale_snapshot_count = monitoring_gap_count - missing_snapshot_count
+    if top_action:
+        dispatch_top_client = top_client["client"] if top_client else top_action.get("client")
+        dispatch_top_site = priority_sites[0]["name"] if priority_sites else top_action["site"]
+        dispatch_top_action = top_action["recommended_action"]
+    elif top_monitoring_site:
+        dispatch_top_client = top_monitoring_site["client"]
+        dispatch_top_site = top_monitoring_site["name"]
+        dispatch_top_action = top_monitoring_site["recommended_action"]
+    else:
+        dispatch_top_client = None
+        dispatch_top_site = None
+        dispatch_top_action = "Continue normal monitoring cadence."
+
+    if immediate_actions:
+        next_queue = "immediate"
+    elif scheduled_actions:
+        next_queue = "scheduled"
+    elif monitoring_gap_count:
+        next_queue = "monitoring"
+    elif watch_actions:
+        next_queue = "watch"
+    else:
+        next_queue = "none"
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "status": _dispatch_summary_status(len(immediate_actions), len(scheduled_actions)),
+        "status": _dispatch_summary_status(
+            len(immediate_actions),
+            len(scheduled_actions),
+            monitoring_gap_count,
+        ),
         "open_action_count": len(actions),
         "immediate_action_count": len(immediate_actions),
         "scheduled_action_count": len(scheduled_actions),
         "watch_action_count": len(watch_actions),
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "monitoring_gap_count": monitoring_gap_count,
         "priority_site_count": priority_payload["priority_site_count"],
-        "top_client": top_client["client"] if top_client else None,
+        "top_client": dispatch_top_client,
         "top_client_open_action_count": top_client["open_action_count"] if top_client else 0,
-        "top_site": priority_sites[0]["name"] if priority_sites else None,
-        "top_action": top_action["recommended_action"] if top_action else "Continue normal monitoring cadence.",
-        "next_queue": "immediate" if immediate_actions else ("scheduled" if scheduled_actions else "watch" if watch_actions else "none"),
+        "top_site": dispatch_top_site,
+        "top_action": dispatch_top_action,
+        "next_queue": next_queue,
         "priority_sites": priority_sites,
+        "monitoring_sites": monitoring_sites,
     }
 
 
-def _daily_ops_headline(status: str, immediate_count: int, scheduled_count: int, top_site: str | None) -> str:
+def _daily_ops_headline(
+    status: str,
+    immediate_count: int,
+    scheduled_count: int,
+    monitoring_gap_count: int,
+    top_site: str | None,
+) -> str:
     """Return a short shift headline for operator briefings."""
     if immediate_count:
         site_fragment = f" Start with {top_site}." if top_site else ""
         return f"Red shift brief: {immediate_count} immediate action{'s' if immediate_count != 1 else ''} need follow-up.{site_fragment}"
     if scheduled_count:
         return f"Yellow shift brief: {scheduled_count} scheduled action{'s' if scheduled_count != 1 else ''} should be planned."
+    if monitoring_gap_count:
+        gap_label = "gap needs" if monitoring_gap_count == 1 else "gaps need"
+        site_fragment = f" Start with {top_site}." if top_site else ""
+        return f"Yellow shift brief: {monitoring_gap_count} monitoring {gap_label} follow-up.{site_fragment}"
     if status == "green":
         return "Green shift brief: no urgent or scheduled FleetOps actions are open."
     return "FleetOps shift brief: review current monitoring status and open work."
@@ -2691,6 +2743,7 @@ def api_daily_ops_brief():
             status,
             dispatch["immediate_action_count"],
             dispatch["scheduled_action_count"],
+            dispatch["monitoring_gap_count"],
             dispatch["top_site"],
         ),
         "site_count": summary["sites"],
@@ -2699,11 +2752,15 @@ def api_daily_ops_brief():
         "open_action_count": dispatch["open_action_count"],
         "immediate_action_count": dispatch["immediate_action_count"],
         "scheduled_action_count": dispatch["scheduled_action_count"],
+        "missing_snapshot_count": dispatch["missing_snapshot_count"],
+        "stale_snapshot_count": dispatch["stale_snapshot_count"],
+        "monitoring_gap_count": dispatch["monitoring_gap_count"],
         "next_queue": dispatch["next_queue"],
         "top_client": dispatch["top_client"],
         "top_site": dispatch["top_site"],
         "recommended_focus": dispatch["top_action"],
         "priority_sites": priority_sites,
+        "monitoring_sites": dispatch["monitoring_sites"][:3],
     }
 
 

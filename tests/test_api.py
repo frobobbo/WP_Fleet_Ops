@@ -2761,6 +2761,55 @@ def test_api_dispatch_summary_returns_queue_level_operator_routing(tmp_path):
     assert [site["name"] for site in payload["priority_sites"]] == ["Dispatch Critical Store", "Dispatch Warning Blog"]
 
 
+def test_dispatch_and_daily_brief_route_monitoring_gaps_to_operators(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Dispatch Site",
+            url="https://stale-dispatch.example",
+            client="Client Dispatch Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Dispatch Site",
+            "url": "https://missing-dispatch.example",
+            "client": "Client Dispatch Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    dispatch = client.get("/api/dispatch-summary").json()
+
+    assert dispatch["status"] == "yellow"
+    assert dispatch["open_action_count"] == 0
+    assert dispatch["missing_snapshot_count"] == 1
+    assert dispatch["stale_snapshot_count"] == 1
+    assert dispatch["monitoring_gap_count"] == 2
+    assert dispatch["top_client"] == "Client Dispatch Gap"
+    assert dispatch["top_site"] == "Missing Dispatch Site"
+    assert dispatch["top_action"] == "Capture a fresh fleet snapshot and verify site health."
+    assert dispatch["next_queue"] == "monitoring"
+
+    brief = client.get("/api/daily-ops-brief").json()
+
+    assert brief["status"] == "yellow"
+    assert brief["headline"] == (
+        "Yellow shift brief: 2 monitoring gaps need follow-up. Start with Missing Dispatch Site."
+    )
+    assert brief["missing_snapshot_count"] == 1
+    assert brief["stale_snapshot_count"] == 1
+    assert brief["monitoring_gap_count"] == 2
+    assert brief["next_queue"] == "monitoring"
+    assert brief["top_site"] == "Missing Dispatch Site"
+    assert brief["recommended_focus"] == "Capture a fresh fleet snapshot and verify site health."
+
+
 def test_api_daily_ops_brief_returns_shift_ready_summary(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
