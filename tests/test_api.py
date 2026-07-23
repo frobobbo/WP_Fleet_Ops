@@ -2447,6 +2447,47 @@ def test_api_client_service_reviews_prioritizes_account_checkins(tmp_path):
     assert routine["talking_point"] == "Review monitoring coverage, recent wins, and upcoming maintenance cadence."
 
 
+def test_api_client_service_reviews_schedule_monitoring_gap_follow_up(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Review Site",
+            url="https://stale-service-review.example",
+            client="Client Review Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Review Site",
+            "url": "https://missing-service-review.example",
+            "client": "Client Review Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/client-service-reviews").json()
+
+    assert payload["client_count"] == 1
+    assert payload["scheduled_review_count"] == 1
+    assert payload["monitoring_gap_client_count"] == 1
+    review = payload["clients"][0]
+    assert review["client"] == "Client Review Gap"
+    assert review["status"] == "yellow"
+    assert review["review_priority"] == "scheduled"
+    assert review["monitoring_gap_count"] == 2
+    assert review["missing_snapshot_count"] == 1
+    assert review["stale_snapshot_count"] == 1
+    assert review["current_snapshot_count"] == 0
+    assert review["top_site"] == "Missing Review Site"
+    assert review["talking_point"] == "Restore monitoring coverage before the next client review."
+    assert review["next_action"] == "Capture initial fleet snapshots for unmonitored sites."
+
+
 def test_api_client_follow_ups_adds_due_dates_and_channels(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

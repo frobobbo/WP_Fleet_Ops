@@ -2418,12 +2418,19 @@ def _client_service_review_rows() -> list[dict]:
     rows = []
     for brief in _client_update_brief_rows():
         action_count = brief["open_action_count"]
+        monitoring_gap_count = brief["missing_snapshot_count"] + brief["stale_snapshot_count"]
         if brief["immediate_action_count"]:
             review_priority = "urgent"
-        elif brief["scheduled_action_count"] or brief["average_score"] < 85:
+        elif brief["scheduled_action_count"] or monitoring_gap_count or brief["average_score"] < 85:
             review_priority = "scheduled"
         else:
             review_priority = "routine"
+
+        talking_point = (
+            "Restore monitoring coverage before the next client review."
+            if monitoring_gap_count
+            else topic_map.get(brief["status"], topic_map["yellow"])
+        )
 
         rows.append(
             {
@@ -2431,13 +2438,17 @@ def _client_service_review_rows() -> list[dict]:
                 "status": brief["status"],
                 "review_priority": review_priority,
                 "site_count": brief["site_count"],
+                "current_snapshot_count": brief["current_snapshot_count"],
+                "missing_snapshot_count": brief["missing_snapshot_count"],
+                "stale_snapshot_count": brief["stale_snapshot_count"],
+                "monitoring_gap_count": monitoring_gap_count,
                 "average_score": brief["average_score"],
                 "healthy_site_count": brief["healthy_site_count"],
                 "open_action_count": action_count,
                 "immediate_action_count": brief["immediate_action_count"],
                 "scheduled_action_count": brief["scheduled_action_count"],
                 "top_site": brief["top_site"],
-                "talking_point": topic_map.get(brief["status"], topic_map["yellow"]),
+                "talking_point": talking_point,
                 "next_action": brief["next_action"],
                 "latest_snapshot_at": brief["latest_snapshot_at"],
             }
@@ -2464,6 +2475,7 @@ def api_client_service_reviews():
         "urgent_review_count": sum(1 for client in clients if client["review_priority"] == "urgent"),
         "scheduled_review_count": sum(1 for client in clients if client["review_priority"] == "scheduled"),
         "routine_review_count": sum(1 for client in clients if client["review_priority"] == "routine"),
+        "monitoring_gap_client_count": sum(1 for client in clients if client["monitoring_gap_count"]),
         "clients": clients,
     }
 
