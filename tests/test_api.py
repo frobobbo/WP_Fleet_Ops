@@ -2623,6 +2623,46 @@ def test_api_maintenance_approval_packets_summarizes_client_approvals(tmp_path):
     assert routine["approval_summary"] == "No maintenance approval packet is needed for Client Approval Routine right now."
 
 
+def test_monitoring_gaps_do_not_request_client_maintenance_approval(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Approval Site",
+            url="https://stale-approval.example",
+            client="Client Monitoring Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Approval Site",
+            "url": "https://missing-approval.example",
+            "client": "Client Monitoring Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    approval_payload = client.get("/api/maintenance-approval-packets").json()
+    draft_payload = client.get("/api/maintenance-ticket-drafts").json()
+
+    assert approval_payload["scheduled_count"] == 1
+    assert approval_payload["needed_count"] == 0
+    packet = approval_payload["packets"][0]
+    assert packet["client"] == "Client Monitoring Gap"
+    assert packet["approval_priority"] == "scheduled"
+    assert packet["open_action_count"] == 0
+    assert packet["packet_needed"] is False
+    assert packet["approval_summary"] == (
+        "No maintenance approval packet is needed for Client Monitoring Gap right now."
+    )
+    assert draft_payload["draft_count"] == 0
+    assert draft_payload["drafts"] == []
+
+
 def test_api_maintenance_ticket_drafts_returns_ticket_ready_approval_requests(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

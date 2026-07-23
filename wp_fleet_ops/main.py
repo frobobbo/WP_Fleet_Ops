@@ -2543,7 +2543,10 @@ def _maintenance_approval_packet_rows() -> list[dict]:
     packets = []
     for review in _client_service_review_rows():
         priority = review["review_priority"]
-        packet_needed = priority != "routine" or review["open_action_count"] > 0
+        # Service reviews also schedule follow-up for stale or missing monitoring
+        # data. That operational follow-up does not authorize maintenance on a
+        # client site, so only create an approval request for actual open work.
+        packet_needed = review["open_action_count"] > 0
         if packet_needed:
             approval_summary = (
                 f"Request {priority} maintenance approval for {review['client']} covering "
