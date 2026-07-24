@@ -66,6 +66,7 @@ async def add_browser_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     return response
 
 
