@@ -1335,20 +1335,36 @@ def api_maintenance_calendar():
 @app.get("/api/slo")
 def api_slo():
     """Return fleet-level service objective compliance for leadership review."""
+    now = datetime.now(timezone.utc)
     rows = store.latest_dashboard()
-    total = len(rows)
+    monitored_total = len(rows)
+    tracked_total = len(store.list_sites())
+    current_snapshot_count = sum(
+        1
+        for row in rows
+        if _snapshot_is_current(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+    )
     objectives = [
-        _slo_row("availability", "Sites reachable", total, sum(1 for row in rows if row["uptime_ok"]), "site reachable"),
-        _slo_row("tls", "TLS renewal buffer", total, sum(1 for row in rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
-        _slo_row("backups", "Backup freshness", total, sum(1 for row in rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
-        _slo_row("performance", "Homepage response", total, sum(1 for row in rows if row["response_ms"] <= 1500), "<= 1500 ms"),
-        _slo_row("security", "Security headers", total, sum(1 for row in rows if row["security_header_count"] >= 2), ">= 2 core headers"),
+        _slo_row("availability", "Sites reachable", monitored_total, sum(1 for row in rows if row["uptime_ok"]), "site reachable"),
+        _slo_row("tls", "TLS renewal buffer", monitored_total, sum(1 for row in rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
+        _slo_row("backups", "Backup freshness", monitored_total, sum(1 for row in rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
+        _slo_row("performance", "Homepage response", monitored_total, sum(1 for row in rows if row["response_ms"] <= 1500), "<= 1500 ms"),
+        _slo_row("security", "Security headers", monitored_total, sum(1 for row in rows if row["security_header_count"] >= 2), ">= 2 core headers"),
+        _slo_row(
+            "monitoring",
+            "Current monitoring evidence",
+            tracked_total,
+            current_snapshot_count,
+            f"snapshot <= {SNAPSHOT_FRESHNESS_HOURS} hours old",
+        ),
     ]
     objectives.sort(key=lambda objective: (objective["compliance_percent"], objective["name"]))
     worst_objective = objectives[0] if objectives else None
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": total,
+        "generated_at": now.isoformat(),
+        "site_count": tracked_total,
+        "monitored_site_count": monitored_total,
+        "current_snapshot_count": current_snapshot_count,
         "objective_count": len(objectives),
         "at_risk_count": sum(1 for objective in objectives if objective["status"] == "at_risk"),
         "worst_objective": worst_objective,

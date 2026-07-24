@@ -1404,7 +1404,7 @@ def test_api_slo_returns_service_objective_compliance(tmp_path):
     payload = response.json()
     assert payload["generated_at"].endswith("+00:00")
     assert payload["site_count"] == 2
-    assert payload["objective_count"] == 5
+    assert payload["objective_count"] == 6
     assert payload["at_risk_count"] == 5
     assert payload["worst_objective"]["compliance_percent"] == 50.0
     objectives = {objective["name"]: objective for objective in payload["objectives"]}
@@ -1421,6 +1421,50 @@ def test_api_slo_returns_service_objective_compliance(tmp_path):
     assert objectives["backups"]["threshold"] == "<= 72 hours old"
     assert objectives["performance"]["threshold"] == "<= 1500 ms"
     assert objectives["security"]["threshold"] == ">= 2 core headers"
+    assert objectives["monitoring"] == {
+        "name": "monitoring",
+        "label": "Current monitoring evidence",
+        "threshold": "snapshot <= 168 hours old",
+        "met_count": 2,
+        "miss_count": 0,
+        "compliance_percent": 100.0,
+        "status": "healthy",
+    }
+
+
+def test_api_slo_fails_closed_when_monitoring_evidence_is_missing_or_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale SLO Evidence",
+            url="https://stale-slo-evidence.example",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={"name": "Missing SLO Evidence", "url": "https://missing-slo-evidence.example"},
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/slo").json()
+
+    assert payload["site_count"] == 2
+    assert payload["monitored_site_count"] == 1
+    assert payload["current_snapshot_count"] == 0
+    assert payload["at_risk_count"] == 1
+    assert payload["worst_objective"] == {
+        "name": "monitoring",
+        "label": "Current monitoring evidence",
+        "threshold": "snapshot <= 168 hours old",
+        "met_count": 0,
+        "miss_count": 2,
+        "compliance_percent": 0.0,
+        "status": "at_risk",
+    }
 
 
 def test_api_remediation_plan_groups_actions_by_operational_timing(tmp_path):
