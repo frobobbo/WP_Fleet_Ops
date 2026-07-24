@@ -1680,42 +1680,45 @@ def _executive_risk_rows() -> list[dict]:
         severity = action.get("severity", "info")
         counts[severity] = counts.get(severity, 0) + 1
 
-    clients: dict[str, dict] = {}
+    clients = {
+        account["client"]: {
+            "client": account["client"],
+            "site_count": account["site_count"],
+            "monitored_site_count": account["monitored_site_count"],
+            "current_snapshot_count": account["current_snapshot_count"],
+            "missing_snapshot_count": account["missing_snapshot_count"],
+            "stale_snapshot_count": account["stale_snapshot_count"],
+            "monitoring_gap_count": account["missing_snapshot_count"] + account["stale_snapshot_count"],
+            "average_score": account["average_score"],
+            "lowest_score": None,
+            "critical_site_count": 0,
+            "latest_snapshot_at": account["latest_snapshot_at"],
+        }
+        for account in api_clients()["clients"]
+    }
     for row in store.latest_dashboard():
         client_name = row.get("client") or "Unassigned"
-        summary = clients.setdefault(
-            client_name,
-            {
-                "client": client_name,
-                "site_count": 0,
-                "score_total": 0,
-                "lowest_score": row["score"],
-                "critical_site_count": 0,
-                "latest_snapshot_at": None,
-            },
+        summary = clients[client_name]
+        summary["lowest_score"] = (
+            row["score"]
+            if summary["lowest_score"] is None
+            else min(summary["lowest_score"], row["score"])
         )
-        summary["site_count"] += 1
-        summary["score_total"] += row["score"] or 0
-        summary["lowest_score"] = min(summary["lowest_score"], row["score"])
         summary["critical_site_count"] += 1 if any(alert.get("severity") == "critical" for alert in row["alerts"]) else 0
-        captured_at = row.get("captured_at")
-        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
-            summary["latest_snapshot_at"] = captured_at
 
     rows = []
     for client_name, summary in clients.items():
         counts = action_counts.get(client_name, {"critical": 0, "warning": 0, "info": 0})
-        average_score = round(summary.pop("score_total") / summary["site_count"]) if summary["site_count"] else 100
         open_action_count = sum(counts.values())
+        summary["lowest_score"] = summary["lowest_score"] if summary["lowest_score"] is not None else 100
         if counts.get("critical", 0) or summary["critical_site_count"]:
             risk_level = "critical"
-        elif counts.get("warning", 0) or average_score < 85:
+        elif counts.get("warning", 0) or summary["monitoring_gap_count"] or summary["average_score"] < 85:
             risk_level = "elevated"
         else:
             risk_level = "stable"
         summary.update(
             {
-                "average_score": average_score,
                 "risk_level": risk_level,
                 "open_action_count": open_action_count,
                 "critical_action_count": counts.get("critical", 0),
@@ -1751,11 +1754,16 @@ def api_executive_risks():
     }
 
 
-def _fleet_brief_status(critical_clients: int, immediate_actions: int, open_actions: int) -> str:
+def _fleet_brief_status(
+    critical_clients: int,
+    immediate_actions: int,
+    open_actions: int,
+    monitoring_gap_count: int = 0,
+) -> str:
     """Return a single operating status for the current fleet brief."""
     if critical_clients or immediate_actions:
         return "red"
-    if open_actions:
+    if open_actions or monitoring_gap_count:
         return "yellow"
     return "green"
 
@@ -1766,16 +1774,21 @@ def api_fleet_brief():
     client_risks = _executive_risk_rows()
     actions = _current_actions()
     slo = api_slo()
+    fleet_summary = api_summary()
     critical_clients = sum(1 for client in client_risks if client["risk_level"] == "critical")
     immediate_actions = sum(1 for action in actions if _remediation_bucket(action) == "immediate")
+    monitoring_gap_count = fleet_summary["missing_snapshot_count"] + fleet_summary["stale_snapshot_count"]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "status": _fleet_brief_status(critical_clients, immediate_actions, len(actions)),
-        "site_count": slo["site_count"],
+        "status": _fleet_brief_status(critical_clients, immediate_actions, len(actions), monitoring_gap_count),
+        "site_count": fleet_summary["sites"],
         "client_count": len(client_risks),
         "critical_client_count": critical_clients,
         "immediate_action_count": immediate_actions,
         "open_action_count": len(actions),
+        "missing_snapshot_count": fleet_summary["missing_snapshot_count"],
+        "stale_snapshot_count": fleet_summary["stale_snapshot_count"],
+        "monitoring_gap_count": monitoring_gap_count,
         "at_risk_objective_count": slo["at_risk_count"],
         "worst_objective": slo["worst_objective"],
         "top_clients": client_risks[:5],
@@ -1783,7 +1796,13 @@ def api_fleet_brief():
     }
 
 
-def _operator_handoff_headline(status: str, critical_clients: int, immediate_actions: int) -> str:
+def _operator_handoff_headline(
+    status: str,
+    critical_clients: int,
+    immediate_actions: int,
+    monitoring_gap_count: int = 0,
+    open_actions: int = 0,
+) -> str:
     """Return a concise human-readable summary for shift handoff."""
     if status == "red":
         client_label = "client" if critical_clients == 1 else "clients"
@@ -1792,6 +1811,10 @@ def _operator_handoff_headline(status: str, critical_clients: int, immediate_act
             f"Red: {critical_clients} critical {client_label} and "
             f"{immediate_actions} immediate {action_label} require operator follow-up."
         )
+    if status == "yellow" and monitoring_gap_count and not open_actions:
+        gap_label = "gap" if monitoring_gap_count == 1 else "gaps"
+        gap_verb = "requires" if monitoring_gap_count == 1 else "require"
+        return f"Yellow: {monitoring_gap_count} monitoring {gap_label} {gap_verb} operator follow-up."
     if status == "yellow":
         return "Yellow: scheduled maintenance items remain open; review during the next maintenance window."
     return "Green: no open fleet actions are currently blocking the maintenance queue."
@@ -1806,21 +1829,32 @@ def api_operator_handoff():
         urgency = _remediation_bucket(action)
         actions.append({**action, "urgency": urgency, "due": _remediation_due(urgency)})
     slo = api_slo()
+    fleet_summary = api_summary()
     critical_clients = sum(1 for client in client_risks if client["risk_level"] == "critical")
     immediate_actions = sum(1 for action in actions if action["urgency"] == "immediate")
-    status = _fleet_brief_status(critical_clients, immediate_actions, len(actions))
+    monitoring_gap_count = fleet_summary["missing_snapshot_count"] + fleet_summary["stale_snapshot_count"]
+    status = _fleet_brief_status(critical_clients, immediate_actions, len(actions), monitoring_gap_count)
     top_clients = client_risks[:3]
     priority_clients = [client for client in client_risks if client["risk_level"] != "stable"]
     top_actions = actions[:5]
-    handoff_notes = (
-        [
-            f"Prioritize {priority_clients[0]['client']} due to "
-            f"{priority_clients[0]['critical_action_count']} critical actions and a "
-            f"lowest score of {priority_clients[0]['lowest_score']}."
-        ]
-        if priority_clients
-        else ["No client-level risks require handoff at this time."]
-    )
+    if priority_clients:
+        top_client = priority_clients[0]
+        if top_client["monitoring_gap_count"] and not top_client["open_action_count"]:
+            missing = top_client["missing_snapshot_count"]
+            stale = top_client["stale_snapshot_count"]
+            handoff_notes = [
+                f"Restore monitoring coverage for {top_client['client']}: "
+                f"{missing} missing snapshot{'s' if missing != 1 else ''} and "
+                f"{stale} stale snapshot{'s' if stale != 1 else ''}."
+            ]
+        else:
+            handoff_notes = [
+                f"Prioritize {top_client['client']} due to "
+                f"{top_client['critical_action_count']} critical actions and a "
+                f"lowest score of {top_client['lowest_score']}."
+            ]
+    else:
+        handoff_notes = ["No client-level risks require handoff at this time."]
     if top_actions:
         handoff_notes.append(f"Next action: {top_actions[0]['recommended_action']}")
     if slo.get("worst_objective") and slo["worst_objective"]["status"] in {"watch", "at_risk"}:
@@ -1831,12 +1865,21 @@ def api_operator_handoff():
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": status,
-        "headline": _operator_handoff_headline(status, critical_clients, immediate_actions),
-        "site_count": slo["site_count"],
+        "headline": _operator_handoff_headline(
+            status,
+            critical_clients,
+            immediate_actions,
+            monitoring_gap_count,
+            len(actions),
+        ),
+        "site_count": fleet_summary["sites"],
         "client_count": len(client_risks),
         "critical_client_count": critical_clients,
         "immediate_action_count": immediate_actions,
         "open_action_count": len(actions),
+        "missing_snapshot_count": fleet_summary["missing_snapshot_count"],
+        "stale_snapshot_count": fleet_summary["stale_snapshot_count"],
+        "monitoring_gap_count": monitoring_gap_count,
         "at_risk_objective_count": slo["at_risk_count"],
         "worst_objective": slo["worst_objective"],
         "top_clients": top_clients,

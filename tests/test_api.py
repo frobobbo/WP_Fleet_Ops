@@ -1795,6 +1795,68 @@ def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     assert stable["average_score"] >= 85
 
 
+def test_executive_handoffs_surface_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Executive Site",
+            url="https://stale-executive-gap.example",
+            client="Client Executive Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Executive Site",
+            "url": "https://missing-executive-gap.example",
+            "client": "Client Executive Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    risks = client.get("/api/executive-risks").json()
+
+    assert risks["client_count"] == 1
+    assert risks["elevated_client_count"] == 1
+    assert risks["stable_client_count"] == 0
+    risk = risks["clients"][0]
+    assert risk["client"] == "Client Executive Gap"
+    assert risk["risk_level"] == "elevated"
+    assert risk["site_count"] == 2
+    assert risk["monitored_site_count"] == 1
+    assert risk["missing_snapshot_count"] == 1
+    assert risk["stale_snapshot_count"] == 1
+    assert risk["monitoring_gap_count"] == 2
+
+    fleet_brief = client.get("/api/fleet-brief").json()
+
+    assert fleet_brief["status"] == "yellow"
+    assert fleet_brief["site_count"] == 2
+    assert fleet_brief["client_count"] == 1
+    assert fleet_brief["open_action_count"] == 0
+    assert fleet_brief["missing_snapshot_count"] == 1
+    assert fleet_brief["stale_snapshot_count"] == 1
+    assert fleet_brief["monitoring_gap_count"] == 2
+    assert fleet_brief["top_clients"][0]["client"] == "Client Executive Gap"
+
+    handoff = client.get("/api/operator-handoff").json()
+
+    assert handoff["status"] == "yellow"
+    assert handoff["site_count"] == 2
+    assert handoff["client_count"] == 1
+    assert handoff["open_action_count"] == 0
+    assert handoff["monitoring_gap_count"] == 2
+    assert handoff["headline"] == "Yellow: 2 monitoring gaps require operator follow-up."
+    assert handoff["top_clients"][0]["client"] == "Client Executive Gap"
+    assert handoff["handoff_notes"][0] == (
+        "Restore monitoring coverage for Client Executive Gap: 1 missing snapshot and 1 stale snapshot."
+    )
+
+
 def test_api_fleet_brief_returns_operator_summary(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
