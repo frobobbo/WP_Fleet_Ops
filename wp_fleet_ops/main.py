@@ -60,6 +60,7 @@ SNAPSHOT_FRESHNESS_HOURS = 168
 async def add_browser_security_headers(request: Request, call_next):
     """Apply baseline browser protections to dashboard and API responses."""
     response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store"
     response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Referrer-Policy"] = "no-referrer"

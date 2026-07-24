@@ -53,6 +53,7 @@ def test_responses_include_browser_security_headers(tmp_path):
         assert response.headers["x-frame-options"] == "DENY"
         assert response.headers["referrer-policy"] == "no-referrer"
         assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
+        assert response.headers["cache-control"] == "no-store"
         assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
         assert "form-action 'self'" in response.headers["content-security-policy"]
 
