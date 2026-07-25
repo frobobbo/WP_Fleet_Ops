@@ -2003,6 +2003,39 @@ def api_snapshot_history(limit: int = 25):
     }
 
 
+@app.get("/api/site-snapshot-history")
+def api_site_snapshot_history(url: str, limit: int = 25):
+    """Return snapshot history for a single site, newest first, for per-site trend analysis."""
+    bounded_limit = max(1, min(limit, 100))
+    normalized = normalize_site_url(url)
+    snapshots = [
+        {
+            "name": row["name"],
+            "url": row["url"],
+            "client": row.get("client") or "Unassigned",
+            "score": row["score"],
+            "status": _dashboard_status(row["score"]),
+            "captured_at": row["captured_at"],
+            "uptime_ok": bool(row["uptime_ok"]),
+            "ssl_days": row["ssl_days"],
+            "wp_updates": row["wp_updates"],
+            "backup_age_hours": row["backup_age_hours"],
+            "response_ms": row["response_ms"],
+            "security_header_count": row["security_header_count"],
+            "alert_count": len(row["alerts"]),
+            "alerts": row["alerts"],
+        }
+        for row in store.site_snapshots(normalized, bounded_limit)
+    ]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "url": normalized,
+        "limit": bounded_limit,
+        "snapshot_count": len(snapshots),
+        "snapshots": snapshots,
+    }
+
+
 def _site_trend_status(score_delta: int | None) -> str:
     """Return a compact trend label from a latest-vs-previous score delta."""
     if score_delta is None:

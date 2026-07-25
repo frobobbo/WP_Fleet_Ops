@@ -3262,3 +3262,64 @@ def test_snapshot_normalizes_site_name_in_alert_payloads_and_reports(tmp_path):
     report = client.get("/report").text
     assert "Padded Site needs attention" in report
     assert "  Padded Site  " not in report
+
+
+def test_api_site_snapshot_history_returns_ordered_snapshots(tmp_path):
+    client = make_test_client(tmp_path)
+    for i in range(3):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="History Site",
+                url="https://history.example",
+                response_ms=str(200 + i * 100),
+            ),
+            follow_redirects=False,
+        )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Other Site", url="https://other.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-snapshot-history?url=https://history.example")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] == "https://history.example"
+    assert payload["snapshot_count"] == 3
+    # All snapshots belong to the requested site
+    assert all(s["url"] == "https://history.example" for s in payload["snapshots"])
+    # Newest first (last inserted has highest response_ms=400)
+    assert payload["snapshots"][0]["response_ms"] == 400
+    assert payload["snapshots"][1]["response_ms"] == 300
+
+
+def test_api_site_snapshot_history_respects_limit(tmp_path):
+    client = make_test_client(tmp_path)
+    for _ in range(5):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name="Paged Site", url="https://paged.example"),
+            follow_redirects=False,
+        )
+
+    response = client.get("/api/site-snapshot-history?url=https://paged.example&limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 2
+    assert payload["snapshot_count"] == 2
+
+
+def test_api_site_snapshot_history_returns_empty_for_unknown_site(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/site-snapshot-history?url=https://unknown.example")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] == "https://unknown.example"
+    assert payload["snapshot_count"] == 0
+    assert payload["snapshots"] == []
+    assert payload["generated_at"].endswith("+00:00")
