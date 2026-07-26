@@ -204,6 +204,29 @@ class FleetOpsStore:
         with self._connect() as con:
             return int(con.execute("select count(*) from snapshots").fetchone()[0])
 
+    def recent_trend_snapshots(self, limit: int = 100) -> list[dict]:
+        """Return a bounded history with at most two recent snapshots per site."""
+        sql = """
+        with ranked_snapshots as (
+            select s.name,s.url,s.client, sn.*,
+                   row_number() over (partition by sn.site_id order by sn.id desc) as site_snapshot_rank
+            from snapshots sn
+            join sites s on s.id=sn.site_id
+        )
+        select * from ranked_snapshots
+        where site_snapshot_rank <= 2
+        order by id desc
+        limit ?
+        """
+        with self._connect() as con:
+            rows = []
+            for r in con.execute(sql, (limit,)):
+                d = dict(r)
+                d.pop("site_snapshot_rank", None)
+                d["alerts"] = json.loads(d.pop("alerts_json"))
+                rows.append(d)
+            return rows
+
     def site_snapshots(self, url: str, limit: int = 25, offset: int = 0) -> list[dict]:
         """Return snapshots for a single site by URL, newest first."""
         sql = """

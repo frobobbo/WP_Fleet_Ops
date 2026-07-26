@@ -2135,6 +2135,41 @@ def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     assert improving["recommended_action"] == "Continue monitoring the site trend."
 
 
+def test_api_site_trends_prevents_one_site_from_crowding_out_other_histories(tmp_path):
+    client = make_test_client(tmp_path)
+    for response_ms in (300, 1800):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Quiet Trend Site",
+                url="https://quiet-trend.example",
+                response_ms=str(response_ms),
+            ),
+            follow_redirects=False,
+        )
+    for response_ms in (200, 300, 400, 500):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Frequent Trend Site",
+                url="https://frequent-trend.example",
+                response_ms=str(response_ms),
+            ),
+            follow_redirects=False,
+        )
+
+    response = client.get("/api/site-trends?limit=4")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["snapshot_limit"] == 4
+    assert payload["site_count"] == 2
+    trends = {trend["name"]: trend for trend in payload["trends"]}
+    assert trends["Quiet Trend Site"]["previous_score"] is not None
+    assert trends["Quiet Trend Site"]["trend_status"] == "regressing"
+    assert trends["Frequent Trend Site"]["previous_score"] is not None
+
+
 def test_api_action_matrix_groups_open_actions_by_client_and_site(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

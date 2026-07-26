@@ -2060,7 +2060,7 @@ def _site_trend_status(score_delta: int | None) -> str:
 def _site_trend_rows(limit: int) -> list[dict]:
     """Compare each site's latest snapshot with its prior snapshot for trend triage."""
     history_by_url: dict[str, list[dict]] = {}
-    for snapshot in store.recent_snapshots(limit):
+    for snapshot in store.recent_trend_snapshots(limit):
         history_by_url.setdefault(snapshot["url"], []).append(snapshot)
 
     rows = []
