@@ -3297,19 +3297,27 @@ def test_api_site_snapshot_history_returns_ordered_snapshots(tmp_path):
 
 def test_api_site_snapshot_history_respects_limit(tmp_path):
     client = make_test_client(tmp_path)
-    for _ in range(5):
+    for i in range(5):
         client.post(
             "/snapshot",
-            data=valid_snapshot_payload(name="Paged Site", url="https://paged.example"),
+            data=valid_snapshot_payload(
+                name="Paged Site",
+                url="https://paged.example",
+                response_ms=str(200 + i * 100),
+            ),
             follow_redirects=False,
         )
 
-    response = client.get("/api/site-snapshot-history?url=https://paged.example&limit=2")
+    response = client.get("/api/site-snapshot-history?url=https://paged.example&limit=2&offset=2")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["limit"] == 2
+    assert payload["offset"] == 2
     assert payload["snapshot_count"] == 2
+    assert payload["total_snapshot_count"] == 5
+    assert payload["has_more"] is True
+    assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [400, 300]
 
 
 def test_api_site_snapshot_history_returns_empty_for_unknown_site(tmp_path):
@@ -3321,5 +3329,7 @@ def test_api_site_snapshot_history_returns_empty_for_unknown_site(tmp_path):
     payload = response.json()
     assert payload["url"] == "https://unknown.example"
     assert payload["snapshot_count"] == 0
+    assert payload["total_snapshot_count"] == 0
+    assert payload["has_more"] is False
     assert payload["snapshots"] == []
     assert payload["generated_at"].endswith("+00:00")

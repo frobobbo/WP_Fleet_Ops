@@ -2004,10 +2004,12 @@ def api_snapshot_history(limit: int = 25):
 
 
 @app.get("/api/site-snapshot-history")
-def api_site_snapshot_history(url: str, limit: int = 25):
-    """Return snapshot history for a single site, newest first, for per-site trend analysis."""
+def api_site_snapshot_history(url: str, limit: int = 25, offset: int = 0):
+    """Return a paginated snapshot history for one site, newest first."""
     bounded_limit = max(1, min(limit, 100))
+    bounded_offset = max(offset, 0)
     normalized = normalize_site_url(url)
+    total_snapshot_count = store.count_site_snapshots(normalized)
     snapshots = [
         {
             "name": row["name"],
@@ -2025,13 +2027,16 @@ def api_site_snapshot_history(url: str, limit: int = 25):
             "alert_count": len(row["alerts"]),
             "alerts": row["alerts"],
         }
-        for row in store.site_snapshots(normalized, bounded_limit)
+        for row in store.site_snapshots(normalized, bounded_limit, bounded_offset)
     ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "url": normalized,
         "limit": bounded_limit,
+        "offset": bounded_offset,
         "snapshot_count": len(snapshots),
+        "total_snapshot_count": total_snapshot_count,
+        "has_more": bounded_offset + len(snapshots) < total_snapshot_count,
         "snapshots": snapshots,
     }
 
