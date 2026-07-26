@@ -146,6 +146,42 @@ class FleetOpsStore:
                 rows.append(d)
             return rows
 
+    def recent_care_checks(
+        self,
+        limit: int = 25,
+        offset: int = 0,
+        url: str | None = None,
+    ) -> list[dict]:
+        """Return a page of care checks, optionally scoped to one site."""
+        sql = """
+        select s.name, s.url, s.client, c.* from care_checks c
+        join sites s on s.id=c.site_id
+        """
+        params: list[object] = []
+        if url is not None:
+            sql += " where s.url=?"
+            params.append(url)
+        sql += " order by c.id desc limit ? offset ?"
+        params.extend((limit, offset))
+        with self._connect() as con:
+            rows = []
+            for r in con.execute(sql, params):
+                d = dict(r)
+                d["actions"] = json.loads(d.pop("actions_json"))
+                d["security_headers"] = json.loads(d.pop("raw_json")).get("security_headers", {})
+                rows.append(d)
+            return rows
+
+    def count_care_checks(self, url: str | None = None) -> int:
+        """Return the total care-check count, optionally scoped to one site."""
+        sql = "select count(*) from care_checks c join sites s on s.id=c.site_id"
+        params: tuple[str, ...] = ()
+        if url is not None:
+            sql += " where s.url=?"
+            params = (url,)
+        with self._connect() as con:
+            return int(con.execute(sql, params).fetchone()[0])
+
     def save_snapshot(self, site_id: int, site: FleetSite, score: int, alerts: list[Alert]) -> int:
         with self._connect() as con:
             cur = con.execute(

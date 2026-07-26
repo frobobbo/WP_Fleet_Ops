@@ -3393,3 +3393,68 @@ def test_api_site_snapshot_history_returns_empty_for_unknown_site(tmp_path):
     assert payload["has_more"] is False
     assert payload["snapshots"] == []
     assert payload["generated_at"].endswith("+00:00")
+
+
+def test_api_care_check_history_returns_paginated_checks_newest_first(tmp_path):
+    client = make_test_client(tmp_path)
+    for i in range(4):
+        client.post(
+            "/care/manual-check",
+            data={
+                "name": f"Care History {i}",
+                "url": f"https://care-history-{i}.example",
+                "client": "Client Care",
+                "latency_ms": str(200 + i * 100),
+                "wordpress_version": f"6.{i}",
+                "update_count": str(i),
+            },
+            follow_redirects=False,
+        )
+
+    response = client.get("/api/care-check-history?limit=2&offset=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["url"] is None
+    assert payload["limit"] == 2
+    assert payload["offset"] == 1
+    assert payload["care_check_count"] == 2
+    assert payload["total_care_check_count"] == 4
+    assert payload["has_more"] is True
+    assert [check["wordpress_version"] for check in payload["care_checks"]] == ["6.2", "6.1"]
+    assert payload["care_checks"][0]["client"] == "Client Care"
+    assert payload["care_checks"][0]["actions"]
+
+
+def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
+    client = make_test_client(tmp_path)
+    for latency_ms in (200, 500, 800):
+        client.post(
+            "/care/manual-check",
+            data={
+                "name": "Care History Site",
+                "url": "https://care-history.example",
+                "latency_ms": str(latency_ms),
+            },
+            follow_redirects=False,
+        )
+    client.post(
+        "/care/manual-check",
+        data={"name": "Other Care Site", "url": "https://other-care.example"},
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/care-check-history",
+        params={"url": "HTTPS://CARE-HISTORY.EXAMPLE:443/#checks", "limit": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] == "https://care-history.example"
+    assert payload["care_check_count"] == 2
+    assert payload["total_care_check_count"] == 3
+    assert payload["has_more"] is True
+    assert [check["latency_ms"] for check in payload["care_checks"]] == [800, 500]
+    assert all(check["url"] == payload["url"] for check in payload["care_checks"])

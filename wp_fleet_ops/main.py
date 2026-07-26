@@ -2008,6 +2008,45 @@ def api_snapshot_history(limit: int = 25, offset: int = 0):
     }
 
 
+@app.get("/api/care-check-history")
+def api_care_check_history(url: str | None = None, limit: int = 25, offset: int = 0):
+    """Return paginated client-care checks, optionally filtered by site URL."""
+    bounded_limit = max(1, min(limit, 100))
+    bounded_offset = max(offset, 0)
+    normalized_url = normalize_site_url(url) if url is not None else None
+    total_care_check_count = store.count_care_checks(normalized_url)
+    care_checks = [
+        {
+            "name": row["name"],
+            "url": row["url"],
+            "client": row.get("client") or "Unassigned",
+            "status": row["status"],
+            "score": row["score"],
+            "checked_at": row["checked_at"],
+            "http_status": row["http_status"],
+            "latency_ms": row["latency_ms"],
+            "ssl_days_remaining": row["ssl_days_remaining"],
+            "wordpress_version": row["wordpress_version"],
+            "update_count": row["update_count"],
+            "backup_age_hours": row["backup_age_hours"],
+            "summary": row["summary"],
+            "actions": row["actions"],
+            "security_headers": row["security_headers"],
+        }
+        for row in store.recent_care_checks(bounded_limit, bounded_offset, normalized_url)
+    ]
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "url": normalized_url,
+        "limit": bounded_limit,
+        "offset": bounded_offset,
+        "care_check_count": len(care_checks),
+        "total_care_check_count": total_care_check_count,
+        "has_more": bounded_offset + len(care_checks) < total_care_check_count,
+        "care_checks": care_checks,
+    }
+
+
 @app.get("/api/site-snapshot-history")
 def api_site_snapshot_history(url: str, limit: int = 25, offset: int = 0):
     """Return a paginated snapshot history for one site, newest first."""
