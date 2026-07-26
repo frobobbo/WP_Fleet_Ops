@@ -1973,9 +1973,11 @@ def api_site_scorecards():
 
 
 @app.get("/api/snapshot-history")
-def api_snapshot_history(limit: int = 25):
-    """Return recent raw fleet snapshots for trend widgets and audit handoffs."""
+def api_snapshot_history(limit: int = 25, offset: int = 0):
+    """Return paginated fleet snapshots for trend widgets and audit handoffs."""
     bounded_limit = max(1, min(limit, 100))
+    bounded_offset = max(offset, 0)
+    total_snapshot_count = store.count_snapshots()
     snapshots = [
         {
             "name": row["name"],
@@ -1993,12 +1995,15 @@ def api_snapshot_history(limit: int = 25):
             "alert_count": len(row["alerts"]),
             "alerts": row["alerts"],
         }
-        for row in store.recent_snapshots(bounded_limit)
+        for row in store.recent_snapshots(bounded_limit, bounded_offset)
     ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "limit": bounded_limit,
+        "offset": bounded_offset,
         "snapshot_count": len(snapshots),
+        "total_snapshot_count": total_snapshot_count,
+        "has_more": bounded_offset + len(snapshots) < total_snapshot_count,
         "snapshots": snapshots,
     }
 

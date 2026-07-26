@@ -183,21 +183,26 @@ class FleetOpsStore:
                 rows.append(d)
             return rows
 
-    def recent_snapshots(self, limit: int = 25) -> list[dict]:
-        """Return recent fleet snapshots across all sites, newest first."""
+    def recent_snapshots(self, limit: int = 25, offset: int = 0) -> list[dict]:
+        """Return a page of fleet snapshots across all sites, newest first."""
         sql = """
         select s.name,s.url,s.client, sn.* from snapshots sn
         join sites s on s.id=sn.site_id
         order by sn.id desc
-        limit ?
+        limit ? offset ?
         """
         with self._connect() as con:
             rows = []
-            for r in con.execute(sql, (limit,)):
+            for r in con.execute(sql, (limit, offset)):
                 d = dict(r)
                 d["alerts"] = json.loads(d.pop("alerts_json"))
                 rows.append(d)
             return rows
+
+    def count_snapshots(self) -> int:
+        """Return the total number of fleet snapshots."""
+        with self._connect() as con:
+            return int(con.execute("select count(*) from snapshots").fetchone()[0])
 
     def site_snapshots(self, url: str, limit: int = 25, offset: int = 0) -> list[dict]:
         """Return snapshots for a single site by URL, newest first."""

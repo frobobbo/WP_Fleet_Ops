@@ -2040,6 +2040,31 @@ def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
     assert latest["alerts"][0]["severity"] == "critical"
 
 
+def test_api_snapshot_history_supports_pagination(tmp_path):
+    client = make_test_client(tmp_path)
+    for i in range(4):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"History Site {i}",
+                url=f"https://history-{i}.example",
+                response_ms=str(200 + i * 100),
+            ),
+            follow_redirects=False,
+        )
+
+    response = client.get("/api/snapshot-history?limit=2&offset=1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 2
+    assert payload["offset"] == 1
+    assert payload["snapshot_count"] == 2
+    assert payload["total_snapshot_count"] == 4
+    assert payload["has_more"] is True
+    assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [400, 300]
+
+
 def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
