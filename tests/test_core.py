@@ -152,6 +152,21 @@ def test_store_indexes_per_site_history_queries(tmp_path):
     assert "idx_snapshots_site_id_id" in snapshot_indexes
 
 
+def test_store_indexes_client_history_filters(tmp_path):
+    db_path = tmp_path / "fleetops.sqlite3"
+    FleetOpsStore(db_path)
+
+    with sqlite3.connect(db_path) as con:
+        site_indexes = {row[1] for row in con.execute("pragma index_list(sites)")}
+        indexed_columns = [
+            row[2]
+            for row in con.execute("pragma index_info(idx_sites_client_id)")
+        ]
+
+    assert "idx_sites_client_id" in site_indexes
+    assert indexed_columns == ["client", "id"]
+
+
 def test_normalize_site_url_deduplicates_bare_domains():
     assert normalize_site_url("Example.COM/") == "https://example.com"
 

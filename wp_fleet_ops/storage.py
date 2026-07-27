@@ -37,6 +37,13 @@ class FleetOpsStore:
                 """
             )
             con.execute("alter table sites add column client text not null default ''") if not self._has_column(con, "sites", "client") else None
+            # Client-scoped history reads should enter through the small matching
+            # site set instead of scanning every care check or fleet snapshot.
+            # Include the join key so SQLite can resolve site IDs from the index.
+            con.execute(
+                "create index if not exists idx_sites_client_id "
+                "on sites(client, id)"
+            )
             con.execute(
                 """
                 create table if not exists care_checks(
