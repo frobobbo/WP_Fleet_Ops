@@ -140,6 +140,18 @@ def test_store_rejects_orphan_check_and_snapshot_rows(tmp_path):
         store.save_snapshot(999, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site))
 
 
+def test_store_indexes_per_site_history_queries(tmp_path):
+    db_path = tmp_path / "fleetops.sqlite3"
+    FleetOpsStore(db_path)
+
+    with sqlite3.connect(db_path) as con:
+        care_indexes = {row[1] for row in con.execute("pragma index_list(care_checks)")}
+        snapshot_indexes = {row[1] for row in con.execute("pragma index_list(snapshots)")}
+
+    assert "idx_care_checks_site_id_id" in care_indexes
+    assert "idx_snapshots_site_id_id" in snapshot_indexes
+
+
 def test_normalize_site_url_deduplicates_bare_domains():
     assert normalize_site_url("Example.COM/") == "https://example.com"
 

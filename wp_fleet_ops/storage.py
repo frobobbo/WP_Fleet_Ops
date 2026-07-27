@@ -75,6 +75,17 @@ class FleetOpsStore:
                 )
                 """
             )
+            # Latest and per-site history APIs filter by site_id and then read
+            # newest IDs first. Install these indexes for both new and existing
+            # databases so history growth does not turn those reads into scans.
+            con.execute(
+                "create index if not exists idx_care_checks_site_id_id "
+                "on care_checks(site_id, id desc)"
+            )
+            con.execute(
+                "create index if not exists idx_snapshots_site_id_id "
+                "on snapshots(site_id, id desc)"
+            )
 
     @staticmethod
     def _has_column(con: sqlite3.Connection, table: str, column: str) -> bool:
