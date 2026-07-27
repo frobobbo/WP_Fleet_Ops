@@ -132,6 +132,16 @@ def _snapshot_is_current(captured_at: str | None, now: datetime, threshold_hours
     return freshness == "current"
 
 
+def _normalize_client_filter(client: str | None) -> str | None:
+    """Normalize an optional account filter while preserving stored client names."""
+    if client is None:
+        return None
+    normalized = client.strip()
+    if not normalized:
+        raise ValueError("Client filter must not be empty.")
+    return "Unassigned" if normalized.casefold() == "unassigned" else normalized
+
+
 def _recommended_action(alert: dict) -> str:
     """Translate an alert into a concise operator next step."""
     message = (alert.get("message") or "").lower()
@@ -1973,17 +1983,24 @@ def api_site_scorecards():
 
 
 @app.get("/api/snapshot-history")
-def api_snapshot_history(url: str | None = None, limit: int = 25, offset: int = 0):
-    """Return paginated fleet snapshots, optionally filtered by site URL."""
+def api_snapshot_history(
+    url: str | None = None,
+    client: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+):
+    """Return paginated fleet snapshots, optionally filtered by site or client."""
     bounded_limit = max(1, min(limit, 100))
     bounded_offset = max(offset, 0)
     normalized_url = normalize_site_url(url) if url is not None else None
-    if normalized_url is None:
-        total_snapshot_count = store.count_snapshots()
-        history_rows = store.recent_snapshots(bounded_limit, bounded_offset)
-    else:
-        total_snapshot_count = store.count_site_snapshots(normalized_url)
-        history_rows = store.site_snapshots(normalized_url, bounded_limit, bounded_offset)
+    normalized_client = _normalize_client_filter(client)
+    total_snapshot_count = store.count_snapshots(normalized_url, normalized_client)
+    history_rows = store.recent_snapshots(
+        bounded_limit,
+        bounded_offset,
+        normalized_url,
+        normalized_client,
+    )
     snapshots = [
         {
             "name": row["name"],
@@ -2006,6 +2023,7 @@ def api_snapshot_history(url: str | None = None, limit: int = 25, offset: int = 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "url": normalized_url,
+        "client": normalized_client,
         "limit": bounded_limit,
         "offset": bounded_offset,
         "snapshot_count": len(snapshots),
@@ -2016,12 +2034,18 @@ def api_snapshot_history(url: str | None = None, limit: int = 25, offset: int = 
 
 
 @app.get("/api/care-check-history")
-def api_care_check_history(url: str | None = None, limit: int = 25, offset: int = 0):
-    """Return paginated client-care checks, optionally filtered by site URL."""
+def api_care_check_history(
+    url: str | None = None,
+    client: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+):
+    """Return paginated care checks, optionally filtered by site or client."""
     bounded_limit = max(1, min(limit, 100))
     bounded_offset = max(offset, 0)
     normalized_url = normalize_site_url(url) if url is not None else None
-    total_care_check_count = store.count_care_checks(normalized_url)
+    normalized_client = _normalize_client_filter(client)
+    total_care_check_count = store.count_care_checks(normalized_url, normalized_client)
     care_checks = [
         {
             "name": row["name"],
@@ -2040,11 +2064,17 @@ def api_care_check_history(url: str | None = None, limit: int = 25, offset: int 
             "actions": row["actions"],
             "security_headers": row["security_headers"],
         }
-        for row in store.recent_care_checks(bounded_limit, bounded_offset, normalized_url)
+        for row in store.recent_care_checks(
+            bounded_limit,
+            bounded_offset,
+            normalized_url,
+            normalized_client,
+        )
     ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "url": normalized_url,
+        "client": normalized_client,
         "limit": bounded_limit,
         "offset": bounded_offset,
         "care_check_count": len(care_checks),

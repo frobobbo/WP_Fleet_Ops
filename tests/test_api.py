@@ -2098,6 +2098,46 @@ def test_api_snapshot_history_filters_by_normalized_site_url(tmp_path):
     assert all(snapshot["url"] == payload["url"] for snapshot in payload["snapshots"])
 
 
+def test_api_snapshot_history_filters_and_paginates_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for i in range(3):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"Alpha History {i}",
+                url=f"https://alpha-history-{i}.example",
+                client="Client Alpha",
+                response_ms=str(300 + i * 100),
+            ),
+            follow_redirects=False,
+        )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta History",
+            url="https://beta-history.example",
+            client="Client Beta",
+            response_ms="900",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/snapshot-history",
+        params={"client": "  Client Alpha  ", "limit": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] is None
+    assert payload["client"] == "Client Alpha"
+    assert payload["snapshot_count"] == 2
+    assert payload["total_snapshot_count"] == 3
+    assert payload["has_more"] is True
+    assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [500, 400]
+    assert all(snapshot["client"] == payload["client"] for snapshot in payload["snapshots"])
+
+
 def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -3491,3 +3531,43 @@ def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
     assert payload["has_more"] is True
     assert [check["latency_ms"] for check in payload["care_checks"]] == [800, 500]
     assert all(check["url"] == payload["url"] for check in payload["care_checks"])
+
+
+def test_api_care_check_history_filters_and_paginates_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for i in range(3):
+        client.post(
+            "/care/manual-check",
+            data={
+                "name": f"Alpha Care History {i}",
+                "url": f"https://alpha-care-history-{i}.example",
+                "client": "Client Alpha",
+                "latency_ms": str(300 + i * 100),
+            },
+            follow_redirects=False,
+        )
+    client.post(
+        "/care/manual-check",
+        data={
+            "name": "Beta Care History",
+            "url": "https://beta-care-history.example",
+            "client": "Client Beta",
+            "latency_ms": "900",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/care-check-history",
+        params={"client": "  Client Alpha  ", "limit": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] is None
+    assert payload["client"] == "Client Alpha"
+    assert payload["care_check_count"] == 2
+    assert payload["total_care_check_count"] == 3
+    assert payload["has_more"] is True
+    assert [check["latency_ms"] for check in payload["care_checks"]] == [500, 400]
+    assert all(check["client"] == payload["client"] for check in payload["care_checks"])

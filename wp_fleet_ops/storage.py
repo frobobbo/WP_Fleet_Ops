@@ -162,16 +162,25 @@ class FleetOpsStore:
         limit: int = 25,
         offset: int = 0,
         url: str | None = None,
+        client: str | None = None,
     ) -> list[dict]:
-        """Return a page of care checks, optionally scoped to one site."""
+        """Return a page of care checks, optionally scoped by site or client."""
         sql = """
         select s.name, s.url, s.client, c.* from care_checks c
         join sites s on s.id=c.site_id
         """
         params: list[object] = []
+        filters = []
         if url is not None:
-            sql += " where s.url=?"
+            filters.append("s.url=?")
             params.append(url)
+        if client == "Unassigned":
+            filters.append("trim(s.client) = ''")
+        elif client is not None:
+            filters.append("s.client=?")
+            params.append(client)
+        if filters:
+            sql += " where " + " and ".join(filters)
         sql += " order by c.id desc limit ? offset ?"
         params.extend((limit, offset))
         with self._connect() as con:
@@ -183,13 +192,21 @@ class FleetOpsStore:
                 rows.append(d)
             return rows
 
-    def count_care_checks(self, url: str | None = None) -> int:
-        """Return the total care-check count, optionally scoped to one site."""
+    def count_care_checks(self, url: str | None = None, client: str | None = None) -> int:
+        """Return the care-check count, optionally scoped by site or client."""
         sql = "select count(*) from care_checks c join sites s on s.id=c.site_id"
-        params: tuple[str, ...] = ()
+        params: list[str] = []
+        filters = []
         if url is not None:
-            sql += " where s.url=?"
-            params = (url,)
+            filters.append("s.url=?")
+            params.append(url)
+        if client == "Unassigned":
+            filters.append("trim(s.client) = ''")
+        elif client is not None:
+            filters.append("s.client=?")
+            params.append(client)
+        if filters:
+            sql += " where " + " and ".join(filters)
         with self._connect() as con:
             return int(con.execute(sql, params).fetchone()[0])
 
@@ -230,26 +247,57 @@ class FleetOpsStore:
                 rows.append(d)
             return rows
 
-    def recent_snapshots(self, limit: int = 25, offset: int = 0) -> list[dict]:
-        """Return a page of fleet snapshots across all sites, newest first."""
+    def recent_snapshots(
+        self,
+        limit: int = 25,
+        offset: int = 0,
+        url: str | None = None,
+        client: str | None = None,
+    ) -> list[dict]:
+        """Return a page of fleet snapshots, optionally scoped by site or client."""
         sql = """
         select s.name,s.url,s.client, sn.* from snapshots sn
         join sites s on s.id=sn.site_id
-        order by sn.id desc
-        limit ? offset ?
         """
+        params: list[object] = []
+        filters = []
+        if url is not None:
+            filters.append("s.url=?")
+            params.append(url)
+        if client == "Unassigned":
+            filters.append("trim(s.client) = ''")
+        elif client is not None:
+            filters.append("s.client=?")
+            params.append(client)
+        if filters:
+            sql += " where " + " and ".join(filters)
+        sql += " order by sn.id desc limit ? offset ?"
+        params.extend((limit, offset))
         with self._connect() as con:
             rows = []
-            for r in con.execute(sql, (limit, offset)):
+            for r in con.execute(sql, params):
                 d = dict(r)
                 d["alerts"] = json.loads(d.pop("alerts_json"))
                 rows.append(d)
             return rows
 
-    def count_snapshots(self) -> int:
-        """Return the total number of fleet snapshots."""
+    def count_snapshots(self, url: str | None = None, client: str | None = None) -> int:
+        """Return the snapshot count, optionally scoped by site or client."""
+        sql = "select count(*) from snapshots sn join sites s on s.id=sn.site_id"
+        params: list[str] = []
+        filters = []
+        if url is not None:
+            filters.append("s.url=?")
+            params.append(url)
+        if client == "Unassigned":
+            filters.append("trim(s.client) = ''")
+        elif client is not None:
+            filters.append("s.client=?")
+            params.append(client)
+        if filters:
+            sql += " where " + " and ".join(filters)
         with self._connect() as con:
-            return int(con.execute("select count(*) from snapshots").fetchone()[0])
+            return int(con.execute(sql, params).fetchone()[0])
 
     def recent_trend_snapshots(self, limit: int = 100) -> list[dict]:
         """Return a bounded history with at most two recent snapshots per site."""
@@ -276,27 +324,8 @@ class FleetOpsStore:
 
     def site_snapshots(self, url: str, limit: int = 25, offset: int = 0) -> list[dict]:
         """Return snapshots for a single site by URL, newest first."""
-        sql = """
-        select s.name,s.url,s.client, sn.* from snapshots sn
-        join sites s on s.id=sn.site_id
-        where s.url=?
-        order by sn.id desc
-        limit ? offset ?
-        """
-        with self._connect() as con:
-            rows = []
-            for r in con.execute(sql, (url, limit, offset)):
-                d = dict(r)
-                d["alerts"] = json.loads(d.pop("alerts_json"))
-                rows.append(d)
-            return rows
+        return self.recent_snapshots(limit, offset, url=url)
 
     def count_site_snapshots(self, url: str) -> int:
         """Return the total number of snapshots persisted for one site URL."""
-        sql = """
-        select count(*) from snapshots sn
-        join sites s on s.id=sn.site_id
-        where s.url=?
-        """
-        with self._connect() as con:
-            return int(con.execute(sql, (url,)).fetchone()[0])
+        return self.count_snapshots(url=url)
