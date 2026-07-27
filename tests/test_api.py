@@ -2065,6 +2065,39 @@ def test_api_snapshot_history_supports_pagination(tmp_path):
     assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [400, 300]
 
 
+def test_api_snapshot_history_filters_by_normalized_site_url(tmp_path):
+    client = make_test_client(tmp_path)
+    for response_ms in (200, 500, 800):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Filtered History Site",
+                url="https://filtered-history.example",
+                response_ms=str(response_ms),
+            ),
+            follow_redirects=False,
+        )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Other History Site", url="https://other-history.example"),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/snapshot-history",
+        params={"url": "HTTPS://FILTERED-HISTORY.EXAMPLE:443/#snapshots", "limit": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["url"] == "https://filtered-history.example"
+    assert payload["snapshot_count"] == 2
+    assert payload["total_snapshot_count"] == 3
+    assert payload["has_more"] is True
+    assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [800, 500]
+    assert all(snapshot["url"] == payload["url"] for snapshot in payload["snapshots"])
+
+
 def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
