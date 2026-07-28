@@ -142,6 +142,14 @@ def _normalize_client_filter(client: str | None) -> str | None:
     return "Unassigned" if normalized.casefold() == "unassigned" else normalized
 
 
+def _bounded_history_offset(limit: int, offset: int, total_count: int) -> int:
+    """Clamp an offset past the result set to the start of its final page."""
+    requested_offset = max(offset, 0)
+    if total_count and requested_offset >= total_count:
+        return ((total_count - 1) // limit) * limit
+    return requested_offset
+
+
 def _pagination_navigation(limit: int, offset: int, returned_count: int, total_count: int) -> dict:
     """Return explicit offsets for traversing an offset-paginated result set."""
     has_more = offset + returned_count < total_count
@@ -2001,10 +2009,10 @@ def api_snapshot_history(
 ):
     """Return paginated fleet snapshots, optionally filtered by site or client."""
     bounded_limit = max(1, min(limit, 100))
-    bounded_offset = max(offset, 0)
     normalized_url = normalize_site_url(url) if url is not None else None
     normalized_client = _normalize_client_filter(client)
     total_snapshot_count = store.count_snapshots(normalized_url, normalized_client)
+    bounded_offset = _bounded_history_offset(bounded_limit, offset, total_snapshot_count)
     history_rows = store.recent_snapshots(
         bounded_limit,
         bounded_offset,
@@ -2058,10 +2066,10 @@ def api_care_check_history(
 ):
     """Return paginated care checks, optionally filtered by site or client."""
     bounded_limit = max(1, min(limit, 100))
-    bounded_offset = max(offset, 0)
     normalized_url = normalize_site_url(url) if url is not None else None
     normalized_client = _normalize_client_filter(client)
     total_care_check_count = store.count_care_checks(normalized_url, normalized_client)
+    bounded_offset = _bounded_history_offset(bounded_limit, offset, total_care_check_count)
     care_checks = [
         {
             "care_check_id": row["id"],
@@ -2110,9 +2118,9 @@ def api_care_check_history(
 def api_site_snapshot_history(url: str, limit: int = 25, offset: int = 0):
     """Return a paginated snapshot history for one site, newest first."""
     bounded_limit = max(1, min(limit, 100))
-    bounded_offset = max(offset, 0)
     normalized = normalize_site_url(url)
     total_snapshot_count = store.count_site_snapshots(normalized)
+    bounded_offset = _bounded_history_offset(bounded_limit, offset, total_snapshot_count)
     snapshots = [
         {
             "snapshot_id": row["id"],
