@@ -2031,7 +2031,10 @@ def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
     assert payload["generated_at"].endswith("+00:00")
     assert payload["limit"] == 1
     assert payload["snapshot_count"] == 1
+    assert payload["previous_offset"] is None
+    assert payload["next_offset"] == 1
     latest = payload["snapshots"][0]
+    assert isinstance(latest["snapshot_id"], int)
     assert latest["name"] == "History Site"
     assert latest["client"] == "Client History"
     assert latest["status"] == "red"
@@ -2062,6 +2065,9 @@ def test_api_snapshot_history_supports_pagination(tmp_path):
     assert payload["snapshot_count"] == 2
     assert payload["total_snapshot_count"] == 4
     assert payload["has_more"] is True
+    assert payload["previous_offset"] == 0
+    assert payload["next_offset"] == 3
+    assert payload["snapshots"][0]["snapshot_id"] > payload["snapshots"][1]["snapshot_id"]
     assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [400, 300]
 
 
@@ -3450,6 +3456,9 @@ def test_api_site_snapshot_history_respects_limit(tmp_path):
     assert payload["snapshot_count"] == 2
     assert payload["total_snapshot_count"] == 5
     assert payload["has_more"] is True
+    assert payload["previous_offset"] == 0
+    assert payload["next_offset"] == 4
+    assert payload["snapshots"][0]["snapshot_id"] > payload["snapshots"][1]["snapshot_id"]
     assert [snapshot["response_ms"] for snapshot in payload["snapshots"]] == [400, 300]
 
 
@@ -3464,6 +3473,8 @@ def test_api_site_snapshot_history_returns_empty_for_unknown_site(tmp_path):
     assert payload["snapshot_count"] == 0
     assert payload["total_snapshot_count"] == 0
     assert payload["has_more"] is False
+    assert payload["previous_offset"] is None
+    assert payload["next_offset"] is None
     assert payload["snapshots"] == []
     assert payload["generated_at"].endswith("+00:00")
 
@@ -3495,6 +3506,9 @@ def test_api_care_check_history_returns_paginated_checks_newest_first(tmp_path):
     assert payload["care_check_count"] == 2
     assert payload["total_care_check_count"] == 4
     assert payload["has_more"] is True
+    assert payload["previous_offset"] == 0
+    assert payload["next_offset"] == 3
+    assert payload["care_checks"][0]["care_check_id"] > payload["care_checks"][1]["care_check_id"]
     assert [check["wordpress_version"] for check in payload["care_checks"]] == ["6.2", "6.1"]
     assert payload["care_checks"][0]["client"] == "Client Care"
     assert payload["care_checks"][0]["actions"]

@@ -142,6 +142,16 @@ def _normalize_client_filter(client: str | None) -> str | None:
     return "Unassigned" if normalized.casefold() == "unassigned" else normalized
 
 
+def _pagination_navigation(limit: int, offset: int, returned_count: int, total_count: int) -> dict:
+    """Return explicit offsets for traversing an offset-paginated result set."""
+    has_more = offset + returned_count < total_count
+    return {
+        "has_more": has_more,
+        "previous_offset": max(0, offset - limit) if offset > 0 else None,
+        "next_offset": offset + returned_count if has_more else None,
+    }
+
+
 def _recommended_action(alert: dict) -> str:
     """Translate an alert into a concise operator next step."""
     message = (alert.get("message") or "").lower()
@@ -2003,6 +2013,7 @@ def api_snapshot_history(
     )
     snapshots = [
         {
+            "snapshot_id": row["id"],
             "name": row["name"],
             "url": row["url"],
             "client": row.get("client") or "Unassigned",
@@ -2028,7 +2039,12 @@ def api_snapshot_history(
         "offset": bounded_offset,
         "snapshot_count": len(snapshots),
         "total_snapshot_count": total_snapshot_count,
-        "has_more": bounded_offset + len(snapshots) < total_snapshot_count,
+        **_pagination_navigation(
+            bounded_limit,
+            bounded_offset,
+            len(snapshots),
+            total_snapshot_count,
+        ),
         "snapshots": snapshots,
     }
 
@@ -2048,6 +2064,7 @@ def api_care_check_history(
     total_care_check_count = store.count_care_checks(normalized_url, normalized_client)
     care_checks = [
         {
+            "care_check_id": row["id"],
             "name": row["name"],
             "url": row["url"],
             "client": row.get("client") or "Unassigned",
@@ -2079,7 +2096,12 @@ def api_care_check_history(
         "offset": bounded_offset,
         "care_check_count": len(care_checks),
         "total_care_check_count": total_care_check_count,
-        "has_more": bounded_offset + len(care_checks) < total_care_check_count,
+        **_pagination_navigation(
+            bounded_limit,
+            bounded_offset,
+            len(care_checks),
+            total_care_check_count,
+        ),
         "care_checks": care_checks,
     }
 
@@ -2093,6 +2115,7 @@ def api_site_snapshot_history(url: str, limit: int = 25, offset: int = 0):
     total_snapshot_count = store.count_site_snapshots(normalized)
     snapshots = [
         {
+            "snapshot_id": row["id"],
             "name": row["name"],
             "url": row["url"],
             "client": row.get("client") or "Unassigned",
@@ -2117,7 +2140,12 @@ def api_site_snapshot_history(url: str, limit: int = 25, offset: int = 0):
         "offset": bounded_offset,
         "snapshot_count": len(snapshots),
         "total_snapshot_count": total_snapshot_count,
-        "has_more": bounded_offset + len(snapshots) < total_snapshot_count,
+        **_pagination_navigation(
+            bounded_limit,
+            bounded_offset,
+            len(snapshots),
+            total_snapshot_count,
+        ),
         "snapshots": snapshots,
     }
 
