@@ -2098,6 +2098,8 @@ def test_history_apis_clamp_offsets_past_the_last_page(tmp_path, path, count_key
     assert payload["limit"] == 2
     assert payload["offset"] == 2
     assert payload[count_key] == 1
+    assert payload["first_offset"] == 0
+    assert payload["last_offset"] == 2
     assert payload["previous_offset"] == 0
     assert payload["next_offset"] is None
     assert len(payload[rows_key]) == 1
@@ -3505,6 +3507,8 @@ def test_api_site_snapshot_history_returns_empty_for_unknown_site(tmp_path):
     assert payload["snapshot_count"] == 0
     assert payload["total_snapshot_count"] == 0
     assert payload["has_more"] is False
+    assert payload["first_offset"] is None
+    assert payload["last_offset"] is None
     assert payload["previous_offset"] is None
     assert payload["next_offset"] is None
     assert payload["snapshots"] == []
