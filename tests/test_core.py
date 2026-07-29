@@ -140,6 +140,19 @@ def test_store_rejects_orphan_check_and_snapshot_rows(tmp_path):
         store.save_snapshot(999, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site))
 
 
+def test_store_configures_connections_for_concurrent_requests(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    with store._connect() as con:
+        journal_mode = con.execute("pragma journal_mode").fetchone()[0]
+        busy_timeout = con.execute("pragma busy_timeout").fetchone()[0]
+        foreign_keys = con.execute("pragma foreign_keys").fetchone()[0]
+
+    assert journal_mode == "wal"
+    assert busy_timeout == 30_000
+    assert foreign_keys == 1
+
+
 def test_store_indexes_per_site_history_queries(tmp_path):
     db_path = tmp_path / "fleetops.sqlite3"
     FleetOpsStore(db_path)

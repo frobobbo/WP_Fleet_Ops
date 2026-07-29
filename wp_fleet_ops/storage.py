@@ -15,16 +15,24 @@ class FleetOpsStore:
         self._init()
 
     def _connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.path)
+        # FastAPI runs synchronous handlers in a thread pool, so brief overlap
+        # between dashboard reads and snapshot writes is expected. Give the
+        # active writer time to finish instead of surfacing transient lock errors.
+        con = sqlite3.connect(self.path, timeout=30)
         con.row_factory = sqlite3.Row
         # SQLite declares foreign keys in the schema but does not enforce them
         # unless every connection opts in. Keep checks and snapshots tied to a
         # real site so orphan history cannot silently disappear from reports.
         con.execute("pragma foreign_keys = on")
+        con.execute("pragma busy_timeout = 30000")
         return con
 
     def _init(self):
         with self._connect() as con:
+            # WAL lets readers continue while a snapshot or care check is being
+            # persisted. The setting is durable for this database and applies to
+            # subsequent connections after initialization.
+            con.execute("pragma journal_mode = wal")
             con.execute(
                 """
                 create table if not exists sites(
