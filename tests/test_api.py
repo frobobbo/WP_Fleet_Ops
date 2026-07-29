@@ -2065,6 +2065,9 @@ def test_api_snapshot_history_supports_pagination(tmp_path):
     assert payload["snapshot_count"] == 2
     assert payload["total_snapshot_count"] == 4
     assert payload["has_more"] is True
+    assert payload["range_start"] == 2
+    assert payload["range_end"] == 3
+    assert payload["remaining_count"] == 1
     assert payload["previous_offset"] == 0
     assert payload["next_offset"] == 3
     assert payload["snapshots"][0]["snapshot_id"] > payload["snapshots"][1]["snapshot_id"]
@@ -2098,6 +2101,9 @@ def test_history_apis_clamp_offsets_past_the_last_page(tmp_path, path, count_key
     assert payload["limit"] == 2
     assert payload["offset"] == 2
     assert payload[count_key] == 1
+    assert payload["range_start"] == 3
+    assert payload["range_end"] == 3
+    assert payload["remaining_count"] == 0
     assert payload["first_offset"] == 0
     assert payload["last_offset"] == 2
     assert payload["previous_offset"] == 0
@@ -2121,6 +2127,9 @@ def test_history_apis_reset_offsets_when_filtered_history_is_empty(tmp_path, pat
 
     assert payload["offset"] == 0
     assert payload[count_key] == 0
+    assert payload["range_start"] is None
+    assert payload["range_end"] is None
+    assert payload["remaining_count"] == 0
     assert payload["first_offset"] is None
     assert payload["last_offset"] is None
     assert payload["previous_offset"] is None
