@@ -153,12 +153,14 @@ def _bounded_history_offset(limit: int, offset: int, total_count: int) -> int:
 
 
 def _pagination_navigation(limit: int, offset: int, returned_count: int, total_count: int) -> dict:
-    """Return navigation and exact result-range metadata for an offset page."""
+    """Return navigation, page position, and exact result-range metadata."""
     range_end = offset + returned_count
     has_more = range_end < total_count
     has_results = total_count > 0
     return {
         "has_more": has_more,
+        "page_number": (offset // limit) + 1 if has_results else 0,
+        "page_count": ((total_count - 1) // limit) + 1 if has_results else 0,
         "range_start": offset + 1 if returned_count else None,
         "range_end": range_end if returned_count else None,
         "remaining_count": max(total_count - range_end, 0),

@@ -24,6 +24,13 @@ Environment variables:
 - `WP_FLEET_OPS_DB`: explicit SQLite database path.
 - `PORT`: used by the console script runner.
 
+### History API pagination
+
+`/api/snapshot-history`, `/api/care-check-history`, and `/api/site-snapshot-history`
+return offset navigation plus `page_number` and `page_count`. Pages are one-based when
+results exist; both page fields are `0` for an empty result set. Requested offsets beyond
+the result set are clamped to the final page.
+
 ## Container
 
 ```bash
