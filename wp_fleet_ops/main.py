@@ -143,9 +143,11 @@ def _normalize_client_filter(client: str | None) -> str | None:
 
 
 def _bounded_history_offset(limit: int, offset: int, total_count: int) -> int:
-    """Clamp an offset past the result set to the start of its final page."""
+    """Clamp an offset to a page that exists in the result set."""
+    if total_count == 0:
+        return 0
     requested_offset = max(offset, 0)
-    if total_count and requested_offset >= total_count:
+    if requested_offset >= total_count:
         return ((total_count - 1) // limit) * limit
     return requested_offset
 

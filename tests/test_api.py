@@ -2105,6 +2105,29 @@ def test_history_apis_clamp_offsets_past_the_last_page(tmp_path, path, count_key
     assert len(payload[rows_key]) == 1
 
 
+@pytest.mark.parametrize(
+    ("path", "count_key", "rows_key"),
+    [
+        ("/api/snapshot-history", "snapshot_count", "snapshots"),
+        ("/api/care-check-history", "care_check_count", "care_checks"),
+        ("/api/site-snapshot-history?url=https://empty-history.example", "snapshot_count", "snapshots"),
+    ],
+)
+def test_history_apis_reset_offsets_when_filtered_history_is_empty(tmp_path, path, count_key, rows_key):
+    client = make_test_client(tmp_path)
+
+    separator = "&" if "?" in path else "?"
+    payload = client.get(f"{path}{separator}limit=2&offset=999").json()
+
+    assert payload["offset"] == 0
+    assert payload[count_key] == 0
+    assert payload["first_offset"] is None
+    assert payload["last_offset"] is None
+    assert payload["previous_offset"] is None
+    assert payload["next_offset"] is None
+    assert payload[rows_key] == []
+
+
 def test_api_snapshot_history_filters_by_normalized_site_url(tmp_path):
     client = make_test_client(tmp_path)
     for response_ms in (200, 500, 800):
