@@ -1,4 +1,5 @@
 from email.message import Message
+from pathlib import Path
 import sqlite3
 from urllib.error import HTTPError
 
@@ -7,6 +8,20 @@ import pytest
 from wp_fleet_ops.checks import evaluate_site, fetch_basic_site_check, normalize_site_url, summarize_care_report
 from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from wp_fleet_ops.storage import FleetOpsStore
+
+
+def test_helm_connection_test_checks_database_readiness():
+    helm_test = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "templates"
+        / "tests"
+        / "test-connection.yaml"
+    ).read_text()
+
+    assert "/ready" in helm_test
+    assert "/health" not in helm_test
 
 
 def test_care_score_and_report_are_client_friendly():
