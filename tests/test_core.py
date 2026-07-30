@@ -10,7 +10,7 @@ from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alert
 from wp_fleet_ops.storage import FleetOpsStore
 
 
-def test_helm_connection_test_checks_database_readiness():
+def test_helm_connection_test_checks_required_app_surfaces():
     helm_test = (
         Path(__file__).parents[1]
         / "charts"
@@ -20,7 +20,12 @@ def test_helm_connection_test_checks_database_readiness():
         / "test-connection.yaml"
     ).read_text()
 
-    assert "/ready" in helm_test
+    assert "command: ['/bin/sh', '-ec']" in helm_test
+    assert '"status":"ready"' in helm_test
+    assert '"${base_url}/ready"' in helm_test
+    assert '"${base_url}/"' in helm_test
+    assert '"${base_url}/report"' in helm_test
+    assert "WP FleetOps Maintenance Report" in helm_test
     assert "/health" not in helm_test
 
 
