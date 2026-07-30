@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -84,7 +85,18 @@ def health():
 @app.get("/ready")
 def ready():
     """Confirm the app can reach its SQLite store before receiving traffic."""
-    return {"status": "ready", "app": "wp-fleet-ops", "database": "ok", **store.health_counts()}
+    try:
+        counts = store.health_counts()
+    except sqlite3.Error:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "not_ready",
+                "app": "wp-fleet-ops",
+                "database": "unavailable",
+            },
+        )
+    return {"status": "ready", "app": "wp-fleet-ops", "database": "ok", **counts}
 
 
 def _dashboard_status(score: int) -> str:

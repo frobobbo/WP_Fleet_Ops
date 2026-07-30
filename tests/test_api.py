@@ -96,6 +96,26 @@ def test_ready_reports_database_access_and_current_counts(tmp_path):
     }
 
 
+def test_ready_returns_service_unavailable_when_database_probe_fails(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    def unavailable_database():
+        raise sqlite3.OperationalError("sensitive database path")
+
+    monkeypatch.setattr(main.store, "health_counts", unavailable_database)
+
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "app": "wp-fleet-ops",
+        "database": "unavailable",
+    }
+    assert "sensitive database path" not in response.text
+
+
 def test_api_summary_returns_dashboard_rollups(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
