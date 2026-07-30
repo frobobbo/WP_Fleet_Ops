@@ -13,9 +13,11 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# The application does not call the Kubernetes API. Keep credentials out of the
+# Pod unless an operator explicitly opts into token mounting.
 serviceAccount:
   create: true
-  automount: true
+  automount: false
   annotations: {}
   name: ""
 

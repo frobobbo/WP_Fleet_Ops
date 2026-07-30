@@ -29,6 +29,15 @@ def test_helm_connection_test_checks_required_app_surfaces():
     assert "/health" not in helm_test
 
 
+def test_helm_workload_disables_unused_service_account_token_by_default():
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "serviceAccount:\n  create: true\n  automount: false" in values
+    assert "automountServiceAccountToken: {{ .Values.serviceAccount.automount }}" in deployment
+
+
 def test_care_score_and_report_are_client_friendly():
     good = evaluate_site("Church", "church.example", 200, 200, 90, "6.6", 0, 12, {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"})
     bad = evaluate_site("Client", "https://client.example", 500, 1800, 5, "6.2", 6, 120, {})
