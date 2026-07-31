@@ -186,7 +186,7 @@ def ssl_days_remaining(url: str, timeout: int = 10) -> int:
 def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
     name = normalize_site_name(name)
     url = normalize_site_url(url)
-    parsed = urlparse(url)
+    effective_url = url
     started = time.monotonic()
     status = 0
     headers: dict[str, str] = {}
@@ -195,15 +195,21 @@ def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.status
             headers = dict(resp.headers.items())
+            effective_url = normalize_site_url(resp.geturl())
     except urllib.error.HTTPError as exc:
         # HTTPError still represents a completed HTTP response. Preserve its
         # status and headers so operators see the actual server-side failure.
         status = exc.code
         headers = dict(exc.headers.items()) if exc.headers else {}
+        effective_url = normalize_site_url(exc.geturl())
     except Exception:
         status = 0
     latency_ms = int((time.monotonic() - started) * 1000)
-    ssl_days = ssl_days_remaining(url, timeout=timeout) if parsed.scheme == "https" else 0
+    # urllib follows redirects. Inspect the certificate at the effective HTTPS
+    # destination so an HTTP-to-HTTPS redirect does not look like an expired
+    # certificate, while retaining the operator-configured URL in the record.
+    effective_scheme = urlparse(effective_url).scheme
+    ssl_days = ssl_days_remaining(effective_url, timeout=timeout) if effective_scheme == "https" else 0
     return evaluate_site(name, url, status, latency_ms, ssl_days, "unknown", 0, 0, headers)
 
 

@@ -324,3 +324,42 @@ def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypa
     assert check.http_status == 503
     assert check.security_headers["strict-transport-security"] == "max-age=31536000"
     assert "HTTP status is 503" in check.actions[0]
+
+
+def test_fetch_basic_site_check_uses_final_https_redirect_for_certificate(monkeypatch):
+    import wp_fleet_ops.checks as checks
+
+    headers = Message()
+    headers["Strict-Transport-Security"] = "max-age=31536000"
+
+    class RedirectedResponse:
+        status = 200
+
+        def __init__(self, response_headers):
+            self.headers = response_headers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://www.redirect.example/home"
+
+    response = RedirectedResponse(headers)
+    checked_urls = []
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", lambda *_args, **_kwargs: response)
+
+    def certificate_days(url, timeout=10):
+        checked_urls.append((url, timeout))
+        return 90
+
+    monkeypatch.setattr(checks, "ssl_days_remaining", certificate_days)
+
+    check = fetch_basic_site_check("Redirected", "http://redirect.example", timeout=7)
+
+    assert check.url == "http://redirect.example"
+    assert check.ssl_days_remaining == 90
+    assert checked_urls == [("https://www.redirect.example/home", 7)]
