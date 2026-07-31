@@ -694,6 +694,95 @@ def api_incidents():
     }
 
 
+def _availability_recommended_action(status: str, freshness: str) -> str:
+    """Return the safest next step for current or incomplete availability evidence."""
+    if status == "down":
+        return "Confirm site availability, hosting status, DNS, and recent deploys."
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot and verify site availability."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock, then verify site availability."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp, then verify site availability."
+    if freshness == "stale":
+        return "Capture a fresh fleet snapshot before relying on availability status."
+    return "Continue normal availability monitoring."
+
+
+@app.get("/api/availability")
+def api_availability():
+    """Return availability status while failing closed on missing or stale evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    sites = []
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_reachable = None
+            availability_status = "unknown"
+            reachable = None
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_reachable = bool(row["uptime_ok"])
+            if freshness != "current":
+                availability_status = "unknown"
+                reachable = None
+            else:
+                reachable = last_observed_reachable
+                availability_status = "available" if reachable else "down"
+
+        sites.append(
+            {
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "availability_status": availability_status,
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "reachable": reachable,
+                "last_observed_reachable": last_observed_reachable,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _availability_recommended_action(availability_status, freshness),
+            }
+        )
+
+    status_rank = {"down": 0, "unknown": 1, "available": 2}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
+    sites.sort(
+        key=lambda site: (
+            status_rank.get(site["availability_status"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    available_count = sum(1 for site in sites if site["availability_status"] == "available")
+    down_count = sum(1 for site in sites if site["availability_status"] == "down")
+    unknown_count = len(sites) - current_evidence_count
+    status = "red" if down_count else ("yellow" if unknown_count else "green")
+    return {
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": len(sites),
+        "current_evidence_count": current_evidence_count,
+        "available_count": available_count,
+        "down_count": down_count,
+        "unknown_count": unknown_count,
+        "availability_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "sites": sites,
+    }
+
+
 def _backup_status(backup_age_hours: int) -> str:
     if backup_age_hours > 72:
         return "critical"

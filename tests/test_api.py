@@ -783,6 +783,91 @@ def test_api_incidents_returns_only_critical_alerts(tmp_path):
     assert payload["incidents"][0]["recommended_action"]
 
 
+def test_api_availability_fails_closed_for_missing_and_stale_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Down Store",
+            url="https://down-store.example",
+            client="Client Commerce",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Healthy Store",
+            url="https://healthy-store.example",
+            client="Client Commerce",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Store",
+            url="https://stale-store.example",
+            client="Client Legacy",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Store",
+            "url": "https://missing-store.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-store.example"),
+        )
+
+    response = client.get("/api/availability")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 4
+    assert payload["current_evidence_count"] == 2
+    assert payload["available_count"] == 1
+    assert payload["down_count"] == 1
+    assert payload["unknown_count"] == 2
+    assert payload["availability_evidence_percent"] == 50
+    assert [site["name"] for site in payload["sites"]] == [
+        "Down Store",
+        "Missing Store",
+        "Stale Store",
+        "Healthy Store",
+    ]
+
+    down, missing, stale, healthy = payload["sites"]
+    assert down["availability_status"] == "down"
+    assert down["snapshot_freshness"] == "current"
+    assert down["reachable"] is False
+    assert down["last_observed_reachable"] is False
+    assert down["recommended_action"] == "Confirm site availability, hosting status, DNS, and recent deploys."
+    assert missing["availability_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["reachable"] is None
+    assert missing["last_observed_reachable"] is None
+    assert missing["latest_snapshot_at"] is None
+    assert stale["availability_status"] == "unknown"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["reachable"] is None
+    assert stale["last_observed_reachable"] is True
+    assert stale["snapshot_age_hours"] > 168
+    assert healthy["availability_status"] == "available"
+    assert healthy["snapshot_freshness"] == "current"
+    assert healthy["reachable"] is True
+
+
 def test_api_backups_highlights_stale_backup_queue(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
