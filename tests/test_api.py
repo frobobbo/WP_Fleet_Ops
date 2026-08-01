@@ -911,6 +911,84 @@ def test_api_backups_highlights_stale_backup_queue(tmp_path):
     assert payload["sites"][2]["backup_status"] == "fresh"
 
 
+def test_api_backups_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url in (
+        ("Current Backup", "https://current-backup.example"),
+        ("Stale Backup", "https://stale-evidence-backup.example"),
+        ("Invalid Backup", "https://invalid-evidence-backup.example"),
+        ("Future Backup", "https://future-evidence-backup.example"),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, backup_age_hours="12"),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Backup",
+            "url": "https://missing-evidence-backup.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-evidence-backup.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("not-a-timestamp", "https://invalid-evidence-backup.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ((datetime.now(timezone.utc) + timedelta(days=1)).isoformat(), "https://future-evidence-backup.example"),
+        )
+
+    response = client.get("/api/backups")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 5
+    assert payload["current_evidence_count"] == 1
+    assert payload["fresh_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["critical_count"] == 0
+    assert payload["stale_count"] == 0
+    assert payload["unknown_count"] == 4
+    assert payload["backup_evidence_percent"] == 20
+    assert payload["oldest_backup_age_hours"] == 12
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Backup",
+        "Invalid Backup",
+        "Future Backup",
+        "Stale Backup",
+        "Current Backup",
+    ]
+
+    missing, invalid, future, stale, current = payload["sites"]
+    assert missing["backup_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["backup_age_hours"] is None
+    assert missing["last_observed_backup_age_hours"] is None
+    assert missing["recommended_action"] == "Capture an initial fleet snapshot and verify backup freshness."
+    assert invalid["snapshot_freshness"] == "invalid"
+    assert future["snapshot_freshness"] == "clock_skew"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["backup_status"] == "unknown"
+    assert stale["backup_age_hours"] is None
+    assert stale["last_observed_backup_age_hours"] == 12
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == "Capture a fresh fleet snapshot before relying on backup status."
+    assert current["backup_status"] == "fresh"
+    assert current["snapshot_freshness"] == "current"
+    assert current["backup_age_hours"] == 12
+    assert current["last_observed_backup_age_hours"] == 12
+
+
 def test_api_actions_surfaces_aging_backup_warning(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
