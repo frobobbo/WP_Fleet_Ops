@@ -1481,6 +1481,89 @@ def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
     assert payload["sites"][2]["update_status"] == "current"
 
 
+def test_api_updates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url in (
+        ("Current Updates", "https://current-updates.example"),
+        ("Stale Updates", "https://stale-updates.example"),
+        ("Invalid Updates", "https://invalid-updates.example"),
+        ("Future Updates", "https://future-updates.example"),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, wp_updates="3"),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Updates",
+            "url": "https://missing-updates.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-updates.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("not-a-timestamp", "https://invalid-updates.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ((datetime.now(timezone.utc) + timedelta(days=1)).isoformat(), "https://future-updates.example"),
+        )
+
+    response = client.get("/api/updates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 5
+    assert payload["current_evidence_count"] == 1
+    assert payload["critical_count"] == 0
+    assert payload["warning_count"] == 1
+    assert payload["current_count"] == 0
+    assert payload["unknown_count"] == 4
+    assert payload["update_evidence_percent"] == 20
+    assert payload["backlog_count"] == 1
+    assert payload["total_pending_updates"] == 3
+    assert payload["max_pending_updates"] == 3
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Updates",
+        "Invalid Updates",
+        "Future Updates",
+        "Stale Updates",
+        "Current Updates",
+    ]
+
+    missing, invalid, future, stale, current = payload["sites"]
+    assert missing["update_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["pending_updates"] is None
+    assert missing["last_observed_pending_updates"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify the WordPress update backlog."
+    )
+    assert invalid["snapshot_freshness"] == "invalid"
+    assert future["snapshot_freshness"] == "clock_skew"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["update_status"] == "unknown"
+    assert stale["pending_updates"] is None
+    assert stale["last_observed_pending_updates"] == 3
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on update status."
+    )
+    assert current["update_status"] == "warning"
+    assert current["snapshot_freshness"] == "current"
+    assert current["pending_updates"] == 3
+    assert current["last_observed_pending_updates"] == 3
+
+
 def test_api_risk_register_groups_current_risks_by_category(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

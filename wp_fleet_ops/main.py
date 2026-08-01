@@ -1327,31 +1327,100 @@ def _update_recommended_action(status: str) -> str:
     return "Continue normal update monitoring."
 
 
+def _update_evidence_recommended_action(status: str, freshness: str) -> str:
+    """Return an update next step without trusting incomplete snapshot evidence."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot and verify the WordPress update backlog."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock, then verify the WordPress update backlog."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp, then verify the WordPress update backlog."
+    if freshness == "stale":
+        return "Capture a fresh fleet snapshot before relying on update status."
+    return _update_recommended_action(status)
+
+
 @app.get("/api/updates")
 def api_updates():
-    """Return WordPress update backlog inventory, ordered by largest backlog."""
+    """Return update status while failing closed on missing or stale evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     sites = []
-    for row in store.latest_dashboard():
-        status = _update_status(row["wp_updates"])
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_pending_updates = None
+            pending_updates = None
+            status = "unknown"
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_pending_updates = row["wp_updates"]
+            if freshness == "current":
+                pending_updates = last_observed_pending_updates
+                status = _update_status(pending_updates)
+            else:
+                pending_updates = None
+                status = "unknown"
+
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
-                "pending_updates": row["wp_updates"],
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "pending_updates": pending_updates,
+                "last_observed_pending_updates": last_observed_pending_updates,
                 "update_status": status,
-                "latest_snapshot_at": row["captured_at"],
-                "recommended_action": _update_recommended_action(status),
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _update_evidence_recommended_action(status, freshness),
             }
         )
 
-    sites.sort(key=lambda site: (-site["pending_updates"], site["client"].lower(), site["name"].lower()))
+    status_rank = {"critical": 0, "unknown": 1, "warning": 2, "current": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
+    sites.sort(
+        key=lambda site: (
+            status_rank.get(site["update_status"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            -(site["last_observed_pending_updates"] or 0),
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    critical_count = sum(1 for site in sites if site["update_status"] == "critical")
+    warning_count = sum(1 for site in sites if site["update_status"] == "warning")
+    current_count = sum(1 for site in sites if site["update_status"] == "current")
+    unknown_count = len(sites) - current_evidence_count
+    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    current_update_counts = [
+        site["pending_updates"]
+        for site in sites
+        if site["pending_updates"] is not None
+    ]
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "status": overall_status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
-        "backlog_count": sum(1 for site in sites if site["pending_updates"] > 0),
-        "total_pending_updates": sum(site["pending_updates"] for site in sites),
-        "max_pending_updates": max((site["pending_updates"] for site in sites), default=0),
+        "current_evidence_count": current_evidence_count,
+        "critical_count": critical_count,
+        "warning_count": warning_count,
+        "current_count": current_count,
+        "unknown_count": unknown_count,
+        "update_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "backlog_count": critical_count + warning_count,
+        "total_pending_updates": sum(current_update_counts),
+        "max_pending_updates": max(current_update_counts, default=0),
         "sites": sites,
     }
 
