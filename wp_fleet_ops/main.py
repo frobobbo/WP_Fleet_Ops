@@ -1057,34 +1057,102 @@ def _security_recommended_action(status: str) -> str:
     return "Continue normal security header monitoring."
 
 
+def _security_evidence_recommended_action(status: str, freshness: str) -> str:
+    """Return a security next step without trusting incomplete snapshot evidence."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot and verify security header coverage."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock, then verify security header coverage."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp, then verify security header coverage."
+    if freshness == "stale":
+        return "Capture a fresh fleet snapshot before relying on security coverage."
+    return _security_recommended_action(status)
+
+
 @app.get("/api/security")
 def api_security():
-    """Return security header coverage gaps across the monitored fleet."""
+    """Return security status while failing closed on missing or stale evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     sites = []
-    for row in store.latest_dashboard():
-        status = _security_status(row["security_header_count"])
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_security_header_count = None
+            security_header_count = None
+            status = "unknown"
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_security_header_count = row["security_header_count"]
+            if freshness == "current":
+                security_header_count = last_observed_security_header_count
+                status = _security_status(security_header_count)
+            else:
+                security_header_count = None
+                status = "unknown"
+
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
-                "security_header_count": row["security_header_count"],
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "security_header_count": security_header_count,
+                "last_observed_security_header_count": last_observed_security_header_count,
                 "security_status": status,
-                "latest_snapshot_at": row["captured_at"],
-                "recommended_action": _security_recommended_action(status),
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _security_evidence_recommended_action(status, freshness),
             }
         )
 
-    sites.sort(key=lambda site: (site["security_header_count"], site["client"].lower(), site["name"].lower()))
-    return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": len(sites),
-        "covered_count": sum(1 for site in sites if site["security_status"] == "covered"),
-        "gap_count": sum(1 for site in sites if site["security_status"] != "covered"),
-        "average_security_header_count": round(
-            sum(site["security_header_count"] for site in sites) / len(sites), 1
+    status_rank = {"critical": 0, "unknown": 1, "warning": 2, "covered": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
+    sites.sort(
+        key=lambda site: (
+            status_rank.get(site["security_status"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            site["security_header_count"] if site["security_header_count"] is not None else -1,
+            site["client"].lower(),
+            site["name"].lower(),
         )
-        if sites
+    )
+    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    covered_count = sum(1 for site in sites if site["security_status"] == "covered")
+    warning_count = sum(1 for site in sites if site["security_status"] == "warning")
+    critical_count = sum(1 for site in sites if site["security_status"] == "critical")
+    unknown_count = len(sites) - current_evidence_count
+    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    current_header_counts = [
+        site["security_header_count"]
+        for site in sites
+        if site["security_header_count"] is not None
+    ]
+    return {
+        "generated_at": now.isoformat(),
+        "status": overall_status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": len(sites),
+        "current_evidence_count": current_evidence_count,
+        "covered_count": covered_count,
+        "warning_count": warning_count,
+        "critical_count": critical_count,
+        "gap_count": warning_count + critical_count,
+        "unknown_count": unknown_count,
+        "security_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "average_security_header_count": round(
+            sum(current_header_counts) / len(current_header_counts), 1
+        )
+        if current_header_counts
         else 0,
         "sites": sites,
     }

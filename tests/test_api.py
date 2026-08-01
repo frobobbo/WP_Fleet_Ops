@@ -1184,6 +1184,88 @@ def test_api_security_highlights_header_coverage_gaps(tmp_path):
     assert payload["sites"][2]["security_status"] == "covered"
 
 
+def test_api_security_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url in (
+        ("Current Security", "https://current-security.example"),
+        ("Stale Security", "https://stale-security.example"),
+        ("Invalid Security", "https://invalid-security.example"),
+        ("Future Security", "https://future-security.example"),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, security_header_count="3"),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Security",
+            "url": "https://missing-security.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-security.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("not-a-timestamp", "https://invalid-security.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ((datetime.now(timezone.utc) + timedelta(days=1)).isoformat(), "https://future-security.example"),
+        )
+
+    response = client.get("/api/security")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 5
+    assert payload["current_evidence_count"] == 1
+    assert payload["covered_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["critical_count"] == 0
+    assert payload["gap_count"] == 0
+    assert payload["unknown_count"] == 4
+    assert payload["security_evidence_percent"] == 20
+    assert payload["average_security_header_count"] == 3
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Security",
+        "Invalid Security",
+        "Future Security",
+        "Stale Security",
+        "Current Security",
+    ]
+
+    missing, invalid, future, stale, current = payload["sites"]
+    assert missing["security_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["security_header_count"] is None
+    assert missing["last_observed_security_header_count"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify security header coverage."
+    )
+    assert invalid["snapshot_freshness"] == "invalid"
+    assert future["snapshot_freshness"] == "clock_skew"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["security_status"] == "unknown"
+    assert stale["security_header_count"] is None
+    assert stale["last_observed_security_header_count"] == 3
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on security coverage."
+    )
+    assert current["security_status"] == "covered"
+    assert current["snapshot_freshness"] == "current"
+    assert current["security_header_count"] == 3
+    assert current["last_observed_security_header_count"] == 3
+
+
 def test_api_performance_prioritizes_slowest_sites(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
