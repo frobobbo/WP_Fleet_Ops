@@ -1152,31 +1152,100 @@ def _certificate_recommended_action(status: str) -> str:
     return "Continue normal certificate monitoring."
 
 
+def _certificate_evidence_recommended_action(status: str, freshness: str) -> str:
+    """Return a certificate next step without trusting incomplete snapshot evidence."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot and verify certificate expiry."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock, then verify certificate expiry."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp, then verify certificate expiry."
+    if freshness == "stale":
+        return "Capture a fresh fleet snapshot before relying on certificate status."
+    return _certificate_recommended_action(status)
+
+
 @app.get("/api/certificates")
 def api_certificates():
-    """Return TLS certificate expiry inventory, ordered by soonest renewal need."""
+    """Return certificate status while failing closed on missing or stale evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     sites = []
-    for row in store.latest_dashboard():
-        status = _certificate_status(row["ssl_days"])
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_ssl_days = None
+            ssl_days = None
+            status = "unknown"
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_ssl_days = row["ssl_days"]
+            if freshness == "current":
+                ssl_days = last_observed_ssl_days
+                status = _certificate_status(ssl_days)
+            else:
+                ssl_days = None
+                status = "unknown"
+
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
-                "ssl_days_remaining": row["ssl_days"],
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "ssl_days_remaining": ssl_days,
+                "last_observed_ssl_days_remaining": last_observed_ssl_days,
                 "certificate_status": status,
-                "latest_snapshot_at": row["captured_at"],
-                "recommended_action": _certificate_recommended_action(status),
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _certificate_evidence_recommended_action(status, freshness),
             }
         )
 
-    sites.sort(key=lambda site: (site["ssl_days_remaining"], site["client"].lower(), site["name"].lower()))
+    status_rank = {"critical": 0, "unknown": 1, "warning": 2, "healthy": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
+    sites.sort(
+        key=lambda site: (
+            status_rank.get(site["certificate_status"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            site["last_observed_ssl_days_remaining"]
+            if site["last_observed_ssl_days_remaining"] is not None
+            else float("inf"),
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    critical_count = sum(1 for site in sites if site["certificate_status"] == "critical")
+    warning_count = sum(1 for site in sites if site["certificate_status"] == "warning")
+    healthy_count = sum(1 for site in sites if site["certificate_status"] == "healthy")
+    unknown_count = len(sites) - current_evidence_count
+    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    current_ssl_days = [
+        site["ssl_days_remaining"]
+        for site in sites
+        if site["ssl_days_remaining"] is not None
+    ]
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "status": overall_status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
-        "critical_count": sum(1 for site in sites if site["certificate_status"] == "critical"),
-        "warning_count": sum(1 for site in sites if site["certificate_status"] == "warning"),
-        "minimum_ssl_days": min((site["ssl_days_remaining"] for site in sites), default=None),
+        "current_evidence_count": current_evidence_count,
+        "healthy_count": healthy_count,
+        "critical_count": critical_count,
+        "warning_count": warning_count,
+        "unknown_count": unknown_count,
+        "certificate_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "minimum_ssl_days": min(current_ssl_days, default=None),
         "sites": sites,
     }
 

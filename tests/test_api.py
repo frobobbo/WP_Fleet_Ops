@@ -1271,6 +1271,87 @@ def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     assert payload["sites"][2]["certificate_status"] == "healthy"
 
 
+def test_api_certificates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url in (
+        ("Current Certificate", "https://current-certificate.example"),
+        ("Stale Certificate", "https://stale-certificate.example"),
+        ("Invalid Certificate", "https://invalid-certificate.example"),
+        ("Future Certificate", "https://future-certificate.example"),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, ssl_days="90"),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Certificate",
+            "url": "https://missing-certificate.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-certificate.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("not-a-timestamp", "https://invalid-certificate.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ((datetime.now(timezone.utc) + timedelta(days=1)).isoformat(), "https://future-certificate.example"),
+        )
+
+    response = client.get("/api/certificates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 5
+    assert payload["current_evidence_count"] == 1
+    assert payload["healthy_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["critical_count"] == 0
+    assert payload["unknown_count"] == 4
+    assert payload["certificate_evidence_percent"] == 20
+    assert payload["minimum_ssl_days"] == 90
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Certificate",
+        "Invalid Certificate",
+        "Future Certificate",
+        "Stale Certificate",
+        "Current Certificate",
+    ]
+
+    missing, invalid, future, stale, current = payload["sites"]
+    assert missing["certificate_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["ssl_days_remaining"] is None
+    assert missing["last_observed_ssl_days_remaining"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify certificate expiry."
+    )
+    assert invalid["snapshot_freshness"] == "invalid"
+    assert future["snapshot_freshness"] == "clock_skew"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["certificate_status"] == "unknown"
+    assert stale["ssl_days_remaining"] is None
+    assert stale["last_observed_ssl_days_remaining"] == 90
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on certificate status."
+    )
+    assert current["certificate_status"] == "healthy"
+    assert current["snapshot_freshness"] == "current"
+    assert current["ssl_days_remaining"] == 90
+    assert current["last_observed_ssl_days_remaining"] == 90
+
+
 def test_api_actions_include_thirty_day_certificate_renewals(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
