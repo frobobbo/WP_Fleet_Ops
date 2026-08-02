@@ -1174,32 +1174,101 @@ def _performance_recommended_action(status: str) -> str:
     return "Continue normal performance monitoring."
 
 
+def _performance_evidence_recommended_action(status: str, freshness: str) -> str:
+    """Return a performance next step without trusting incomplete evidence."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot and verify response time."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock, then verify response time."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp, then verify response time."
+    if freshness == "stale":
+        return "Capture a fresh fleet snapshot before relying on performance status."
+    return _performance_recommended_action(status)
+
+
 @app.get("/api/performance")
 def api_performance():
-    """Return response-time health across the monitored fleet, slowest first."""
+    """Return performance status while failing closed on incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     sites = []
-    for row in store.latest_dashboard():
-        status = _performance_status(row["response_ms"])
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_response_ms = None
+            response_ms = None
+            status = "unknown"
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_response_ms = row["response_ms"]
+            if freshness == "current":
+                response_ms = last_observed_response_ms
+                status = _performance_status(response_ms)
+            else:
+                response_ms = None
+                status = "unknown"
+
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
-                "response_ms": row["response_ms"],
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "response_ms": response_ms,
+                "last_observed_response_ms": last_observed_response_ms,
                 "performance_status": status,
-                "latest_snapshot_at": row["captured_at"],
-                "recommended_action": _performance_recommended_action(status),
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _performance_evidence_recommended_action(status, freshness),
             }
         )
 
-    sites.sort(key=lambda site: (-site["response_ms"], site["client"].lower(), site["name"].lower()))
+    status_rank = {"slow": 0, "unknown": 1, "warning": 2, "fast": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
+    sites.sort(
+        key=lambda site: (
+            status_rank.get(site["performance_status"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            -(site["last_observed_response_ms"] or 0),
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    slow_count = sum(1 for site in sites if site["performance_status"] == "slow")
+    warning_count = sum(1 for site in sites if site["performance_status"] == "warning")
+    fast_count = sum(1 for site in sites if site["performance_status"] == "fast")
+    unknown_count = len(sites) - current_evidence_count
+    overall_status = "red" if slow_count else ("yellow" if warning_count or unknown_count else "green")
+    current_response_times = [
+        site["response_ms"]
+        for site in sites
+        if site["response_ms"] is not None
+    ]
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "status": overall_status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
-        "slow_count": sum(1 for site in sites if site["performance_status"] == "slow"),
-        "warning_count": sum(1 for site in sites if site["performance_status"] == "warning"),
-        "average_response_ms": round(sum(site["response_ms"] for site in sites) / len(sites)) if sites else 0,
-        "max_response_ms": max((site["response_ms"] for site in sites), default=0),
+        "current_evidence_count": current_evidence_count,
+        "slow_count": slow_count,
+        "warning_count": warning_count,
+        "fast_count": fast_count,
+        "unknown_count": unknown_count,
+        "performance_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "average_response_ms": round(sum(current_response_times) / len(current_response_times))
+        if current_response_times
+        else 0,
+        "max_response_ms": max(current_response_times, default=0),
         "sites": sites,
     }
 

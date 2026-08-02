@@ -1310,6 +1310,88 @@ def test_api_performance_prioritizes_slowest_sites(tmp_path):
     assert payload["sites"][2]["performance_status"] == "fast"
 
 
+def test_api_performance_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url in (
+        ("Current Performance", "https://current-performance.example"),
+        ("Stale Performance", "https://stale-performance.example"),
+        ("Invalid Performance", "https://invalid-performance.example"),
+        ("Future Performance", "https://future-performance.example"),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, response_ms="250"),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Performance",
+            "url": "https://missing-performance.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-performance.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("not-a-timestamp", "https://invalid-performance.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ((datetime.now(timezone.utc) + timedelta(days=1)).isoformat(), "https://future-performance.example"),
+        )
+
+    response = client.get("/api/performance")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 5
+    assert payload["current_evidence_count"] == 1
+    assert payload["slow_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["fast_count"] == 1
+    assert payload["unknown_count"] == 4
+    assert payload["performance_evidence_percent"] == 20
+    assert payload["average_response_ms"] == 250
+    assert payload["max_response_ms"] == 250
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Performance",
+        "Invalid Performance",
+        "Future Performance",
+        "Stale Performance",
+        "Current Performance",
+    ]
+
+    missing, invalid, future, stale, current = payload["sites"]
+    assert missing["performance_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["response_ms"] is None
+    assert missing["last_observed_response_ms"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify response time."
+    )
+    assert invalid["snapshot_freshness"] == "invalid"
+    assert future["snapshot_freshness"] == "clock_skew"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["performance_status"] == "unknown"
+    assert stale["response_ms"] is None
+    assert stale["last_observed_response_ms"] == 250
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on performance status."
+    )
+    assert current["performance_status"] == "fast"
+    assert current["snapshot_freshness"] == "current"
+    assert current["response_ms"] == 250
+    assert current["last_observed_response_ms"] == 250
+
+
 def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
