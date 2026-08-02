@@ -1137,6 +1137,82 @@ def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
     assert payload["sites"][3]["restore_drill_priority"] == "routine"
 
 
+def test_api_restore_drill_queue_fails_closed_for_incomplete_backup_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Urgent Restore Drill",
+            url="https://current-urgent-restore.example",
+            backup_age_hours="180",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Routine Restore Drill",
+            url="https://stale-routine-restore.example",
+            backup_age_hours="12",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Restore Evidence",
+            "url": "https://missing-restore-evidence.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-routine-restore.example"),
+        )
+
+    response = client.get("/api/restore-drill-queue")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 3
+    assert payload["current_evidence_count"] == 1
+    assert payload["unknown_count"] == 2
+    assert payload["urgent_count"] == 1
+    assert payload["high_count"] == 0
+    assert payload["watch_count"] == 0
+    assert payload["routine_count"] == 0
+    assert payload["restore_evidence_percent"] == 33
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Restore Evidence",
+        "Stale Routine Restore Drill",
+        "Current Urgent Restore Drill",
+    ]
+
+    missing, stale, current = payload["sites"]
+    assert missing["restore_drill_priority"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["backup_age_hours"] is None
+    assert missing["last_observed_backup_age_hours"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify backup restore readiness."
+    )
+    assert stale["restore_drill_priority"] == "unknown"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["backup_age_hours"] is None
+    assert stale["last_observed_backup_age_hours"] == 12
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before scheduling a restore drill."
+    )
+    assert current["restore_drill_priority"] == "urgent"
+    assert current["snapshot_freshness"] == "current"
+    assert current["backup_age_hours"] == 180
+    assert current["last_observed_backup_age_hours"] == 180
+
+
 def test_api_security_highlights_header_coverage_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

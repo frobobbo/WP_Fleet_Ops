@@ -1003,40 +1003,93 @@ def _restore_drill_recommended_action(priority: str) -> str:
     return "Keep the site in the normal quarterly restore-drill rotation."
 
 
+def _restore_drill_evidence_recommended_action(priority: str, freshness: str) -> str:
+    """Return a restore-drill next step without trusting incomplete evidence."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot and verify backup restore readiness."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock, then verify backup restore readiness."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp, then verify backup restore readiness."
+    if freshness == "stale":
+        return "Capture a fresh fleet snapshot before scheduling a restore drill."
+    return _restore_drill_recommended_action(priority)
+
+
 @app.get("/api/restore-drill-queue")
 def api_restore_drill_queue():
-    """Return backup restore-drill priorities for operational planning."""
-    priority_rank = {"urgent": 0, "high": 1, "watch": 2, "routine": 3}
+    """Return restore-drill priorities while failing closed on incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    priority_rank = {"unknown": 0, "urgent": 1, "high": 2, "watch": 3, "routine": 4}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
-    for row in store.latest_dashboard():
-        priority = _restore_drill_priority(row["backup_age_hours"])
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_backup_age_hours = None
+            backup_age_hours = None
+            priority = "unknown"
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_backup_age_hours = row["backup_age_hours"]
+            if freshness == "current":
+                backup_age_hours = last_observed_backup_age_hours
+                priority = _restore_drill_priority(backup_age_hours)
+            else:
+                backup_age_hours = None
+                priority = "unknown"
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
-                "backup_age_hours": row["backup_age_hours"],
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "backup_age_hours": backup_age_hours,
+                "last_observed_backup_age_hours": last_observed_backup_age_hours,
                 "restore_drill_priority": priority,
-                "latest_snapshot_at": row["captured_at"],
-                "recommended_action": _restore_drill_recommended_action(priority),
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _restore_drill_evidence_recommended_action(priority, freshness),
             }
         )
 
     sites.sort(
         key=lambda site: (
             priority_rank.get(site["restore_drill_priority"], 99),
-            -site["backup_age_hours"],
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            -(site["last_observed_backup_age_hours"] or 0),
             site["client"].lower(),
             site["name"].lower(),
         )
     )
+    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    urgent_count = sum(1 for site in sites if site["restore_drill_priority"] == "urgent")
+    high_count = sum(1 for site in sites if site["restore_drill_priority"] == "high")
+    watch_count = sum(1 for site in sites if site["restore_drill_priority"] == "watch")
+    routine_count = sum(1 for site in sites if site["restore_drill_priority"] == "routine")
+    unknown_count = len(sites) - current_evidence_count
+    status = "red" if urgent_count else ("yellow" if unknown_count or high_count or watch_count else "green")
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
-        "urgent_count": sum(1 for site in sites if site["restore_drill_priority"] == "urgent"),
-        "high_count": sum(1 for site in sites if site["restore_drill_priority"] == "high"),
-        "watch_count": sum(1 for site in sites if site["restore_drill_priority"] == "watch"),
-        "routine_count": sum(1 for site in sites if site["restore_drill_priority"] == "routine"),
+        "current_evidence_count": current_evidence_count,
+        "unknown_count": unknown_count,
+        "urgent_count": urgent_count,
+        "high_count": high_count,
+        "watch_count": watch_count,
+        "routine_count": routine_count,
+        "restore_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
         "sites": sites,
     }
 
