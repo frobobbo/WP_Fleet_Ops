@@ -589,6 +589,91 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     assert payload["sites"][2]["breaches"][0]["severity"] == "warning"
 
 
+def test_api_sla_breaches_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current SLA Breach",
+            url="https://current-sla-breach.example",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale SLA Breach",
+            url="https://stale-sla-breach.example",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current SLA Compliant",
+            url="https://current-sla-compliant.example",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing SLA Evidence",
+            "url": "https://missing-sla-evidence.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-sla-breach.example"),
+        )
+
+    response = client.get("/api/sla-breaches")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 4
+    assert payload["current_evidence_count"] == 2
+    assert payload["unknown_count"] == 2
+    assert payload["breach_count"] == 1
+    assert payload["critical_breach_count"] == 1
+    assert payload["warning_breach_count"] == 0
+    assert payload["sla_evidence_percent"] == 50
+    assert [site["name"] for site in payload["sites"]] == [
+        "Current SLA Breach",
+        "Missing SLA Evidence",
+        "Stale SLA Breach",
+    ]
+
+    current, missing, stale = payload["sites"]
+    assert current["sla_status"] == "breached"
+    assert current["snapshot_freshness"] == "current"
+    assert current["highest_severity"] == "critical"
+    assert current["breaches"][0]["target"] == "availability"
+    assert current["last_observed_breaches"] == current["breaches"]
+    assert missing["sla_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["latest_snapshot_at"] is None
+    assert missing["breaches"] == []
+    assert missing["last_observed_breaches"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot before evaluating SLA compliance."
+    )
+    assert stale["sla_status"] == "unknown"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["breaches"] == []
+    assert stale["last_observed_breaches"][0]["target"] == "availability"
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before evaluating SLA compliance."
+    )
+
+
 def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

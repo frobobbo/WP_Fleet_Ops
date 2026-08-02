@@ -479,43 +479,128 @@ def _sla_breaches(row: dict) -> list[dict]:
     return breaches
 
 
+def _sla_evidence_recommended_action(freshness: str) -> str:
+    """Return a next step when SLA evidence cannot be treated as current."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot before evaluating SLA compliance."
+    if freshness == "clock_skew":
+        return "Correct the snapshot timestamp or source clock before evaluating SLA compliance."
+    if freshness == "invalid":
+        return "Repair the invalid snapshot timestamp before evaluating SLA compliance."
+    return "Capture a fresh fleet snapshot before evaluating SLA compliance."
+
+
 @app.get("/api/sla-breaches")
 def api_sla_breaches():
-    """Return sites currently missing core operational service targets."""
-    severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    """Return current SLA breaches while failing closed on incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    tracked_sites = store.list_sites()
+    severity_rank = {"critical": 0, "unknown": 1, "warning": 2, "info": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
-    for row in store.latest_dashboard():
-        breaches = _sla_breaches(row)
-        if not breaches:
+    current_evidence_count = 0
+    for site in tracked_sites:
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_breaches = None
+            last_observed_score = None
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_breaches = _sla_breaches(row)
+            last_observed_breaches.sort(
+                key=lambda breach: (severity_rank.get(breach["severity"], 99), breach["target"])
+            )
+            last_observed_score = row["score"]
+
+        if freshness != "current":
+            sites.append(
+                {
+                    "name": site["name"],
+                    "url": site["url"],
+                    "client": site.get("client") or "Unassigned",
+                    "score": None,
+                    "last_observed_score": last_observed_score,
+                    "sla_status": "unknown",
+                    "breach_count": 0,
+                    "highest_severity": "unknown",
+                    "snapshot_freshness": freshness,
+                    "snapshot_age_hours": age_hours,
+                    "latest_snapshot_at": latest_snapshot_at,
+                    "breaches": [],
+                    "last_observed_breaches": last_observed_breaches,
+                    "recommended_action": _sla_evidence_recommended_action(freshness),
+                }
+            )
             continue
-        breaches.sort(key=lambda breach: (severity_rank.get(breach["severity"], 99), breach["target"]))
+
+        current_evidence_count += 1
+        assert row is not None and last_observed_breaches is not None
+        if not last_observed_breaches:
+            continue
+        highest_severity = last_observed_breaches[0]["severity"]
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
                 "score": row["score"],
-                "breach_count": len(breaches),
-                "highest_severity": breaches[0]["severity"],
-                "latest_snapshot_at": row["captured_at"],
-                "breaches": breaches,
+                "last_observed_score": row["score"],
+                "sla_status": "breached",
+                "breach_count": len(last_observed_breaches),
+                "highest_severity": highest_severity,
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "breaches": last_observed_breaches,
+                "last_observed_breaches": last_observed_breaches,
+                "recommended_action": last_observed_breaches[0]["recommended_action"],
             }
         )
 
     sites.sort(
         key=lambda site: (
             severity_rank.get(site["highest_severity"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
             -site["breach_count"],
-            site["score"],
+            site["score"] if site["score"] is not None else 101,
             site["client"].lower(),
             site["name"].lower(),
         )
     )
+    site_count = len(tracked_sites)
+    unknown_count = site_count - current_evidence_count
+    breach_count = sum(1 for site in sites if site["sla_status"] == "breached")
+    critical_breach_count = sum(
+        1
+        for site in sites
+        if site["sla_status"] == "breached" and site["highest_severity"] == "critical"
+    )
+    warning_breach_count = sum(
+        1
+        for site in sites
+        if site["sla_status"] == "breached" and site["highest_severity"] == "warning"
+    )
+    status = "red" if critical_breach_count else ("yellow" if warning_breach_count or unknown_count else "green")
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": len(store.latest_dashboard()),
-        "breach_count": len(sites),
-        "critical_breach_count": sum(1 for site in sites if site["highest_severity"] == "critical"),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": site_count,
+        "current_evidence_count": current_evidence_count,
+        "unknown_count": unknown_count,
+        "sla_evidence_percent": round((current_evidence_count / site_count) * 100) if site_count else 100,
+        "breach_count": breach_count,
+        "critical_breach_count": critical_breach_count,
+        "warning_breach_count": warning_breach_count,
         "sites": sites,
     }
 
