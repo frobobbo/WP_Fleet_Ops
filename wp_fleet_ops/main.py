@@ -981,30 +981,45 @@ def api_backups():
     }
 
 
-def _backup_remediation_recommended_action(critical_count: int, warning_count: int) -> str:
+def _backup_remediation_recommended_action(
+    critical_count: int,
+    warning_count: int,
+    unknown_count: int = 0,
+) -> str:
+    if critical_count and warning_count and unknown_count:
+        return "Run immediate backups for critical sites, refresh incomplete evidence, then verify warning-site schedules."
     if critical_count and warning_count:
         return "Run immediate backups for critical sites, then verify schedules for warning sites."
+    if critical_count and unknown_count:
+        return "Run immediate backups for critical sites, then refresh missing or stale backup evidence."
     if critical_count:
         return "Run immediate backups for every critical site and verify restore points."
+    if warning_count and unknown_count:
+        return "Refresh missing or stale backup evidence, then confirm scheduled backups for warning sites."
     if warning_count:
         return "Confirm the next scheduled backup completes successfully for warning sites."
+    if unknown_count:
+        return "Capture fresh fleet snapshots before scheduling backup remediation."
     return "Continue normal backup monitoring."
 
 
 @app.get("/api/backup-remediation")
 def api_backup_remediation():
-    """Group stale backup remediation work by client for dispatch planning."""
+    """Group current backup work by client while failing closed on incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    tracked_sites = store.list_sites()
     client_rows: dict[str, dict] = {}
-    site_count = 0
-    for row in store.latest_dashboard():
-        site_count += 1
-        client_name = row.get("client") or "Unassigned"
-        status = _backup_status(row["backup_age_hours"])
+    for site in tracked_sites:
+        row = latest_by_url.get(site["url"])
+        client_name = site.get("client") or "Unassigned"
         summary = client_rows.setdefault(
             client_name,
             {
                 "client": client_name,
                 "site_count": 0,
+                "current_evidence_count": 0,
+                "unknown_site_count": 0,
                 "fresh_site_count": 0,
                 "warning_site_count": 0,
                 "critical_site_count": 0,
@@ -1015,7 +1030,47 @@ def api_backup_remediation():
             },
         )
         summary["site_count"] += 1
-        summary["oldest_backup_age_hours"] = max(summary["oldest_backup_age_hours"], row["backup_age_hours"])
+
+        if row is None:
+            freshness = "missing"
+            snapshot_age_hours = None
+            latest_snapshot_at = None
+            last_observed_backup_age_hours = None
+        else:
+            freshness, snapshot_age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_backup_age_hours = row["backup_age_hours"]
+
+        if freshness != "current":
+            summary["unknown_site_count"] += 1
+            if summary["backup_status"] != "critical":
+                summary["backup_status"] = "unknown"
+            summary["sites"].append(
+                {
+                    "name": site["name"],
+                    "url": site["url"],
+                    "backup_age_hours": None,
+                    "last_observed_backup_age_hours": last_observed_backup_age_hours,
+                    "backup_status": "unknown",
+                    "snapshot_freshness": freshness,
+                    "snapshot_age_hours": snapshot_age_hours,
+                    "latest_snapshot_at": latest_snapshot_at,
+                    "recommended_action": _backup_evidence_recommended_action("unknown", freshness),
+                }
+            )
+            continue
+
+        assert row is not None and last_observed_backup_age_hours is not None
+        summary["current_evidence_count"] += 1
+        status = _backup_status(last_observed_backup_age_hours)
+        summary["oldest_backup_age_hours"] = max(
+            summary["oldest_backup_age_hours"],
+            last_observed_backup_age_hours,
+        )
         if status == "critical":
             summary["critical_site_count"] += 1
             summary["stale_site_count"] += 1
@@ -1023,7 +1078,7 @@ def api_backup_remediation():
         elif status == "warning":
             summary["warning_site_count"] += 1
             summary["stale_site_count"] += 1
-            if summary["backup_status"] != "critical":
+            if summary["backup_status"] == "fresh":
                 summary["backup_status"] = "warning"
         else:
             summary["fresh_site_count"] += 1
@@ -1031,38 +1086,69 @@ def api_backup_remediation():
         if status != "fresh":
             summary["sites"].append(
                 {
-                    "name": row["name"],
-                    "url": row["url"],
-                    "backup_age_hours": row["backup_age_hours"],
+                    "name": site["name"],
+                    "url": site["url"],
+                    "backup_age_hours": last_observed_backup_age_hours,
+                    "last_observed_backup_age_hours": last_observed_backup_age_hours,
                     "backup_status": status,
-                    "latest_snapshot_at": row["captured_at"],
+                    "snapshot_freshness": freshness,
+                    "snapshot_age_hours": snapshot_age_hours,
+                    "latest_snapshot_at": latest_snapshot_at,
                     "recommended_action": _backup_recommended_action(status),
                 }
             )
 
+    status_rank = {"critical": 0, "unknown": 1, "warning": 2, "fresh": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     clients = []
     for summary in client_rows.values():
-        summary["sites"].sort(key=lambda site: (-site["backup_age_hours"], site["name"].lower()))
+        summary["sites"].sort(
+            key=lambda site: (
+                status_rank.get(site["backup_status"], 99),
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                -(site["last_observed_backup_age_hours"] or 0),
+                site["name"].lower(),
+            )
+        )
+        summary["backup_evidence_percent"] = round(
+            (summary["current_evidence_count"] / summary["site_count"]) * 100
+        ) if summary["site_count"] else 100
         summary["recommended_action"] = _backup_remediation_recommended_action(
-            summary["critical_site_count"], summary["warning_site_count"]
+            summary["critical_site_count"],
+            summary["warning_site_count"],
+            summary["unknown_site_count"],
         )
         clients.append(summary)
 
     clients.sort(
         key=lambda row: (
-            row["backup_status"] != "critical",
-            row["backup_status"] != "warning",
+            status_rank.get(row["backup_status"], 99),
+            -row["critical_site_count"],
+            -row["unknown_site_count"],
+            -row["warning_site_count"],
             -row["stale_site_count"],
             -row["oldest_backup_age_hours"],
             row["client"].lower(),
         )
     )
+    site_count = len(tracked_sites)
+    current_evidence_count = sum(row["current_evidence_count"] for row in clients)
+    unknown_count = site_count - current_evidence_count
+    stale_site_count = sum(row["stale_site_count"] for row in clients)
+    critical_site_count = sum(row["critical_site_count"] for row in clients)
+    warning_site_count = sum(row["warning_site_count"] for row in clients)
+    status = "red" if critical_site_count else ("yellow" if warning_site_count or unknown_count else "green")
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "client_count": len(clients),
         "site_count": site_count,
-        "stale_site_count": sum(row["stale_site_count"] for row in clients),
-        "critical_site_count": sum(row["critical_site_count"] for row in clients),
+        "current_evidence_count": current_evidence_count,
+        "unknown_count": unknown_count,
+        "backup_evidence_percent": round((current_evidence_count / site_count) * 100) if site_count else 100,
+        "stale_site_count": stale_site_count,
+        "critical_site_count": critical_site_count,
         "clients": clients,
     }
 

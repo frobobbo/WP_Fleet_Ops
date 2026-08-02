@@ -1163,6 +1163,90 @@ def test_api_backup_remediation_groups_stale_backup_work_by_client(tmp_path):
     assert payload["clients"][1]["backup_status"] == "critical"
 
 
+def test_api_backup_remediation_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Critical Backup",
+            url="https://current-remediation-backup.example",
+            client="Client Recovery",
+            backup_age_hours="96",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Critical Backup",
+            url="https://stale-remediation-backup.example",
+            client="Client Recovery",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Backup Evidence",
+            "url": "https://missing-remediation-backup.example",
+            "client": "Client Recovery",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-remediation-backup.example"),
+        )
+
+    response = client.get("/api/backup-remediation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 3
+    assert payload["current_evidence_count"] == 1
+    assert payload["unknown_count"] == 2
+    assert payload["backup_evidence_percent"] == 33
+    assert payload["stale_site_count"] == 1
+    assert payload["critical_site_count"] == 1
+
+    account = payload["clients"][0]
+    assert account["client"] == "Client Recovery"
+    assert account["site_count"] == 3
+    assert account["current_evidence_count"] == 1
+    assert account["unknown_site_count"] == 2
+    assert account["backup_evidence_percent"] == 33
+    assert account["backup_status"] == "critical"
+    assert [site["name"] for site in account["sites"]] == [
+        "Current Critical Backup",
+        "Missing Backup Evidence",
+        "Stale Critical Backup",
+    ]
+
+    current, missing, stale = account["sites"]
+    assert current["backup_status"] == "critical"
+    assert current["snapshot_freshness"] == "current"
+    assert current["backup_age_hours"] == 96
+    assert current["last_observed_backup_age_hours"] == 96
+    assert missing["backup_status"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["backup_age_hours"] is None
+    assert missing["last_observed_backup_age_hours"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify backup freshness."
+    )
+    assert stale["backup_status"] == "unknown"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["backup_age_hours"] is None
+    assert stale["last_observed_backup_age_hours"] == 120
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on backup status."
+    )
+
+
 def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
