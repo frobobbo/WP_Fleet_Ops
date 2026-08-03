@@ -609,10 +609,13 @@ def api_sla_breaches():
 
 
 def _current_actions() -> list[dict]:
-    """Build a sorted action list from the latest fleet snapshots."""
+    """Build actions only from snapshots with current monitoring evidence."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    now = datetime.now(timezone.utc)
     actions = []
     for row in store.latest_dashboard():
+        if not _snapshot_is_current(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS):
+            continue
         for alert in row["alerts"]:
             severity = alert.get("severity", "info")
             actions.append(
