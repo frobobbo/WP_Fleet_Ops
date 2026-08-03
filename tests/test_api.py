@@ -43,6 +43,43 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        (
+            "/care/manual-check",
+            {
+                "name": "Oversized Care Reading",
+                "url": "https://oversized-care.example",
+                "latency_ms": str(1 << 63),
+            },
+        ),
+        (
+            "/snapshot",
+            valid_snapshot_payload(
+                name="Oversized Snapshot Reading",
+                url="https://oversized-snapshot.example",
+                response_ms=str(1 << 63),
+            ),
+        ),
+    ],
+)
+def test_write_forms_reject_telemetry_too_large_for_sqlite_without_partial_state(tmp_path, path, payload):
+    client = make_test_client(tmp_path)
+
+    response = client.post(path, data=payload, follow_redirects=False)
+
+    assert response.status_code == 422
+    assert client.get("/ready").json() == {
+        "status": "ready",
+        "app": "wp-fleet-ops",
+        "database": "ok",
+        "sites": 0,
+        "care_checks": 0,
+        "fleet_snapshots": 0,
+    }
+
+
 def test_responses_include_browser_security_headers(tmp_path):
     client = make_test_client(tmp_path)
 

@@ -55,6 +55,9 @@ CONTENT_SECURITY_POLICY = (
     "connect-src 'self'"
 )
 SNAPSHOT_FRESHNESS_HOURS = 168
+# SQLite INTEGER columns store signed 64-bit values. Reject larger telemetry at
+# request validation so persistence cannot fail after a site has been upserted.
+SQLITE_INTEGER_MAX = (1 << 63) - 1
 
 
 @app.middleware("http")
@@ -3748,11 +3751,11 @@ def manual_care_check(
     url: str = Form(..., min_length=1),
     client: str = Form(""),
     http_status: int = Form(200, ge=100, le=599),
-    latency_ms: int = Form(250, ge=0),
-    ssl_days_remaining: int = Form(60, ge=0),
+    latency_ms: int = Form(250, ge=0, le=SQLITE_INTEGER_MAX),
+    ssl_days_remaining: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
     wordpress_version: str = Form("unknown"),
-    update_count: int = Form(0, ge=0),
-    backup_age_hours: int = Form(24, ge=0),
+    update_count: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),
+    backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),
 ):
     name = normalize_site_name(name)
     url = normalize_site_url(url)
@@ -3816,10 +3819,10 @@ def snapshot(
     url: str = Form(..., min_length=1),
     client: str = Form(""),
     uptime_ok: bool = Form(True),
-    ssl_days: int = Form(60, ge=0),
-    wp_updates: int = Form(0, ge=0),
-    backup_age_hours: int = Form(24, ge=0),
-    response_ms: int = Form(250, ge=0),
+    ssl_days: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
+    wp_updates: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),
+    backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),
+    response_ms: int = Form(250, ge=0, le=SQLITE_INTEGER_MAX),
     security_header_count: int = Form(3, ge=0, le=3),
 ):
     name = normalize_site_name(name)
