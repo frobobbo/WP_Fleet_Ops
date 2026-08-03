@@ -795,6 +795,60 @@ def test_stale_snapshot_alerts_do_not_create_current_actions_or_incidents(tmp_pa
     assert dispatch["next_queue"] == "monitoring"
 
 
+def test_stale_critical_snapshot_does_not_pollute_current_priority_views(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Priority Evidence",
+            url="https://expired-priority-evidence.example",
+            client="Client Expired Priority",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="5",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    summary = client.get("/api/summary").json()
+    watchlist = client.get("/api/site-watchlist").json()
+    site_priorities = client.get("/api/site-priorities").json()
+    client_priorities = client.get("/api/client-priorities").json()
+    kpis = client.get("/api/operations-kpis").json()
+
+    assert summary["overall_status"] == "yellow"
+    assert summary["current_snapshot_count"] == 0
+    assert summary["stale_snapshot_count"] == 1
+    assert summary["critical_alerts"] == 0
+    assert summary["needs_attention"] == 0
+    assert summary["healthy_sites"] == 0
+    assert summary["average_score"] == 100
+    assert watchlist["watchlist_count"] == 0
+    assert watchlist["critical_watch_count"] == 0
+    assert watchlist["sites"] == []
+    assert site_priorities["priority_site_count"] == 0
+    assert site_priorities["returned_site_count"] == 0
+    assert site_priorities["sites"] == []
+    assert client_priorities["client_count"] == 0
+    assert client_priorities["returned_client_count"] == 0
+    assert client_priorities["total_priority_score"] == 0
+    assert client_priorities["clients"] == []
+    assert kpis["status"] == "yellow"
+    assert kpis["average_score"] == 100
+    assert kpis["red_site_count"] == 0
+    assert kpis["yellow_site_count"] == 0
+    assert kpis["green_site_count"] == 0
+    assert kpis["open_action_count"] == 0
+    assert kpis["priority_site_count"] == 0
+    assert kpis["top_priority_site"] is None
+    assert kpis["recommended_focus"] == "Refresh stale fleet snapshots before the next operations review."
+
+
 def test_api_site_watchlist_returns_only_attention_sites(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

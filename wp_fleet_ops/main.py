@@ -147,6 +147,16 @@ def _snapshot_is_current(captured_at: str | None, now: datetime, threshold_hours
     return freshness == "current"
 
 
+def _current_snapshot_rows(rows: list[dict], now: datetime | None = None) -> list[dict]:
+    """Return only rows safe to use for current health and dispatch decisions."""
+    observed_at = now or datetime.now(timezone.utc)
+    return [
+        row
+        for row in rows
+        if _snapshot_is_current(row.get("captured_at"), observed_at, SNAPSHOT_FRESHNESS_HOURS)
+    ]
+
+
 def _normalize_client_filter(client: str | None) -> str | None:
     """Normalize an optional account filter while preserving stored client names."""
     if client is None:
@@ -209,23 +219,25 @@ def api_summary():
     """Return compact dashboard rollups for automation and lightweight checks."""
     now = datetime.now(timezone.utc)
     fleet_rows = store.latest_dashboard()
+    current_rows = _current_snapshot_rows(fleet_rows, now)
     care_checks = store.latest_care_checks()
     sites = store.list_sites()
     monitored_urls = {row["url"] for row in fleet_rows}
     monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
     missing_snapshot_count = len(sites) - monitored_site_count
     monitoring_coverage_percent = round((monitored_site_count / len(sites)) * 100) if sites else 100
-    current_snapshot_count = sum(
-        1
-        for row in fleet_rows
-        if _snapshot_is_current(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
-    )
+    current_snapshot_count = len(current_rows)
     stale_snapshot_count = len(fleet_rows) - current_snapshot_count
     snapshot_freshness_percent = round((current_snapshot_count / len(sites)) * 100) if sites else 100
-    score_total = sum(row["score"] or 0 for row in fleet_rows)
-    critical_alerts = sum(1 for row in fleet_rows for alert in row["alerts"] if alert.get("severity") == "critical")
+    score_total = sum(row["score"] or 0 for row in current_rows)
+    critical_alerts = sum(
+        1
+        for row in current_rows
+        for alert in row["alerts"]
+        if alert.get("severity") == "critical"
+    )
     last_snapshot_at = max((row["captured_at"] for row in fleet_rows if row.get("captured_at")), default=None)
-    average_score = round(score_total / len(fleet_rows)) if fleet_rows else 100
+    average_score = round(score_total / len(current_rows)) if current_rows else 100
     if critical_alerts or average_score < 65:
         overall_status = "red"
     elif missing_snapshot_count or stale_snapshot_count or average_score < 85:
@@ -245,8 +257,8 @@ def api_summary():
         "stale_snapshot_count": stale_snapshot_count,
         "snapshot_freshness_percent": snapshot_freshness_percent,
         "care_checks": len(care_checks),
-        "healthy_sites": sum(1 for row in fleet_rows if row["score"] >= 85),
-        "needs_attention": sum(1 for row in fleet_rows if _dashboard_status(row["score"]) == "red"),
+        "healthy_sites": sum(1 for row in current_rows if row["score"] >= 85),
+        "needs_attention": sum(1 for row in current_rows if _dashboard_status(row["score"]) == "red"),
         "client_risks": sum(1 for check in care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,
@@ -611,11 +623,8 @@ def api_sla_breaches():
 def _current_actions() -> list[dict]:
     """Build actions only from snapshots with current monitoring evidence."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
-    now = datetime.now(timezone.utc)
     actions = []
-    for row in store.latest_dashboard():
-        if not _snapshot_is_current(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS):
-            continue
+    for row in _current_snapshot_rows(store.latest_dashboard()):
         for alert in row["alerts"]:
             severity = alert.get("severity", "info")
             actions.append(
@@ -650,10 +659,10 @@ def api_actions():
 
 
 def _site_watchlist_rows() -> list[dict]:
-    """Return latest snapshot rows that need operator attention."""
+    """Return current snapshot rows that need operator attention."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     sites = []
-    for row in store.latest_dashboard():
+    for row in _current_snapshot_rows(store.latest_dashboard()):
         alerts = row["alerts"]
         if row["score"] >= 85 and not alerts:
             continue
@@ -3020,8 +3029,9 @@ def api_site_priorities(limit: int = 10):
     """Return a bounded dispatch list of the highest-priority sites to inspect next."""
     bounded_limit = max(1, min(limit, 50))
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    dashboard_rows = store.latest_dashboard()
     sites = []
-    for row in store.latest_dashboard():
+    for row in _current_snapshot_rows(dashboard_rows):
         critical_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
         warning_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "warning")
         top_alert = (
@@ -3056,7 +3066,7 @@ def api_site_priorities(limit: int = 10):
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "limit": bounded_limit,
-        "site_count": len(store.latest_dashboard()),
+        "site_count": len(dashboard_rows),
         "priority_site_count": len(sites),
         "returned_site_count": len(selected),
         "sites": selected,
@@ -3068,7 +3078,7 @@ def api_client_priorities(limit: int = 10):
     """Return clients ranked by cumulative site priority for account dispatch."""
     bounded_limit = max(1, min(limit, 50))
     clients: dict[str, dict] = {}
-    for row in store.latest_dashboard():
+    for row in _current_snapshot_rows(store.latest_dashboard()):
         priority_score = _site_priority_score(row)
         if priority_score <= 0:
             continue
@@ -3139,7 +3149,7 @@ def _operations_kpi_status(
 @app.get("/api/operations-kpis")
 def api_operations_kpis():
     """Return compact fleet KPIs for status pages and recurring ops reports."""
-    rows = store.latest_dashboard()
+    rows = _current_snapshot_rows(store.latest_dashboard())
     fleet_summary = api_summary()
     actions = _current_actions()
     average_score = round(sum(row["score"] or 0 for row in rows) / len(rows)) if rows else 100
