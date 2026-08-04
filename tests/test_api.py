@@ -2228,8 +2228,63 @@ def test_api_risk_register_groups_current_risks_by_category(tmp_path):
     assert entries["tls"]["affected_site_count"] == 2
     assert entries["tls"]["sites"][0]["severity"] == "critical"
     assert entries["tls"]["sites"][1]["severity"] == "warning"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 2
+    assert payload["monitored_site_count"] == 2
+    assert payload["current_evidence_count"] == 2
+    assert payload["missing_snapshot_count"] == 0
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["risk_evidence_percent"] == 100
     assert entries["updates"]["sites"][0]["recommended_action"].startswith("Apply WordPress")
     assert entries["security"]["sites"][0]["score"] < entries["security"]["sites"][1]["score"]
+
+
+def test_api_risk_register_fails_closed_on_missing_or_stale_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Risk Evidence",
+            url="https://expired-risk-evidence.example",
+            client="Client Risk Evidence",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="8",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Risk Evidence",
+            "url": "https://missing-risk-evidence.example",
+            "client": "Client Risk Evidence",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/risk-register")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["snapshot_freshness_threshold_hours"] == 168
+    assert payload["site_count"] == 2
+    assert payload["monitored_site_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    assert payload["unknown_count"] == 2
+    assert payload["risk_evidence_percent"] == 0
+    assert payload["category_count"] == 0
+    assert payload["critical_category_count"] == 0
+    assert payload["entries"] == []
 
 
 def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):

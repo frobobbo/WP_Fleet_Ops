@@ -1890,7 +1890,7 @@ def _maintenance_recommended_action(window: str) -> str:
     return "No maintenance window is currently required."
 
 
-def _risk_register_entries() -> list[dict]:
+def _risk_register_entries(rows: list[dict]) -> list[dict]:
     """Group current site risks by operational category for planning reviews."""
     definitions = [
         (
@@ -1940,7 +1940,7 @@ def _risk_register_entries() -> list[dict]:
     entries = []
     for key, label, predicate, severity_for, action_for in definitions:
         affected_sites = []
-        for row in store.latest_dashboard():
+        for row in rows:
             if not predicate(row):
                 continue
             affected_sites.append(
@@ -1979,12 +1979,44 @@ def _risk_register_entries() -> list[dict]:
 
 @app.get("/api/risk-register")
 def api_risk_register():
-    """Return category-level operational risks for client planning and QBRs."""
-    entries = _risk_register_entries()
+    """Return current operational risks while surfacing incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    tracked_site_count = len(store.list_sites())
+    dashboard_rows = store.latest_dashboard()
+    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    current_evidence_count = len(current_rows)
+    monitored_site_count = len(dashboard_rows)
+    missing_snapshot_count = tracked_site_count - monitored_site_count
+    stale_snapshot_count = monitored_site_count - current_evidence_count
+    unknown_count = tracked_site_count - current_evidence_count
+    entries = _risk_register_entries(current_rows)
+    critical_category_count = sum(
+        1 for entry in entries if entry["highest_severity"] == "critical"
+    )
+    warning_category_count = sum(
+        1 for entry in entries if entry["highest_severity"] == "warning"
+    )
+    status = "red" if critical_category_count else (
+        "yellow" if warning_category_count or unknown_count else "green"
+    )
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": tracked_site_count,
+        "monitored_site_count": monitored_site_count,
+        "current_evidence_count": current_evidence_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "unknown_count": unknown_count,
+        "risk_evidence_percent": (
+            round((current_evidence_count / tracked_site_count) * 100)
+            if tracked_site_count
+            else 100
+        ),
         "category_count": len(entries),
-        "critical_category_count": sum(1 for entry in entries if entry["highest_severity"] == "critical"),
+        "critical_category_count": critical_category_count,
+        "warning_category_count": warning_category_count,
         "entries": entries,
     }
 
