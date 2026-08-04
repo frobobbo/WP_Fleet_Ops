@@ -1964,16 +1964,96 @@ def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path)
     assert response.status_code == 200
     payload = response.json()
     assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
     assert payload["site_count"] == 4
+    assert payload["current_evidence_count"] == 4
     assert payload["renewal_count"] == 3
     assert payload["overdue_count"] == 1
     assert payload["immediate_count"] == 1
     assert payload["scheduled_count"] == 1
+    assert payload["unknown_count"] == 0
+    assert payload["renewal_evidence_percent"] == 100
     assert [site["name"] for site in payload["sites"]] == ["Expired Cert", "Immediate Cert", "Scheduled Cert"]
     assert [site["renewal_window"] for site in payload["sites"]] == ["overdue", "immediate", "scheduled"]
     assert payload["sites"][0]["recommended_action"] == "Replace the expired certificate and verify HTTPS immediately."
     assert payload["sites"][1]["recommended_action"] == "Renew the certificate this week and confirm post-renewal expiry."
     assert payload["sites"][2]["recommended_action"] == "Schedule certificate renewal before the 7-day critical window."
+
+
+def test_api_certificate_renewal_calendar_fails_closed_for_incomplete_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Scheduled Renewal",
+            url="https://current-calendar-renewal.example",
+            ssl_days="21",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Expired Renewal",
+            url="https://stale-calendar-renewal.example",
+            ssl_days="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Renewal Evidence",
+            "url": "https://missing-calendar-renewal.example",
+            "client": "Client New",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-calendar-renewal.example"),
+        )
+
+    response = client.get("/api/certificate-renewal-calendar")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 3
+    assert payload["current_evidence_count"] == 1
+    assert payload["renewal_count"] == 1
+    assert payload["overdue_count"] == 0
+    assert payload["immediate_count"] == 0
+    assert payload["scheduled_count"] == 1
+    assert payload["unknown_count"] == 2
+    assert payload["renewal_evidence_percent"] == 33
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Renewal Evidence",
+        "Stale Expired Renewal",
+        "Current Scheduled Renewal",
+    ]
+
+    missing, stale, current = payload["sites"]
+    assert missing["renewal_window"] == "unknown"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["ssl_days_remaining"] is None
+    assert missing["last_observed_ssl_days_remaining"] is None
+    assert missing["recommended_action"] == (
+        "Capture an initial fleet snapshot and verify certificate expiry."
+    )
+    assert stale["renewal_window"] == "unknown"
+    assert stale["snapshot_freshness"] == "stale"
+    assert stale["ssl_days_remaining"] is None
+    assert stale["last_observed_ssl_days_remaining"] == 0
+    assert stale["snapshot_age_hours"] > 168
+    assert stale["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on certificate status."
+    )
+    assert current["renewal_window"] == "scheduled"
+    assert current["snapshot_freshness"] == "current"
+    assert current["ssl_days_remaining"] == 21
+    assert current["last_observed_ssl_days_remaining"] == 21
 
 
 def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):

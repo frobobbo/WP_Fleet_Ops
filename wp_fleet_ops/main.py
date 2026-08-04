@@ -1647,42 +1647,97 @@ def _certificate_renewal_action(window: str) -> str:
     return "No renewal action is needed in the next 30 days."
 
 
+def _certificate_renewal_evidence_action(window: str, freshness: str) -> str:
+    """Return a calendar action without treating incomplete evidence as current."""
+    if freshness != "current":
+        return _certificate_evidence_recommended_action("unknown", freshness)
+    return _certificate_renewal_action(window)
+
+
 @app.get("/api/certificate-renewal-calendar")
 def api_certificate_renewal_calendar():
-    """Return TLS renewals grouped into overdue/immediate/scheduled windows."""
-    window_rank = {"overdue": 0, "immediate": 1, "scheduled": 2, "healthy": 3}
+    """Return current TLS renewals while failing closed on incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    tracked_sites = store.list_sites()
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    window_rank = {"overdue": 0, "immediate": 1, "unknown": 2, "scheduled": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
-    for row in store.latest_dashboard():
-        window = _certificate_renewal_window(row["ssl_days"])
+    current_evidence_count = 0
+    for site in tracked_sites:
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            freshness = "missing"
+            age_hours = None
+            latest_snapshot_at = None
+            last_observed_ssl_days = None
+            ssl_days = None
+            window = "unknown"
+        else:
+            freshness, age_hours = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_snapshot_at = row.get("captured_at")
+            last_observed_ssl_days = row["ssl_days"]
+            if freshness == "current":
+                current_evidence_count += 1
+                ssl_days = last_observed_ssl_days
+                window = _certificate_renewal_window(ssl_days)
+            else:
+                ssl_days = None
+                window = "unknown"
+
         if window == "healthy":
             continue
         sites.append(
             {
-                "name": row["name"],
-                "url": row["url"],
-                "client": row.get("client") or "Unassigned",
-                "ssl_days_remaining": row["ssl_days"],
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "ssl_days_remaining": ssl_days,
+                "last_observed_ssl_days_remaining": last_observed_ssl_days,
                 "renewal_window": window,
-                "latest_snapshot_at": row["captured_at"],
-                "recommended_action": _certificate_renewal_action(window),
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
+                "latest_snapshot_at": latest_snapshot_at,
+                "recommended_action": _certificate_renewal_evidence_action(window, freshness),
             }
         )
 
     sites.sort(
         key=lambda site: (
             window_rank[site["renewal_window"]],
-            site["ssl_days_remaining"],
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            site["last_observed_ssl_days_remaining"]
+            if site["last_observed_ssl_days_remaining"] is not None
+            else float("inf"),
             site["client"].lower(),
             site["name"].lower(),
         )
     )
+    overdue_count = sum(1 for site in sites if site["renewal_window"] == "overdue")
+    immediate_count = sum(1 for site in sites if site["renewal_window"] == "immediate")
+    scheduled_count = sum(1 for site in sites if site["renewal_window"] == "scheduled")
+    unknown_count = len(tracked_sites) - current_evidence_count
+    overall_status = "red" if overdue_count or immediate_count else (
+        "yellow" if scheduled_count or unknown_count else "green"
+    )
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": len(store.latest_dashboard()),
-        "renewal_count": len(sites),
-        "overdue_count": sum(1 for site in sites if site["renewal_window"] == "overdue"),
-        "immediate_count": sum(1 for site in sites if site["renewal_window"] == "immediate"),
-        "scheduled_count": sum(1 for site in sites if site["renewal_window"] == "scheduled"),
+        "generated_at": now.isoformat(),
+        "status": overall_status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": len(tracked_sites),
+        "current_evidence_count": current_evidence_count,
+        "renewal_count": overdue_count + immediate_count + scheduled_count,
+        "overdue_count": overdue_count,
+        "immediate_count": immediate_count,
+        "scheduled_count": scheduled_count,
+        "unknown_count": unknown_count,
+        "renewal_evidence_percent": round((current_evidence_count / len(tracked_sites)) * 100)
+        if tracked_sites
+        else 100,
         "sites": sites,
     }
 
