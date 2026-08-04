@@ -2340,16 +2340,15 @@ def test_api_slo_fails_closed_when_monitoring_evidence_is_missing_or_stale(tmp_p
     assert payload["site_count"] == 2
     assert payload["monitored_site_count"] == 1
     assert payload["current_snapshot_count"] == 0
-    assert payload["at_risk_count"] == 1
-    assert payload["worst_objective"] == {
-        "name": "monitoring",
-        "label": "Current monitoring evidence",
-        "threshold": "snapshot <= 168 hours old",
-        "met_count": 0,
-        "miss_count": 2,
-        "compliance_percent": 0.0,
-        "status": "at_risk",
-    }
+    assert payload["at_risk_count"] == 6
+    objectives = {objective["name"]: objective for objective in payload["objectives"]}
+    assert set(objectives) == {"availability", "tls", "backups", "performance", "security", "monitoring"}
+    for objective in objectives.values():
+        assert objective["met_count"] == 0
+        assert objective["miss_count"] == 2
+        assert objective["compliance_percent"] == 0.0
+        assert objective["status"] == "at_risk"
+    assert payload["worst_objective"] == objectives["availability"]
 
 
 def test_api_remediation_plan_groups_actions_by_operational_timing(tmp_path):

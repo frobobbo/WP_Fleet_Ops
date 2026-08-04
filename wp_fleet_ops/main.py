@@ -2059,19 +2059,19 @@ def api_slo():
     """Return fleet-level service objective compliance for leadership review."""
     now = datetime.now(timezone.utc)
     rows = store.latest_dashboard()
+    current_rows = _current_snapshot_rows(rows, now)
     monitored_total = len(rows)
     tracked_total = len(store.list_sites())
-    current_snapshot_count = sum(
-        1
-        for row in rows
-        if _snapshot_is_current(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
-    )
+    current_snapshot_count = len(current_rows)
+    # Every objective uses the full tracked fleet as its denominator and only
+    # current snapshots as evidence. A stale or missing snapshot therefore
+    # cannot make an operational objective look healthy.
     objectives = [
-        _slo_row("availability", "Sites reachable", monitored_total, sum(1 for row in rows if row["uptime_ok"]), "site reachable"),
-        _slo_row("tls", "TLS renewal buffer", monitored_total, sum(1 for row in rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
-        _slo_row("backups", "Backup freshness", monitored_total, sum(1 for row in rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
-        _slo_row("performance", "Homepage response", monitored_total, sum(1 for row in rows if row["response_ms"] <= 1500), "<= 1500 ms"),
-        _slo_row("security", "Security headers", monitored_total, sum(1 for row in rows if row["security_header_count"] >= 2), ">= 2 core headers"),
+        _slo_row("availability", "Sites reachable", tracked_total, sum(1 for row in current_rows if row["uptime_ok"]), "site reachable"),
+        _slo_row("tls", "TLS renewal buffer", tracked_total, sum(1 for row in current_rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
+        _slo_row("backups", "Backup freshness", tracked_total, sum(1 for row in current_rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
+        _slo_row("performance", "Homepage response", tracked_total, sum(1 for row in current_rows if row["response_ms"] <= 1500), "<= 1500 ms"),
+        _slo_row("security", "Security headers", tracked_total, sum(1 for row in current_rows if row["security_header_count"] >= 2), ">= 2 core headers"),
         _slo_row(
             "monitoring",
             "Current monitoring evidence",
