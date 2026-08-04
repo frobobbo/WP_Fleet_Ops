@@ -2023,10 +2023,19 @@ def api_risk_register():
 
 @app.get("/api/maintenance-windows")
 def api_maintenance_windows():
-    """Return sites that need grouped maintenance work, prioritized by urgency."""
+    """Return current maintenance work while surfacing incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    tracked_site_count = len(store.list_sites())
+    dashboard_rows = store.latest_dashboard()
+    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    monitored_site_count = len(dashboard_rows)
+    current_evidence_count = len(current_rows)
+    missing_snapshot_count = tracked_site_count - monitored_site_count
+    stale_snapshot_count = monitored_site_count - current_evidence_count
+    unknown_count = tracked_site_count - current_evidence_count
     urgency_rank = {"immediate": 0, "scheduled": 1, "none": 2}
     sites = []
-    for row in store.latest_dashboard():
+    for row in current_rows:
         reasons = _maintenance_reasons(row)
         window = _maintenance_window(row, reasons)
         if window == "none":
@@ -2046,12 +2055,27 @@ def api_maintenance_windows():
         )
 
     sites.sort(key=lambda site: (urgency_rank[site["maintenance_window"]], -site["risk_count"], site["score"], site["client"].lower(), site["name"].lower()))
+    immediate_count = sum(1 for site in sites if site["maintenance_window"] == "immediate")
+    scheduled_count = sum(1 for site in sites if site["maintenance_window"] == "scheduled")
+    status = "red" if immediate_count else ("yellow" if scheduled_count or unknown_count else "green")
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": len(store.latest_dashboard()),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": tracked_site_count,
+        "monitored_site_count": monitored_site_count,
+        "current_evidence_count": current_evidence_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "unknown_count": unknown_count,
+        "maintenance_evidence_percent": (
+            round((current_evidence_count / tracked_site_count) * 100)
+            if tracked_site_count
+            else 100
+        ),
         "window_count": len(sites),
-        "immediate_count": sum(1 for site in sites if site["maintenance_window"] == "immediate"),
-        "scheduled_count": sum(1 for site in sites if site["maintenance_window"] == "scheduled"),
+        "immediate_count": immediate_count,
+        "scheduled_count": scheduled_count,
         "sites": sites,
     }
 
@@ -2081,12 +2105,12 @@ def _slo_row(name: str, label: str, total: int, met: int, threshold: str) -> dic
     }
 
 
-def _maintenance_calendar_windows() -> list[dict]:
+def _maintenance_calendar_windows(rows: list[dict]) -> list[dict]:
     """Summarize maintenance work by timing window for planning views."""
     labels = {"immediate": "Immediate maintenance", "scheduled": "Scheduled maintenance"}
     urgency_rank = {"immediate": 0, "scheduled": 1}
     windows: dict[str, dict] = {}
-    for row in store.latest_dashboard():
+    for row in rows:
         reasons = _maintenance_reasons(row)
         window = _maintenance_window(row, reasons)
         if window == "none":
@@ -2129,14 +2153,40 @@ def _maintenance_calendar_windows() -> list[dict]:
 
 @app.get("/api/maintenance-calendar")
 def api_maintenance_calendar():
-    """Return maintenance work grouped by immediate vs scheduled windows."""
-    windows = _maintenance_calendar_windows()
+    """Return current maintenance windows while surfacing incomplete evidence."""
+    now = datetime.now(timezone.utc)
+    tracked_site_count = len(store.list_sites())
+    dashboard_rows = store.latest_dashboard()
+    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    monitored_site_count = len(dashboard_rows)
+    current_evidence_count = len(current_rows)
+    missing_snapshot_count = tracked_site_count - monitored_site_count
+    stale_snapshot_count = monitored_site_count - current_evidence_count
+    unknown_count = tracked_site_count - current_evidence_count
+    windows = _maintenance_calendar_windows(current_rows)
+    immediate_site_count = sum(window["site_count"] for window in windows if window["window"] == "immediate")
+    scheduled_site_count = sum(window["site_count"] for window in windows if window["window"] == "scheduled")
+    status = "red" if immediate_site_count else (
+        "yellow" if scheduled_site_count or unknown_count else "green"
+    )
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": len(store.latest_dashboard()),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": tracked_site_count,
+        "monitored_site_count": monitored_site_count,
+        "current_evidence_count": current_evidence_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "unknown_count": unknown_count,
+        "maintenance_evidence_percent": (
+            round((current_evidence_count / tracked_site_count) * 100)
+            if tracked_site_count
+            else 100
+        ),
         "window_count": len(windows),
-        "immediate_site_count": sum(window["site_count"] for window in windows if window["window"] == "immediate"),
-        "scheduled_site_count": sum(window["site_count"] for window in windows if window["window"] == "scheduled"),
+        "immediate_site_count": immediate_site_count,
+        "scheduled_site_count": scheduled_site_count,
         "windows": windows,
     }
 

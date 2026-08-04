@@ -2397,6 +2397,67 @@ def test_api_maintenance_calendar_groups_work_by_window(tmp_path):
     assert scheduled["recommended_action"].startswith("Plan a routine maintenance window")
 
 
+def test_maintenance_views_fail_closed_on_missing_or_stale_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Routine Work",
+            url="https://current-maintenance.example",
+            wp_updates="2",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Emergency Evidence",
+            url="https://expired-maintenance.example",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="8",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Maintenance Evidence",
+            "url": "https://missing-maintenance.example",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://expired-maintenance.example"),
+        )
+
+    windows = client.get("/api/maintenance-windows").json()
+    calendar = client.get("/api/maintenance-calendar").json()
+
+    for payload in (windows, calendar):
+        assert payload["status"] == "yellow"
+        assert payload["snapshot_freshness_threshold_hours"] == 168
+        assert payload["site_count"] == 3
+        assert payload["monitored_site_count"] == 2
+        assert payload["current_evidence_count"] == 1
+        assert payload["missing_snapshot_count"] == 1
+        assert payload["stale_snapshot_count"] == 1
+        assert payload["unknown_count"] == 2
+        assert payload["maintenance_evidence_percent"] == 33
+        assert payload["window_count"] == 1
+
+    assert windows["immediate_count"] == 0
+    assert windows["scheduled_count"] == 1
+    assert [site["name"] for site in windows["sites"]] == ["Current Routine Work"]
+    assert calendar["immediate_site_count"] == 0
+    assert calendar["scheduled_site_count"] == 1
+    assert [window["window"] for window in calendar["windows"]] == ["scheduled"]
+    assert calendar["windows"][0]["sites"][0]["name"] == "Current Routine Work"
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
