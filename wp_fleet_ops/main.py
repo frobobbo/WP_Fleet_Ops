@@ -221,6 +221,11 @@ def api_summary():
     fleet_rows = store.latest_dashboard()
     current_rows = _current_snapshot_rows(fleet_rows, now)
     care_checks = store.latest_care_checks()
+    current_care_checks = [
+        check
+        for check in care_checks
+        if _snapshot_is_current(check.get("checked_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+    ]
     sites = store.list_sites()
     monitored_urls = {row["url"] for row in fleet_rows}
     monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
@@ -229,6 +234,12 @@ def api_summary():
     current_snapshot_count = len(current_rows)
     stale_snapshot_count = len(fleet_rows) - current_snapshot_count
     snapshot_freshness_percent = round((current_snapshot_count / len(sites)) * 100) if sites else 100
+    care_check_urls = {check["url"] for check in care_checks}
+    monitored_care_check_count = sum(1 for site in sites if site["url"] in care_check_urls)
+    missing_care_check_count = len(sites) - monitored_care_check_count
+    current_care_check_count = len(current_care_checks)
+    stale_care_check_count = len(care_checks) - current_care_check_count
+    care_check_freshness_percent = round((current_care_check_count / len(sites)) * 100) if sites else 100
     score_total = sum(row["score"] or 0 for row in current_rows)
     critical_alerts = sum(
         1
@@ -240,7 +251,13 @@ def api_summary():
     average_score = round(score_total / len(current_rows)) if current_rows else 100
     if critical_alerts or average_score < 65:
         overall_status = "red"
-    elif missing_snapshot_count or stale_snapshot_count or average_score < 85:
+    elif (
+        missing_snapshot_count
+        or stale_snapshot_count
+        or missing_care_check_count
+        or stale_care_check_count
+        or average_score < 85
+    ):
         overall_status = "yellow"
     else:
         overall_status = "green"
@@ -257,9 +274,14 @@ def api_summary():
         "stale_snapshot_count": stale_snapshot_count,
         "snapshot_freshness_percent": snapshot_freshness_percent,
         "care_checks": len(care_checks),
+        "monitored_care_check_count": monitored_care_check_count,
+        "missing_care_check_count": missing_care_check_count,
+        "current_care_check_count": current_care_check_count,
+        "stale_care_check_count": stale_care_check_count,
+        "care_check_freshness_percent": care_check_freshness_percent,
         "healthy_sites": sum(1 for row in current_rows if row["score"] >= 85),
         "needs_attention": sum(1 for row in current_rows if _dashboard_status(row["score"]) == "red"),
-        "client_risks": sum(1 for check in care_checks if check["status"] == "red"),
+        "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,
         "last_snapshot_at": last_snapshot_at,

@@ -354,6 +354,34 @@ def test_api_summary_warns_when_healthy_snapshot_is_stale(tmp_path):
     assert summary["overall_status"] == "yellow"
 
 
+def test_api_summary_excludes_stale_care_checks_from_current_client_risk(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Evidence",
+            url="https://stale-care-evidence.example",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ?, status = ?",
+            ("2000-01-01T00:00:00+00:00", "red"),
+        )
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["care_checks"] == 1
+    assert summary["monitored_care_check_count"] == 1
+    assert summary["current_care_check_count"] == 0
+    assert summary["stale_care_check_count"] == 1
+    assert summary["missing_care_check_count"] == 0
+    assert summary["care_check_freshness_percent"] == 0
+    assert summary["client_risks"] == 0
+    assert summary["overall_status"] == "yellow"
+
+
 def test_dashboard_replaces_live_monitor_label_when_snapshot_is_stale(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
