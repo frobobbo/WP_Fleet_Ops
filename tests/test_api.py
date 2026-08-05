@@ -115,6 +115,49 @@ def test_api_report_returns_structured_report_export(tmp_path):
     assert "Monthly WordPress Care Report" in payload["report"]
     assert "WP FleetOps Maintenance Report" in payload["report"]
     assert "Export Site" in payload["report"]
+    assert payload["status"] == "green"
+
+
+def test_api_report_status_reflects_current_site_risk(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Critical Report Site",
+            url="https://critical-report.example",
+            uptime_ok="false",
+            ssl_days="2",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+
+    payload = client.get("/api/report").json()
+
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["current_evidence_count"] == 1
+    assert payload["status"] == "red"
+    assert "Critical Report Site — Needs attention" in payload["report"]
+
+
+def test_api_report_status_reflects_current_maintenance_risk(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Maintenance Report Site",
+            url="https://maintenance-report.example",
+            wp_updates="2",
+        ),
+        follow_redirects=False,
+    )
+
+    payload = client.get("/api/report").json()
+
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["current_evidence_count"] == 1
+    assert payload["status"] == "yellow"
+    assert "[warning] 2 WordPress updates pending." in payload["report"]
 
 
 def test_reports_fail_closed_on_missing_or_stale_combined_evidence(tmp_path):

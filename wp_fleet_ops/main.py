@@ -4020,7 +4020,28 @@ def snapshot(
     return RedirectResponse("/", status_code=303)
 
 
-def _build_text_report() -> tuple[str, int, int, int, int]:
+def _combined_report_status(
+    care_checks: list[SiteCheck],
+    fleet_rows: list[dict],
+    monitoring_gap_count: int,
+) -> str:
+    """Return the highest current risk represented by the combined report."""
+    if any(check.status == "red" for check in care_checks) or any(
+        _dashboard_status(row["score"]) == "red"
+        or any(alert.get("severity") == "critical" for alert in row["alerts"])
+        for row in fleet_rows
+    ):
+        return "red"
+    if monitoring_gap_count or any(check.status == "yellow" for check in care_checks) or any(
+        _dashboard_status(row["score"]) == "yellow"
+        or any(alert.get("severity") == "warning" for alert in row["alerts"])
+        for row in fleet_rows
+    ):
+        return "yellow"
+    return "green"
+
+
+def _build_text_report() -> tuple[str, str, int, int, int, int]:
     """Build a report only from sites with current paired monitoring evidence."""
     now = datetime.now(timezone.utc)
     tracked_sites = store.list_sites()
@@ -4114,8 +4135,11 @@ def _build_text_report() -> tuple[str, int, int, int, int]:
                 "Capture a fresh combined check before publishing site health."
             )
         report_text += "\n---\n\n" + "\n".join(gap_lines) + "\n"
+    current_fleet_rows = [row for row in latest_snapshots if row["url"] in current_urls]
+    report_status = _combined_report_status(care_checks, current_fleet_rows, len(evidence_gaps))
     return (
         report_text,
+        report_status,
         len(care_checks),
         len(fleet_sites),
         len(tracked_sites),
@@ -4126,12 +4150,17 @@ def _build_text_report() -> tuple[str, int, int, int, int]:
 @app.get("/api/report")
 def api_report():
     """Return the combined care/fleet report with metadata for integrations."""
-    report_text, care_check_count, site_count, tracked_site_count, monitoring_gap_count = (
-        _build_text_report()
-    )
+    (
+        report_text,
+        report_status,
+        care_check_count,
+        site_count,
+        tracked_site_count,
+        monitoring_gap_count,
+    ) = _build_text_report()
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "status": "yellow" if monitoring_gap_count else "green",
+        "status": report_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "tracked_site_count": tracked_site_count,
         "site_count": site_count,
@@ -4145,7 +4174,7 @@ def api_report():
 
 @app.get("/report", response_class=PlainTextResponse)
 def report():
-    report_text, _, _, _, _ = _build_text_report()
+    report_text, _, _, _, _, _ = _build_text_report()
     return report_text
 
 
