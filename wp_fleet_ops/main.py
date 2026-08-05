@@ -401,13 +401,15 @@ def api_clients():
             continue
 
         summary["monitored_site_count"] += 1
-        summary["score_total"] += row["score"] or 0
-        summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
-        summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
-        summary["critical_alerts"] += sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
         freshness, _ = _snapshot_freshness(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
         if freshness == "current":
             summary["current_snapshot_count"] += 1
+            summary["score_total"] += row["score"] or 0
+            summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
+            summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
+            summary["critical_alerts"] += sum(
+                1 for alert in row["alerts"] if alert.get("severity") == "critical"
+            )
         else:
             summary["stale_snapshot_count"] += 1
         captured_dt = _parse_captured_at(row.get("captured_at"))
@@ -418,7 +420,8 @@ def api_clients():
     clients = []
     for summary in client_rows.values():
         monitored_site_count = summary["monitored_site_count"]
-        average_score = round(summary.pop("score_total") / monitored_site_count) if monitored_site_count else 100
+        current_snapshot_count = summary["current_snapshot_count"]
+        average_score = round(summary.pop("score_total") / current_snapshot_count) if current_snapshot_count else 100
         summary.pop("_latest_snapshot_dt")
         summary["average_score"] = average_score
         summary["monitoring_coverage_percent"] = round(

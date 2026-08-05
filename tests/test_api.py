@@ -558,6 +558,40 @@ def test_api_clients_warns_about_account_monitoring_gaps(tmp_path):
     assert account["status"] == "yellow"
 
 
+def test_api_clients_excludes_stale_risk_from_current_account_health(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Client Risk",
+            url="https://expired-client-risk.example",
+            client="Client Expired Risk",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="7",
+            backup_age_hours="120",
+            response_ms="2500",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/clients").json()
+
+    account = payload["clients"][0]
+    assert account["client"] == "Client Expired Risk"
+    assert account["monitored_site_count"] == 1
+    assert account["current_snapshot_count"] == 0
+    assert account["stale_snapshot_count"] == 1
+    assert account["average_score"] == 100
+    assert account["healthy_sites"] == 0
+    assert account["needs_attention"] == 0
+    assert account["critical_alerts"] == 0
+    assert account["status"] == "yellow"
+
+
 def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
