@@ -117,6 +117,74 @@ def test_api_report_returns_structured_report_export(tmp_path):
     assert "Export Site" in payload["report"]
 
 
+def test_reports_fail_closed_on_missing_or_stale_combined_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Report Site",
+            url="https://current-report.example",
+            client="Current Client",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Report Site",
+            url="https://expired-report.example",
+            client="Expired Client",
+            uptime_ok="false",
+            ssl_days="2",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Report Site",
+            "url": "https://missing-report.example",
+            "client": "Missing Client",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://expired-report.example"),
+        )
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01T00:00:00+00:00", "https://expired-report.example"),
+        )
+
+    response = client.get("/api/report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["snapshot_freshness_threshold_hours"] == 168
+    assert payload["tracked_site_count"] == 3
+    assert payload["site_count"] == 1
+    assert payload["care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert "Current Report Site — Healthy" in payload["report"]
+    assert "Expired Report Site — Needs attention" not in payload["report"]
+    assert "SSL expires in 2 day(s)." not in payload["report"]
+    assert "# Monitoring Evidence Gaps" in payload["report"]
+    assert "Expired Report Site (Expired Client): fleet snapshot stale; care check stale." in payload["report"]
+    assert "Missing Report Site (Missing Client): fleet snapshot missing; care check missing." in payload["report"]
+    plain_report = client.get("/report").text
+    assert "Expired Report Site — Needs attention" not in plain_report
+    assert "SSL expires in 2 day(s)." not in plain_report
+    assert "Expired Report Site (Expired Client): fleet snapshot stale; care check stale." in plain_report
+    assert "Missing Report Site (Missing Client): fleet snapshot missing; care check missing." in plain_report
+
+
 def test_ready_reports_database_access_and_current_counts(tmp_path):
     client = make_test_client(tmp_path)
     client.post("/care/manual-check", data={"name": "Ready Site", "url": "https://ready.example"}, follow_redirects=False)

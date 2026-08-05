@@ -3995,7 +3995,49 @@ def snapshot(
     return RedirectResponse("/", status_code=303)
 
 
-def _build_text_report() -> tuple[str, int, int]:
+def _build_text_report() -> tuple[str, int, int, int, int]:
+    """Build a report only from sites with current paired monitoring evidence."""
+    now = datetime.now(timezone.utc)
+    tracked_sites = store.list_sites()
+    latest_snapshots = store.latest_dashboard()
+    latest_care_checks = store.latest_care_checks()
+    snapshots_by_url = {row["url"]: row for row in latest_snapshots}
+    care_checks_by_url = {row["url"]: row for row in latest_care_checks}
+    current_urls: set[str] = set()
+    evidence_gaps = []
+    for site in tracked_sites:
+        snapshot = snapshots_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        snapshot_freshness = (
+            _snapshot_freshness(
+                snapshot.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )[0]
+            if snapshot
+            else "missing"
+        )
+        care_check_freshness = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )[0]
+            if care_check
+            else "missing"
+        )
+        if snapshot_freshness == "current" and care_check_freshness == "current":
+            current_urls.add(site["url"])
+            continue
+        evidence_gaps.append(
+            {
+                "name": site["name"],
+                "client": site.get("client") or "Unassigned",
+                "snapshot_freshness": snapshot_freshness,
+                "care_check_freshness": care_check_freshness,
+            }
+        )
+
     care_checks = [
         SiteCheck(
             name=r["name"],
@@ -4013,7 +4055,8 @@ def _build_text_report() -> tuple[str, int, int]:
             actions=r["actions"],
             checked_at=r["checked_at"],
         )
-        for r in store.latest_care_checks()
+        for r in latest_care_checks
+        if r["url"] in current_urls
     ]
     fleet_sites = [
         FleetSite(
@@ -4026,20 +4069,50 @@ def _build_text_report() -> tuple[str, int, int]:
             r["response_ms"],
             r["security_header_count"],
         )
-        for r in store.latest_dashboard()
+        for r in latest_snapshots
+        if r["url"] in current_urls
     ]
     report_text = summarize_care_report(care_checks) + "\n---\n\n" + generate_maintenance_report(fleet_sites)
-    return report_text, len(care_checks), len(fleet_sites)
+    if evidence_gaps:
+        evidence_gaps.sort(key=lambda row: (row["client"].lower(), row["name"].lower()))
+        gap_lines = [
+            "# Monitoring Evidence Gaps",
+            "",
+            "The following sites are excluded from current health claims until both monitoring sources are refreshed:",
+            "",
+        ]
+        for gap in evidence_gaps:
+            gap_lines.append(
+                f"- {gap['name']} ({gap['client']}): "
+                f"fleet snapshot {gap['snapshot_freshness']}; "
+                f"care check {gap['care_check_freshness']}. "
+                "Capture a fresh combined check before publishing site health."
+            )
+        report_text += "\n---\n\n" + "\n".join(gap_lines) + "\n"
+    return (
+        report_text,
+        len(care_checks),
+        len(fleet_sites),
+        len(tracked_sites),
+        len(evidence_gaps),
+    )
 
 
 @app.get("/api/report")
 def api_report():
     """Return the combined care/fleet report with metadata for integrations."""
-    report_text, care_check_count, site_count = _build_text_report()
+    report_text, care_check_count, site_count, tracked_site_count, monitoring_gap_count = (
+        _build_text_report()
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "yellow" if monitoring_gap_count else "green",
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "tracked_site_count": tracked_site_count,
         "site_count": site_count,
         "care_check_count": care_check_count,
+        "current_evidence_count": site_count,
+        "monitoring_gap_count": monitoring_gap_count,
         "line_count": len(report_text.splitlines()),
         "report": report_text,
     }
@@ -4047,7 +4120,7 @@ def api_report():
 
 @app.get("/report", response_class=PlainTextResponse)
 def report():
-    report_text, _, _ = _build_text_report()
+    report_text, _, _, _, _ = _build_text_report()
     return report_text
 
 
