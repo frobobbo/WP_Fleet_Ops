@@ -344,3 +344,26 @@ class FleetOpsStore:
     def count_site_snapshots(self, url: str) -> int:
         """Return the total number of snapshots persisted for one site URL."""
         return self.count_snapshots(url=url)
+
+    def delete_site(self, url: str) -> bool:
+        """Remove a site and all its care checks and snapshots.
+
+        The ``sites`` table uses ``ON DELETE CASCADE`` is not declared in the
+        schema (it relies on foreign keys with ``cascade`` in the constraint), so
+        we delete child rows explicitly before removing the site record. Foreign
+        key enforcement is enabled per-connection via ``pragma foreign_keys``,
+        but to keep the delete self-contained and unambiguous we always remove
+        children first.
+
+        Returns ``True`` if a site was found and removed, ``False`` if no site
+        with that URL exists.
+        """
+        with self._connect() as con:
+            row = con.execute("select id from sites where url=?", (url,)).fetchone()
+            if row is None:
+                return False
+            site_id = int(row["id"])
+            con.execute("delete from care_checks where site_id=?", (site_id,))
+            con.execute("delete from snapshots where site_id=?", (site_id,))
+            con.execute("delete from sites where id=?", (site_id,))
+            return True

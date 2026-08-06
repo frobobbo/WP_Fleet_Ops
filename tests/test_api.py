@@ -4935,6 +4935,102 @@ def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
     assert all(check["url"] == payload["url"] for check in payload["care_checks"])
 
 
+def test_delete_site_removes_site_and_cascades_history(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/care/manual-check",
+        data={"name": "Doomed Site", "url": "https://doomed.example", "client": "Acme"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Doomed Site", url="https://doomed.example", client="Acme"),
+        follow_redirects=False,
+    )
+    # manual-check saves both a care_check and a snapshot; the extra /snapshot
+    # POST also saves a care_check and a snapshot → 1 site, 2 care_checks, 2 fleet_snapshots.
+    ready_before = client.get("/ready").json()
+    assert ready_before["sites"] == 1
+    assert ready_before["care_checks"] == 2
+    assert ready_before["fleet_snapshots"] == 2
+
+    response = client.delete("/sites", params={"url": "https://doomed.example"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["deleted"] is True
+    assert payload["url"] == "https://doomed.example"
+    ready_after = client.get("/ready").json()
+    assert ready_after["sites"] == 0
+    assert ready_after["care_checks"] == 0
+    assert ready_after["fleet_snapshots"] == 0
+
+
+def test_delete_site_normalizes_url_before_lookup(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/care/manual-check",
+        data={"name": "Normalize Me", "url": "https://normalize.example"},
+        follow_redirects=False,
+    )
+
+    # Submit URL with redundant port, uppercase scheme, trailing fragment
+    response = client.delete(
+        "/sites",
+        params={"url": "HTTPS://NORMALIZE.EXAMPLE:443/#gone"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert client.get("/ready").json()["sites"] == 0
+
+
+def test_delete_site_returns_404_for_unknown_url(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.delete("/sites", params={"url": "https://no-such-site.example"})
+
+    assert response.status_code == 404
+    payload = response.json()
+    assert payload["deleted"] is False
+
+
+def test_delete_site_does_not_affect_other_sites(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/care/manual-check",
+        data={"name": "Keep Me", "url": "https://keep.example"},
+        follow_redirects=False,
+    )
+    client.post(
+        "/care/manual-check",
+        data={"name": "Remove Me", "url": "https://remove.example"},
+        follow_redirects=False,
+    )
+
+    response = client.delete("/sites", params={"url": "https://remove.example"})
+
+    assert response.status_code == 200
+    ready = client.get("/ready").json()
+    assert ready["sites"] == 1
+    assert ready["care_checks"] == 1
+    # manual-check saves one fleet snapshot per call; removing one site leaves one
+    assert ready["fleet_snapshots"] == 1
+    directory = client.get("/api/site-directory").json()
+    assert len(directory["sites"]) == 1
+    assert directory["sites"][0]["url"] == "https://keep.example"
+
+
+def test_delete_site_returns_422_for_invalid_url(tmp_path):
+    client = make_test_client(tmp_path)
+
+    # A URL with embedded spaces is rejected by normalize_site_url before the
+    # store is consulted; the ValueError exception handler returns 422.
+    response = client.delete("/sites", params={"url": "not a valid url"})
+
+    assert response.status_code == 422
+
+
 def test_api_care_check_history_filters_and_paginates_by_client(tmp_path):
     client = make_test_client(tmp_path)
     for i in range(3):

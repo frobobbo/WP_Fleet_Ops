@@ -3958,6 +3958,24 @@ def add_site(name: str = Form(...), url: str = Form(...), client: str = Form("")
     return RedirectResponse("/", status_code=303)
 
 
+@app.delete("/sites")
+def delete_site(url: str):
+    """Remove a site and all its care checks and fleet snapshots.
+
+    The URL is normalized using the same rules as site registration so callers
+    do not need to spell the canonical form exactly.  Returns 404 when no
+    matching site exists.
+    """
+    normalized = normalize_site_url(url)
+    deleted = store.delete_site(normalized)
+    if not deleted:
+        return JSONResponse(
+            status_code=404,
+            content={"deleted": False, "url": normalized, "detail": "Site not found."},
+        )
+    return {"deleted": True, "url": normalized}
+
+
 @app.post("/care/manual-check")
 def manual_care_check(
     name: str = Form(..., min_length=1),
