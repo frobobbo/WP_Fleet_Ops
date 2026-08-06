@@ -3264,6 +3264,47 @@ def test_api_site_scorecards_returns_compact_per_site_status_cards(tmp_path):
     assert payload["sites"][1]["next_action"] == "Continue normal maintenance cadence."
 
 
+def test_api_site_scorecards_fail_closed_on_stale_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Scorecard",
+            url="https://stale-scorecard.example",
+            client="Client Scorecard Gap",
+            uptime_ok="false",
+            ssl_days="4",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/site-scorecards").json()
+
+    assert payload["site_count"] == 1
+    assert payload["critical_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["healthy_count"] == 0
+    assert payload["unknown_count"] == 1
+    scorecard = payload["sites"][0]
+    assert scorecard["status"] == "unknown"
+    assert scorecard["observed_status"] == "critical"
+    assert scorecard["score"] is None
+    assert scorecard["observed_score"] < 65
+    assert scorecard["snapshot_freshness"] == "stale"
+    assert scorecard["snapshot_age_hours"] > 168
+    assert set(scorecard["badges"].values()) == {"unknown"}
+    assert scorecard["observed_badges"]["availability"] == "critical"
+    assert scorecard["observed_alert_count"] >= 5
+    assert scorecard["alert_count"] == 0
+    assert scorecard["next_action"] == "Capture a fresh fleet snapshot before relying on this scorecard."
+
+
 def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
