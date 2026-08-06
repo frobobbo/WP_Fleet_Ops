@@ -299,17 +299,23 @@ def api_sites():
             now,
             SNAPSHOT_FRESHNESS_HOURS,
         )
+        observed_status = _dashboard_status(row["score"])
+        observed_critical_alerts = sum(
+            1 for alert in row["alerts"] if alert.get("severity") == "critical"
+        )
         sites.append(
             {
                 "name": row["name"],
                 "url": row["url"],
                 "client": row["client"],
                 "score": row["score"],
-                "status": _dashboard_status(row["score"]),
+                "status": observed_status if freshness == "current" else "unknown",
+                "observed_status": observed_status,
                 "latest_snapshot_at": row["captured_at"],
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
-                "critical_alerts": sum(1 for alert in row["alerts"] if alert.get("severity") == "critical"),
+                "critical_alerts": observed_critical_alerts if freshness == "current" else 0,
+                "observed_critical_alerts": observed_critical_alerts,
                 "alerts": row["alerts"],
             }
         )
@@ -330,6 +336,7 @@ def api_site_directory():
         latest = latest_by_url.get(site["url"])
         if latest:
             score = latest["score"]
+            observed_status = _dashboard_status(score)
             freshness, age_hours = _snapshot_freshness(
                 latest.get("captured_at"),
                 now,
@@ -354,7 +361,8 @@ def api_site_directory():
                     "client": site["client"] or "Unassigned",
                     "monitoring_status": "monitored",
                     "score": score,
-                    "status": _dashboard_status(score),
+                    "status": observed_status if freshness == "current" else "unknown",
+                    "observed_status": observed_status,
                     "latest_snapshot_at": latest["captured_at"],
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": age_hours,
@@ -370,6 +378,7 @@ def api_site_directory():
                     "monitoring_status": "missing_snapshot",
                     "score": None,
                     "status": "unknown",
+                    "observed_status": None,
                     "latest_snapshot_at": None,
                     "snapshot_freshness": "missing",
                     "snapshot_age_hours": None,

@@ -8,6 +8,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Client care health checks for HTTP status, latency, SSL days remaining, WordPress updates, backup age, and security headers.
 - Fleet operations snapshots for uptime, SSL, pending updates, backup freshness, response time, security headers, and alerts.
 - Fail-closed dashboard and client account rollups at `/api/summary` and `/api/clients`, excluding stale fleet snapshots and care checks from current scores, risk counts, health counts, and critical-alert totals while retaining monitoring-gap visibility.
+- Fail-closed site inventories at `/api/sites` and `/api/site-directory`, reporting stale, invalid, or future-dated snapshot health as unknown while retaining explicitly labeled observed status for investigation.
 - Fail-closed availability inventory at `/api/availability`, including missing and stale monitoring evidence.
 - Fail-closed SLA breach queue at `/api/sla-breaches`, separating current target misses from missing or stale evidence.
 - Fail-closed backup inventory at `/api/backups`, separating current backup age from missing, stale, invalid, or future-dated evidence.

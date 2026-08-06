@@ -479,7 +479,12 @@ def test_api_sites_marks_old_snapshots_stale(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
         "/snapshot",
-        data=valid_snapshot_payload(name="Stale Site", url="https://stale-site.example"),
+        data=valid_snapshot_payload(
+            name="Stale Site",
+            url="https://stale-site.example",
+            uptime_ok="false",
+            ssl_days="2",
+        ),
         follow_redirects=False,
     )
     with sqlite3.connect(tmp_path / "test.sqlite3") as con:
@@ -488,7 +493,10 @@ def test_api_sites_marks_old_snapshots_stale(tmp_path):
     site = client.get("/api/sites").json()["sites"][0]
 
     assert site["name"] == "Stale Site"
-    assert site["status"] == "green"
+    assert site["status"] == "unknown"
+    assert site["observed_status"] == "red"
+    assert site["critical_alerts"] == 0
+    assert site["observed_critical_alerts"] >= 1
     assert site["snapshot_freshness"] == "stale"
     assert site["snapshot_age_hours"] > 168
 
@@ -544,6 +552,8 @@ def test_api_site_directory_surfaces_stale_snapshot_freshness(tmp_path):
     site = payload["sites"][0]
     assert site["name"] == "Stale Directory Site"
     assert site["monitoring_status"] == "monitored"
+    assert site["status"] == "unknown"
+    assert site["observed_status"] == "green"
     assert site["snapshot_freshness"] == "stale"
     assert site["snapshot_age_hours"] > 168
     assert site["recommended_action"] == "Capture a fresh fleet snapshot and verify site health."
