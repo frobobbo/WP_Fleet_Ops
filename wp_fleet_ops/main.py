@@ -2607,7 +2607,7 @@ def _executive_risk_rows() -> list[dict]:
         }
         for account in api_clients()["clients"]
     }
-    for row in store.latest_dashboard():
+    for row in _current_snapshot_rows(store.latest_dashboard()):
         client_name = row.get("client") or "Unassigned"
         summary = clients[client_name]
         summary["lowest_score"] = (

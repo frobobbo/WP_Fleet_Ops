@@ -3104,7 +3104,7 @@ def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     assert stable["average_score"] >= 85
 
 
-def test_executive_handoffs_surface_monitoring_gaps(tmp_path):
+def test_executive_handoffs_surface_monitoring_gaps_without_escalating_stale_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
         "/snapshot",
@@ -3112,6 +3112,12 @@ def test_executive_handoffs_surface_monitoring_gaps(tmp_path):
             name="Stale Executive Site",
             url="https://stale-executive-gap.example",
             client="Client Executive Gap",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
         ),
         follow_redirects=False,
     )
@@ -3130,6 +3136,7 @@ def test_executive_handoffs_surface_monitoring_gaps(tmp_path):
     risks = client.get("/api/executive-risks").json()
 
     assert risks["client_count"] == 1
+    assert risks["critical_client_count"] == 0
     assert risks["elevated_client_count"] == 1
     assert risks["stable_client_count"] == 0
     risk = risks["clients"][0]
@@ -3137,9 +3144,12 @@ def test_executive_handoffs_surface_monitoring_gaps(tmp_path):
     assert risk["risk_level"] == "elevated"
     assert risk["site_count"] == 2
     assert risk["monitored_site_count"] == 1
+    assert risk["current_snapshot_count"] == 0
     assert risk["missing_snapshot_count"] == 1
     assert risk["stale_snapshot_count"] == 1
     assert risk["monitoring_gap_count"] == 2
+    assert risk["lowest_score"] == 100
+    assert risk["critical_site_count"] == 0
 
     fleet_brief = client.get("/api/fleet-brief").json()
 
