@@ -2368,6 +2368,9 @@ def api_client_digest():
                     "score": None,
                     "status": "unknown",
                     "critical_alerts": 0,
+                    "observed_score": None,
+                    "observed_status": None,
+                    "observed_critical_alerts": 0,
                     "monitoring_status": "missing_snapshot",
                     "snapshot_freshness": "missing",
                     "snapshot_age_hours": None,
@@ -2381,13 +2384,22 @@ def api_client_digest():
             now,
             SNAPSHOT_FRESHNESS_HOURS,
         )
+        observed_score = row["score"]
+        observed_status = _dashboard_status(observed_score)
+        observed_critical_alerts = sum(
+            1 for alert in row["alerts"] if alert.get("severity") == "critical"
+        )
+        is_current = freshness == "current"
         digest["sites"].append(
             {
                 "name": row["name"],
                 "url": row["url"],
-                "score": row["score"],
-                "status": _dashboard_status(row["score"]),
-                "critical_alerts": sum(1 for alert in row["alerts"] if alert.get("severity") == "critical"),
+                "score": observed_score if is_current else None,
+                "status": observed_status if is_current else "unknown",
+                "critical_alerts": observed_critical_alerts if is_current else 0,
+                "observed_score": observed_score,
+                "observed_status": observed_status,
+                "observed_critical_alerts": observed_critical_alerts,
                 "monitoring_status": "monitored",
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,

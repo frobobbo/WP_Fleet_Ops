@@ -2838,6 +2838,12 @@ def test_api_client_digest_warns_about_account_monitoring_gaps(tmp_path):
             name="Stale Digest Site",
             url="https://stale-digest.example",
             client="Client Digest Gap",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
         ),
         follow_redirects=False,
     )
@@ -2872,6 +2878,13 @@ def test_api_client_digest_warns_about_account_monitoring_gaps(tmp_path):
     assert digest["average_score"] == 100
     assert digest["open_action_count"] == 0
     assert [site["snapshot_freshness"] for site in digest["sites"]] == ["missing", "stale"]
+    stale_site = next(site for site in digest["sites"] if site["snapshot_freshness"] == "stale")
+    assert stale_site["score"] is None
+    assert stale_site["status"] == "unknown"
+    assert stale_site["critical_alerts"] == 0
+    assert stale_site["observed_score"] < 65
+    assert stale_site["observed_status"] == "red"
+    assert stale_site["observed_critical_alerts"] >= 1
     assert "1 of 2 tracked sites have snapshots" in digest["executive_summary"]
 
 
