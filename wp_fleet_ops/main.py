@@ -3075,8 +3075,18 @@ def _site_trend_status(score_delta: int | None) -> str:
     return "stable"
 
 
+def _site_trend_evidence_action(freshness: str) -> str:
+    """Return a safe next step when the latest trend evidence is not current."""
+    if freshness == "clock_skew":
+        return "Correct the latest snapshot timestamp or source clock before relying on site trend status."
+    if freshness == "invalid":
+        return "Repair the latest snapshot timestamp before relying on site trend status."
+    return "Capture a fresh fleet snapshot before relying on site trend status."
+
+
 def _site_trend_rows(limit: int) -> list[dict]:
     """Compare each site's latest snapshot with its prior snapshot for trend triage."""
+    now = datetime.now(timezone.utc)
     history_by_url: dict[str, list[dict]] = {}
     for snapshot in store.recent_trend_snapshots(limit):
         history_by_url.setdefault(snapshot["url"], []).append(snapshot)
@@ -3085,33 +3095,49 @@ def _site_trend_rows(limit: int) -> list[dict]:
     for snapshots in history_by_url.values():
         latest = snapshots[0]
         previous = snapshots[1] if len(snapshots) > 1 else None
-        score_delta = latest["score"] - previous["score"] if previous else None
-        status = _site_trend_status(score_delta)
+        observed_score_delta = latest["score"] - previous["score"] if previous else None
+        observed_status = _site_trend_status(observed_score_delta)
+        freshness, age_hours = _snapshot_freshness(
+            latest.get("captured_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+        is_current = freshness == "current"
         rows.append(
             {
                 "name": latest["name"],
                 "url": latest["url"],
                 "client": latest.get("client") or "Unassigned",
-                "latest_score": latest["score"],
-                "previous_score": previous["score"] if previous else None,
-                "score_delta": score_delta,
-                "trend_status": status,
+                "latest_score": latest["score"] if is_current else None,
+                "previous_score": previous["score"] if previous and is_current else None,
+                "score_delta": observed_score_delta if is_current else None,
+                "trend_status": observed_status if is_current else "unknown",
+                "observed_latest_score": latest["score"],
+                "observed_previous_score": previous["score"] if previous else None,
+                "observed_score_delta": observed_score_delta,
+                "observed_trend_status": observed_status,
+                "snapshot_freshness": freshness,
+                "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest["captured_at"],
                 "previous_snapshot_at": previous["captured_at"] if previous else None,
                 "recommended_action": (
                     "Review recent changes and open a remediation task for the regression."
-                    if status == "regressing"
-                    else "Continue monitoring the site trend."
+                    if is_current and observed_status == "regressing"
+                    else (
+                        "Continue monitoring the site trend."
+                        if is_current
+                        else _site_trend_evidence_action(freshness)
+                    )
                 ),
             }
         )
 
-    trend_rank = {"regressing": 0, "new": 1, "stable": 2, "improving": 3}
+    trend_rank = {"unknown": 0, "regressing": 1, "new": 2, "stable": 3, "improving": 4}
     rows.sort(
         key=lambda row: (
             trend_rank.get(row["trend_status"], 99),
-            row["score_delta"] if row["score_delta"] is not None else 0,
-            row["latest_score"],
+            row["observed_score_delta"] if row["observed_score_delta"] is not None else 0,
+            row["observed_latest_score"],
             row["client"].lower(),
             row["name"].lower(),
         )
@@ -3124,11 +3150,21 @@ def api_site_trends(limit: int = 100):
     """Return latest-vs-previous site score trends for dispatch planning."""
     bounded_limit = max(2, min(limit, 500))
     trends = _site_trend_rows(bounded_limit)
+    current_evidence_count = sum(
+        1 for trend in trends if trend["snapshot_freshness"] == "current"
+    )
+    unknown_count = len(trends) - current_evidence_count
+    regressing_count = sum(1 for trend in trends if trend["trend_status"] == "regressing")
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "red" if regressing_count else ("yellow" if unknown_count else "green"),
         "snapshot_limit": bounded_limit,
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(trends),
-        "regressing_count": sum(1 for trend in trends if trend["trend_status"] == "regressing"),
+        "current_evidence_count": current_evidence_count,
+        "unknown_count": unknown_count,
+        "trend_evidence_percent": round((current_evidence_count / len(trends)) * 100) if trends else 100,
+        "regressing_count": regressing_count,
         "improving_count": sum(1 for trend in trends if trend["trend_status"] == "improving"),
         "new_count": sum(1 for trend in trends if trend["trend_status"] == "new"),
         "trends": trends,

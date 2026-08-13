@@ -3595,6 +3595,7 @@ def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     payload = response.json()
     assert payload["generated_at"].endswith("+00:00")
     assert payload["snapshot_limit"] == 10
+    assert payload["status"] == "red"
     assert payload["site_count"] == 3
     assert payload["regressing_count"] == 1
     assert payload["improving_count"] == 1
@@ -3609,6 +3610,55 @@ def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     assert improving["name"] == "Trend Improving"
     assert improving["score_delta"] > 0
     assert improving["recommended_action"] == "Continue monitoring the site trend."
+
+
+def test_api_site_trends_fail_closed_when_latest_snapshot_is_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Trend Site",
+            url="https://stale-trend.example",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Trend Site",
+            url="https://stale-trend.example",
+            uptime_ok="false",
+            ssl_days="3",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where id = (select max(id) from snapshots)",
+            ("2000-01-01 00:00:00",),
+        )
+
+    payload = client.get("/api/site-trends").json()
+
+    assert payload["site_count"] == 1
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["trend_evidence_percent"] == 0
+    assert payload["regressing_count"] == 0
+    trend = payload["trends"][0]
+    assert trend["trend_status"] == "unknown"
+    assert trend["latest_score"] is None
+    assert trend["previous_score"] is None
+    assert trend["score_delta"] is None
+    assert trend["observed_latest_score"] < trend["observed_previous_score"]
+    assert trend["observed_score_delta"] < 0
+    assert trend["observed_trend_status"] == "regressing"
+    assert trend["snapshot_freshness"] == "stale"
+    assert trend["snapshot_age_hours"] > 168
+    assert trend["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on site trend status."
+    )
 
 
 def test_api_site_trends_prevents_one_site_from_crowding_out_other_histories(tmp_path):
