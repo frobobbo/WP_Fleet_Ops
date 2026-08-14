@@ -926,6 +926,13 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "red"
+    assert payload["tracked_site_count"] == 2
+    assert payload["current_snapshot_count"] == 2
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["missing_snapshot_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
     assert payload["action_count"] >= 2
     actions = payload["actions"]
     assert actions[0]["site"] == "Critical Site"
@@ -938,6 +945,43 @@ def test_api_actions_returns_prioritized_client_work_queue(tmp_path):
     assert warning_actions
     assert warning_actions[0]["recommended_action"] == "Schedule WordPress core, plugin, and theme updates."
     assert actions[0]["score"] < warning_actions[0]["score"]
+
+
+def test_api_actions_surfaces_missing_and_stale_monitoring_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Action Evidence",
+            url="https://expired-action-evidence.example",
+            client="Client Expired Action",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Action Evidence",
+            "url": "https://missing-action-evidence.example",
+            "client": "Client Missing Action",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/actions").json()
+
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "yellow"
+    assert payload["tracked_site_count"] == 2
+    assert payload["current_snapshot_count"] == 0
+    assert payload["stale_snapshot_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["action_count"] == 0
+    assert payload["actions"] == []
 
 
 def test_stale_snapshot_alerts_do_not_create_current_actions_or_incidents(tmp_path):
@@ -966,7 +1010,10 @@ def test_stale_snapshot_alerts_do_not_create_current_actions_or_incidents(tmp_pa
     approvals = client.get("/api/maintenance-approval-packets").json()
     dispatch = client.get("/api/dispatch-summary").json()
 
-    assert actions == {"action_count": 0, "actions": []}
+    assert actions["status"] == "yellow"
+    assert actions["monitoring_gap_count"] == 1
+    assert actions["action_count"] == 0
+    assert actions["actions"] == []
     assert incidents["incident_count"] == 0
     assert incidents["incidents"] == []
     assert workload["open_action_count"] == 0

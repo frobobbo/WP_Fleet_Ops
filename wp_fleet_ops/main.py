@@ -654,11 +654,15 @@ def api_sla_breaches():
     }
 
 
-def _current_actions() -> list[dict]:
+def _current_actions(
+    snapshot_rows: list[dict] | None = None,
+    now: datetime | None = None,
+) -> list[dict]:
     """Build actions only from snapshots with current monitoring evidence."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     actions = []
-    for row in _current_snapshot_rows(store.latest_dashboard()):
+    rows = snapshot_rows if snapshot_rows is not None else store.latest_dashboard()
+    for row in _current_snapshot_rows(rows, now):
         for alert in row["alerts"]:
             severity = alert.get("severity", "info")
             actions.append(
@@ -687,9 +691,29 @@ def _current_actions() -> list[dict]:
 
 @app.get("/api/actions")
 def api_actions():
-    """Return a prioritized work queue of current fleet alerts for operators."""
-    actions = _current_actions()
-    return {"action_count": len(actions), "actions": actions}
+    """Return current fleet alerts without hiding incomplete monitoring evidence."""
+    now = datetime.now(timezone.utc)
+    dashboard_rows = store.latest_dashboard()
+    tracked_sites = store.list_sites()
+    current_snapshot_count = len(_current_snapshot_rows(dashboard_rows, now))
+    stale_snapshot_count = len(dashboard_rows) - current_snapshot_count
+    monitored_urls = {row["url"] for row in dashboard_rows}
+    missing_snapshot_count = sum(1 for site in tracked_sites if site["url"] not in monitored_urls)
+    monitoring_gap_count = stale_snapshot_count + missing_snapshot_count
+    actions = _current_actions(dashboard_rows, now)
+    critical_action_count = sum(1 for action in actions if action["severity"] == "critical")
+    status = "red" if critical_action_count else ("yellow" if actions or monitoring_gap_count else "green")
+    return {
+        "generated_at": now.isoformat(),
+        "status": status,
+        "tracked_site_count": len(tracked_sites),
+        "current_snapshot_count": current_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "monitoring_gap_count": monitoring_gap_count,
+        "action_count": len(actions),
+        "actions": actions,
+    }
 
 
 def _site_watchlist_rows() -> list[dict]:
