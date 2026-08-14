@@ -1011,6 +1011,12 @@ def test_stale_critical_snapshot_does_not_pollute_current_priority_views(tmp_pat
     assert summary["needs_attention"] == 0
     assert summary["healthy_sites"] == 0
     assert summary["average_score"] == 100
+    assert watchlist["status"] == "yellow"
+    assert watchlist["tracked_site_count"] == 1
+    assert watchlist["current_snapshot_count"] == 0
+    assert watchlist["stale_snapshot_count"] == 1
+    assert watchlist["missing_snapshot_count"] == 0
+    assert watchlist["monitoring_gap_count"] == 1
     assert watchlist["watchlist_count"] == 0
     assert watchlist["critical_watch_count"] == 0
     assert watchlist["sites"] == []
@@ -1030,6 +1036,32 @@ def test_stale_critical_snapshot_does_not_pollute_current_priority_views(tmp_pat
     assert kpis["priority_site_count"] == 0
     assert kpis["top_priority_site"] is None
     assert kpis["recommended_focus"] == "Refresh stale fleet snapshots before the next operations review."
+
+
+def test_api_site_watchlist_surfaces_missing_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/sites",
+        data={
+            "name": "Unmonitored Watch Site",
+            "url": "https://unmonitored-watch.example",
+            "client": "Client Watch Gap",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    payload = client.get("/api/site-watchlist").json()
+
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 0
+    assert payload["tracked_site_count"] == 1
+    assert payload["current_snapshot_count"] == 0
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["watchlist_count"] == 0
+    assert payload["sites"] == []
 
 
 def test_api_site_watchlist_returns_only_attention_sites(tmp_path):

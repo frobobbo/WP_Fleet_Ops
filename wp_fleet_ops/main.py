@@ -733,13 +733,29 @@ def _site_watchlist_rows() -> list[dict]:
 
 @app.get("/api/site-watchlist")
 def api_site_watchlist():
-    """Return sites that need operator attention, excluding healthy green sites."""
+    """Return current attention sites plus fail-closed monitoring-gap counts."""
+    now = datetime.now(timezone.utc)
+    dashboard_rows = store.latest_dashboard()
+    tracked_sites = store.list_sites()
     sites = _site_watchlist_rows()
+    current_snapshot_count = len(_current_snapshot_rows(dashboard_rows, now))
+    stale_snapshot_count = len(dashboard_rows) - current_snapshot_count
+    monitored_urls = {row["url"] for row in dashboard_rows}
+    missing_snapshot_count = sum(1 for site in tracked_sites if site["url"] not in monitored_urls)
+    monitoring_gap_count = stale_snapshot_count + missing_snapshot_count
+    critical_watch_count = sum(1 for site in sites if site["watch_status"] == "critical")
+    status = "red" if critical_watch_count else ("yellow" if sites or monitoring_gap_count else "green")
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "site_count": len(store.latest_dashboard()),
+        "generated_at": now.isoformat(),
+        "status": status,
+        "site_count": len(dashboard_rows),
+        "tracked_site_count": len(tracked_sites),
+        "current_snapshot_count": current_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "monitoring_gap_count": monitoring_gap_count,
         "watchlist_count": len(sites),
-        "critical_watch_count": sum(1 for site in sites if site["watch_status"] == "critical"),
+        "critical_watch_count": critical_watch_count,
         "sites": sites,
     }
 
