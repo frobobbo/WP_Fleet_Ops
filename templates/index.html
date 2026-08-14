@@ -80,19 +80,7 @@
 {% set fleet_count = fleet_rows|length %}
 {% set care_count = care_checks|length %}
 {% set site_count = sites|length %}
-{% set critical_count = namespace(value=0) %}
-{% set healthy_count = namespace(value=0) %}
-{% set attention_count = namespace(value=0) %}
-{% set score_total = namespace(value=0) %}
-{% for r in fleet_rows %}
-  {% set score_total.value = score_total.value + (r.score or 0) %}
-  {% if r.score >= 85 %}{% set healthy_count.value = healthy_count.value + 1 %}{% endif %}
-  {% if r.score < 65 %}{% set critical_count.value = critical_count.value + 1 %}{% endif %}
-{% endfor %}
-{% for c in care_checks %}
-  {% if c.status == 'red' %}{% set attention_count.value = attention_count.value + 1 %}{% endif %}
-{% endfor %}
-{% set avg_score = (score_total.value / fleet_count)|round|int if fleet_count else 100 %}
+{% set avg_score = fleet_summary.average_score if fleet_summary.current_snapshot_count else none %}
   <main class="shell">
     <header class="topbar">
       <a class="brand" href="/">
@@ -131,11 +119,11 @@
       </div>
       <aside class="insight-panel hero-card">
         <div class="status-orb">
-          <div class="orb-inner"><strong>{{ avg_score }}</strong><span>average fleet score</span></div>
+          <div class="orb-inner"><strong>{{ avg_score if avg_score is not none else '—' }}</strong><span>current average fleet score</span></div>
         </div>
         <div class="metrics" style="grid-template-columns:1fr 1fr;margin:0">
           <div class="metric"><label>Sites</label><strong>{{ site_count }}</strong><small>tracked properties</small></div>
-          <div class="metric"><label>Needs attention</label><strong class="{{ 'red' if critical_count.value else 'green' }}">{{ critical_count.value }}</strong><small>below 65 score</small></div>
+          <div class="metric"><label>Current risks</label><strong class="{{ 'red' if fleet_summary.needs_attention else 'green' }}">{{ fleet_summary.needs_attention }}</strong><small>current sites below 65 score</small></div>
         </div>
       </aside>
     </section>
@@ -143,8 +131,8 @@
     <section class="metrics" aria-label="Fleet summary metrics">
       <div class="metric"><label>Fleet snapshots</label><strong>{{ fleet_count }}</strong><small>latest operational rows</small></div>
       <div class="metric"><label>Care checks</label><strong>{{ care_count }}</strong><small>client care entries</small></div>
-      <div class="metric"><label>Healthy sites</label><strong class="green">{{ healthy_count.value }}</strong><small>score 85 or higher</small></div>
-      <div class="metric"><label>Client risks</label><strong class="{{ 'red' if attention_count.value else 'green' }}">{{ attention_count.value }}</strong><small>red care statuses</small></div>
+      <div class="metric"><label>Current healthy sites</label><strong class="green">{{ fleet_summary.healthy_sites }}</strong><small>current score 85 or higher</small></div>
+      <div class="metric"><label>Current client risks</label><strong class="{{ 'red' if fleet_summary.client_risks else 'green' }}">{{ fleet_summary.client_risks }}</strong><small>current red care statuses</small></div>
     </section>
 
     <section class="grid">
@@ -193,8 +181,8 @@
         <div class="table-header"><div><h3>Fleet operations</h3><p>Operational health score, uptime, SSL, backups, performance, and generated alerts.</p></div><span class="tag mono">{{ fleet_count }} rows</span></div>
         <div class="table-wrap">
           {% if fleet_rows %}
-          <table><thead><tr><th>Site</th><th>Client</th><th>Score</th><th>Up</th><th>SSL</th><th>Updates</th><th>Backup</th><th>Response</th><th>Alerts</th></tr></thead><tbody>
-          {% for r in fleet_rows %}<tr><td><span class="site-name">{{r.name}}</span></td><td>{{r.client or '—'}}</td><td><span class="score {{ 'green' if r.score >= 85 else 'yellow' if r.score >= 65 else 'red' }}"><span class="dot"></span>{{r.score}}</span></td><td>{{'Yes' if r.uptime_ok else 'No'}}</td><td>{{r.ssl_days}} days</td><td>{{r.wp_updates}}</td><td>{{r.backup_age_hours}}h</td><td>{{r.response_ms}}ms</td><td>{% for a in r.alerts %}<span class="tag {{ 'red' if a.severity == 'critical' else 'yellow' if a.severity == 'warning' else 'blue' }}">{{a.severity}} · {{a.message}}</span>{% else %}<span class="tag green">clear</span>{% endfor %}</td></tr>{% endfor %}
+          <table><thead><tr><th>Site</th><th>Client</th><th>Evidence</th><th>Score</th><th>Up</th><th>SSL</th><th>Updates</th><th>Backup</th><th>Response</th><th>Alerts</th></tr></thead><tbody>
+          {% for r in fleet_rows %}<tr><td><span class="site-name">{{r.name}}</span></td><td>{{r.client or '—'}}</td><td>{% if r.snapshot_freshness == 'current' %}<span class="tag green">current</span>{% else %}<span class="tag yellow">unknown · {{r.snapshot_freshness}}</span>{% endif %}</td><td>{% if r.snapshot_freshness == 'current' %}<span class="score {{ 'green' if r.score >= 85 else 'yellow' if r.score >= 65 else 'red' }}"><span class="dot"></span>{{r.score}}</span>{% else %}<span class="mono">observed {{r.score}}</span>{% endif %}</td><td>{{'Yes' if r.uptime_ok else 'No'}}</td><td>{{r.ssl_days}} days</td><td>{{r.wp_updates}}</td><td>{{r.backup_age_hours}}h</td><td>{{r.response_ms}}ms</td><td>{% for a in r.alerts %}<span class="tag {{ 'red' if a.severity == 'critical' else 'yellow' if a.severity == 'warning' else 'blue' }}">{{a.severity}} · {{a.message}}</span>{% else %}<span class="tag green">clear</span>{% endfor %}</td></tr>{% endfor %}
           </tbody></table>
           {% else %}<div class="empty">No fleet snapshots yet. Add the first snapshot above to light up the dashboard.</div>{% endif %}
         </div>
@@ -204,8 +192,8 @@
         <div class="table-header"><div><h3>Client care checks</h3><p>Client-ready care status with health narrative and maintenance posture.</p></div><span class="tag mono">{{ care_count }} checks</span></div>
         <div class="table-wrap">
           {% if care_checks %}
-          <table><thead><tr><th>Site</th><th>Client</th><th>Status</th><th>Score</th><th>HTTP</th><th>SSL days</th><th>Updates</th><th>Backup age</th><th>Summary</th></tr></thead><tbody>
-          {% for c in care_checks %}<tr><td><span class="site-name">{{c.name}}</span></td><td>{{c.client or '—'}}</td><td><span class="tag {{c.status}}">{{c.status}}</span></td><td><span class="score {{c.status}}"><span class="dot"></span>{{c.score}}</span></td><td>{{c.http_status}}</td><td>{{c.ssl_days_remaining}}</td><td>{{c.update_count}}</td><td>{{c.backup_age_hours}}h</td><td>{{c.summary}}</td></tr>{% endfor %}
+          <table><thead><tr><th>Site</th><th>Client</th><th>Evidence</th><th>Status</th><th>Score</th><th>HTTP</th><th>SSL days</th><th>Updates</th><th>Backup age</th><th>Summary</th></tr></thead><tbody>
+          {% for c in care_checks %}<tr><td><span class="site-name">{{c.name}}</span></td><td>{{c.client or '—'}}</td><td>{% if c.check_freshness == 'current' %}<span class="tag green">current</span>{% else %}<span class="tag yellow">unknown · {{c.check_freshness}}</span>{% endif %}</td><td>{% if c.check_freshness == 'current' %}<span class="tag {{c.status}}">{{c.status}}</span>{% else %}<span class="mono">observed {{c.status}}</span>{% endif %}</td><td>{% if c.check_freshness == 'current' %}<span class="score {{c.status}}"><span class="dot"></span>{{c.score}}</span>{% else %}<span class="mono">observed {{c.score}}</span>{% endif %}</td><td>{{c.http_status}}</td><td>{{c.ssl_days_remaining}}</td><td>{{c.update_count}}</td><td>{{c.backup_age_hours}}h</td><td>{{c.summary}}</td></tr>{% endfor %}
           </tbody></table>
           {% else %}<div class="empty">No care checks yet. Log a manual care check to build the client report.</div>{% endif %}
         </div>

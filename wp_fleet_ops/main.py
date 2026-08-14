@@ -4028,12 +4028,31 @@ def api_account_agenda(limit: int = 10):
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
+    now = datetime.now(timezone.utc)
+    fleet_rows = store.latest_dashboard()
+    for row in fleet_rows:
+        freshness, age_hours = _snapshot_freshness(
+            row.get("captured_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+        row["snapshot_freshness"] = freshness
+        row["snapshot_age_hours"] = age_hours
+    care_checks = store.latest_care_checks()
+    for check in care_checks:
+        freshness, age_hours = _snapshot_freshness(
+            check.get("checked_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+        check["check_freshness"] = freshness
+        check["check_age_hours"] = age_hours
     return templates.TemplateResponse(
         request,
         "index.html",
         {
-            "fleet_rows": store.latest_dashboard(),
-            "care_checks": store.latest_care_checks(),
+            "fleet_rows": fleet_rows,
+            "care_checks": care_checks,
             "sites": store.list_sites(),
             "fleet_summary": api_summary(),
         },

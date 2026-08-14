@@ -425,7 +425,7 @@ def test_api_summary_excludes_stale_care_checks_from_current_client_risk(tmp_pat
     assert summary["overall_status"] == "yellow"
 
 
-def test_dashboard_replaces_live_monitor_label_when_snapshot_is_stale(tmp_path):
+def test_dashboard_fails_closed_on_stale_health_observations(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
         "/snapshot",
@@ -434,11 +434,17 @@ def test_dashboard_replaces_live_monitor_label_when_snapshot_is_stale(tmp_path):
     )
     with sqlite3.connect(tmp_path / "test.sqlite3") as con:
         con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
 
     page = client.get("/").text
 
     assert "Live monitor" not in page
     assert "1 stale snapshot" in page
+    assert '<strong>—</strong><span>current average fleet score</span>' in page
+    assert '<label>Current healthy sites</label><strong class="green">0</strong>' in page
+    assert "unknown · stale" in page
+    assert "observed 100" in page
+    assert "observed green" in page
 
 
 def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
