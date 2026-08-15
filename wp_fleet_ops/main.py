@@ -3314,12 +3314,17 @@ def _site_priority_score(row: dict) -> int:
 
 @app.get("/api/site-priorities")
 def api_site_priorities(limit: int = 10):
-    """Return a bounded dispatch list of the highest-priority sites to inspect next."""
+    """Return current site priorities plus coverage needed to trust the queue."""
     bounded_limit = max(1, min(limit, 50))
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     dashboard_rows = store.latest_dashboard()
+    tracked_sites = store.list_sites()
+    current_rows = _current_snapshot_rows(dashboard_rows)
+    missing_snapshot_count = max(len(tracked_sites) - len(dashboard_rows), 0)
+    stale_snapshot_count = len(dashboard_rows) - len(current_rows)
+    monitoring_gap_count = missing_snapshot_count + stale_snapshot_count
     sites = []
-    for row in _current_snapshot_rows(dashboard_rows):
+    for row in current_rows:
         critical_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
         warning_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "warning")
         top_alert = (
@@ -3354,7 +3359,15 @@ def api_site_priorities(limit: int = 10):
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "limit": bounded_limit,
-        "site_count": len(dashboard_rows),
+        "site_count": len(tracked_sites),
+        "monitored_site_count": len(dashboard_rows),
+        "current_snapshot_count": len(current_rows),
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "monitoring_gap_count": monitoring_gap_count,
+        "priority_evidence_percent": (
+            round((len(current_rows) / len(tracked_sites)) * 100) if tracked_sites else 100
+        ),
         "priority_site_count": len(sites),
         "returned_site_count": len(selected),
         "sites": selected,

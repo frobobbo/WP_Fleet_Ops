@@ -12,6 +12,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Fail-closed site scorecards at `/api/site-scorecards`, replacing stale scores, status, badges, and alert counts with unknown values while retaining labeled observations for investigation.
 - Fail-closed operator watchlist at `/api/site-watchlist`, keeping stale alerts out of the current work queue while surfacing stale and missing snapshot evidence as monitoring gaps.
 - Fail-closed prioritized action queue at `/api/actions`, reporting stale and missing snapshot evidence so an empty current queue cannot be mistaken for complete fleet health.
+- Coverage-aware site priorities at `/api/site-priorities`, excluding stale risk signals while reporting tracked, missing, stale, and current snapshot counts so an empty dispatch queue cannot be mistaken for complete evidence.
 - Fail-closed site trends at `/api/site-trends`, suppressing stale score deltas and trend labels while retaining labeled observations for investigation.
 - Fail-closed client digests at `/api/client-digest`, suppressing stale nested site scores, status, and critical-alert totals while retaining labeled observations for investigation.
 - Fail-closed availability inventory at `/api/availability`, including missing and stale monitoring evidence.

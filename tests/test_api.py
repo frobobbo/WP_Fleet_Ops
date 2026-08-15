@@ -3894,6 +3894,46 @@ def test_api_site_priorities_returns_bounded_dispatch_queue(tmp_path):
     assert top_site["next_action"] == "Confirm site availability, hosting status, and recent deploys."
 
 
+def test_api_site_priorities_surfaces_incomplete_monitoring_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Priority Site",
+            url="https://stale-priority.example",
+            client="Client Priority Gap",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Priority Site",
+            "url": "https://missing-priority.example",
+            "client": "Client Priority Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/site-priorities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 2
+    assert payload["monitored_site_count"] == 1
+    assert payload["current_snapshot_count"] == 0
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["priority_evidence_percent"] == 0
+    assert payload["priority_site_count"] == 0
+    assert payload["returned_site_count"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
