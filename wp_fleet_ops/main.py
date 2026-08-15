@@ -3376,10 +3376,30 @@ def api_site_priorities(limit: int = 10):
 
 @app.get("/api/client-priorities")
 def api_client_priorities(limit: int = 10):
-    """Return clients ranked by cumulative site priority for account dispatch."""
+    """Return current client priorities plus coverage needed to trust the queue."""
     bounded_limit = max(1, min(limit, 50))
+    now = datetime.now(timezone.utc)
+    tracked_sites = store.list_sites()
+    dashboard_rows = store.latest_dashboard()
+    latest_by_url = {row["url"]: row for row in dashboard_rows}
+    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    tracked_clients = {site.get("client") or "Unassigned" for site in tracked_sites}
+    monitored_clients = {row.get("client") or "Unassigned" for row in dashboard_rows}
+    monitoring_gap_clients = {
+        site.get("client") or "Unassigned"
+        for site in tracked_sites
+        if site["url"] not in latest_by_url
+        or not _snapshot_is_current(
+            latest_by_url[site["url"]].get("captured_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+    }
+    missing_snapshot_count = max(len(tracked_sites) - len(dashboard_rows), 0)
+    stale_snapshot_count = len(dashboard_rows) - len(current_rows)
+    monitoring_gap_count = missing_snapshot_count + stale_snapshot_count
     clients: dict[str, dict] = {}
-    for row in _current_snapshot_rows(store.latest_dashboard()):
+    for row in current_rows:
         priority_score = _site_priority_score(row)
         if priority_score <= 0:
             continue
@@ -3426,6 +3446,18 @@ def api_client_priorities(limit: int = 10):
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "limit": bounded_limit,
+        "tracked_client_count": len(tracked_clients),
+        "monitored_client_count": len(monitored_clients),
+        "monitoring_gap_client_count": len(monitoring_gap_clients),
+        "tracked_site_count": len(tracked_sites),
+        "monitored_site_count": len(dashboard_rows),
+        "current_snapshot_count": len(current_rows),
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": stale_snapshot_count,
+        "monitoring_gap_count": monitoring_gap_count,
+        "priority_evidence_percent": (
+            round((len(current_rows) / len(tracked_sites)) * 100) if tracked_sites else 100
+        ),
         "client_count": len(rows),
         "returned_client_count": len(selected),
         "total_priority_score": sum(client["priority_score"] for client in rows),

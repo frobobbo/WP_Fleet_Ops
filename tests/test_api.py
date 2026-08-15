@@ -3998,6 +3998,62 @@ def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
     assert client_a["latest_snapshot_at"]
 
 
+def test_api_client_priorities_surfaces_incomplete_monitoring_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Client Priority Site",
+            url="https://stale-client-priority.example",
+            client="Client Priority Stale",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Healthy Priority Site",
+            url="https://current-healthy-priority.example",
+            client="Client Priority Healthy",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Client Priority Site",
+            "url": "https://missing-client-priority.example",
+            "client": "Client Priority Missing",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-client-priority.example"),
+        )
+
+    response = client.get("/api/client-priorities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tracked_client_count"] == 3
+    assert payload["monitored_client_count"] == 2
+    assert payload["monitoring_gap_client_count"] == 2
+    assert payload["tracked_site_count"] == 3
+    assert payload["monitored_site_count"] == 2
+    assert payload["current_snapshot_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["priority_evidence_percent"] == 33
+    assert payload["client_count"] == 0
+    assert payload["returned_client_count"] == 0
+    assert payload["clients"] == []
+
+
 def test_api_operations_kpis_returns_management_rollup(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
