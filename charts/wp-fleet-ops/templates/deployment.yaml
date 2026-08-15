@@ -46,6 +46,8 @@ spec:
               readOnly: true
             - name: source-work
               mountPath: {{ .Values.sourceBundle.mountPath | quote }}
+            - name: runtime-tmp
+              mountPath: /tmp
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
@@ -79,6 +81,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: {{ .Values.config.dataDir | quote }}
+            - name: runtime-tmp
+              mountPath: /tmp
             {{- if .Values.sourceBundle.enabled }}
             - name: source-work
               mountPath: {{ .Values.sourceBundle.mountPath | quote }}
@@ -91,6 +95,9 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: runtime-tmp
+          emptyDir:
+            sizeLimit: 64Mi
         {{- if .Values.sourceBundle.enabled }}
         - name: source-bundle
           configMap:
