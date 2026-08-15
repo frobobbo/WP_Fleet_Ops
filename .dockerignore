@@ -9,3 +9,7 @@ data/
 dist/
 build/
 *.egg-info
+.env
+*.env
+*kubeconfig*
+source-bundle*.tar.gz

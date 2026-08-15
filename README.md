@@ -71,3 +71,24 @@ kubectl -n wp-fleet-ops port-forward svc/wp-fleet-ops 8080:80
 ```
 
 Then open http://127.0.0.1:8080/health or http://127.0.0.1:8080/.
+
+### Source-bundle fallback
+
+When the application image is unavailable, build the fallback archive with the
+allowlisted helper rather than archiving the repository root:
+
+```bash
+python scripts/build_source_bundle.py
+kubectl -n wp-fleet-ops create configmap wp-fleet-ops-source \
+  --from-file=app.tar.gz=source-bundle.tar.gz \
+  --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install wp-fleet-ops ./charts/wp-fleet-ops \
+  --namespace wp-fleet-ops \
+  --set sourceBundle.enabled=true \
+  --set sourceBundle.configMapName=wp-fleet-ops-source
+```
+
+The builder includes only `pyproject.toml`, `uv.lock`, `wp_fleet_ops/`, and
+`templates/`; rejects symlinks; omits caches; and writes the archive atomically
+with mode `0600`. It fails before deployment if the compressed archive exceeds
+the conservative ConfigMap size limit.
