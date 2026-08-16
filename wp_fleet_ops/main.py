@@ -414,10 +414,16 @@ def _monitoring_coverage_action(snapshot_freshness: str, care_check_freshness: s
 
 
 @app.get("/api/monitoring-coverage")
-def api_monitoring_coverage():
-    """Return per-site paired fleet and care evidence for monitoring audits."""
+def api_monitoring_coverage(client: str | None = None):
+    """Return paired fleet and care evidence, optionally scoped to one client."""
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
     snapshots_by_url = {row["url"]: row for row in store.latest_dashboard()}
     care_checks_by_url = {row["url"]: row for row in store.latest_care_checks()}
     sites = []
@@ -472,6 +478,7 @@ def api_monitoring_coverage():
     monitoring_gap_count = tracked_site_count - current_evidence_count
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": "yellow" if monitoring_gap_count else "green",
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "tracked_site_count": tracked_site_count,

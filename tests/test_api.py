@@ -5237,6 +5237,72 @@ def test_api_monitoring_coverage_is_green_for_an_empty_fleet(tmp_path):
     assert payload["sites"] == []
 
 
+def test_api_monitoring_coverage_filters_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Current",
+            url="https://alpha-current-coverage.example",
+            client="Client Alpha",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Alpha Missing",
+            "url": "https://alpha-missing-coverage.example",
+            "client": "Client Alpha",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Current",
+            url="https://beta-current-coverage.example",
+            client="Client Beta",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unassigned Current",
+            url="https://unassigned-current-coverage.example",
+        ),
+        follow_redirects=False,
+    )
+
+    alpha_response = client.get(
+        "/api/monitoring-coverage",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["status"] == "yellow"
+    assert alpha["tracked_site_count"] == 2
+    assert alpha["current_evidence_count"] == 1
+    assert alpha["monitoring_gap_count"] == 1
+    assert alpha["combined_coverage_percent"] == 50
+    assert {site["name"] for site in alpha["sites"]} == {
+        "Alpha Current",
+        "Alpha Missing",
+    }
+
+    unassigned = client.get(
+        "/api/monitoring-coverage",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "green"
+    assert unassigned["tracked_site_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == ["Unassigned Current"]
+
+
 def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
     client = make_test_client(tmp_path)
     for latency_ms in (200, 500, 800):
