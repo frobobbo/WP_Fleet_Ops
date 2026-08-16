@@ -5303,6 +5303,30 @@ def test_api_monitoring_coverage_filters_by_client_and_unassigned(tmp_path):
     assert [site["name"] for site in unassigned["sites"]] == ["Unassigned Current"]
 
 
+def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_green(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Client Site",
+            url="https://known-client-coverage.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/monitoring-coverage",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
     client = make_test_client(tmp_path)
     for latency_ms in (200, 500, 800):

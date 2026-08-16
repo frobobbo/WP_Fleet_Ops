@@ -424,6 +424,14 @@ def api_monitoring_coverage(client: str | None = None):
         if normalized_client is None
         or (site.get("client") or "Unassigned") == normalized_client
     ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     snapshots_by_url = {row["url"]: row for row in store.latest_dashboard()}
     care_checks_by_url = {row["url"]: row for row in store.latest_care_checks()}
     sites = []
