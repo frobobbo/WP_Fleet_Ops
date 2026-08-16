@@ -400,6 +400,94 @@ def api_site_directory():
     }
 
 
+def _monitoring_coverage_action(snapshot_freshness: str, care_check_freshness: str) -> str:
+    """Return the next step needed to restore paired site-health evidence."""
+    if snapshot_freshness == "current" and care_check_freshness == "current":
+        return "Continue normal monitoring cadence."
+    if snapshot_freshness == "missing" and care_check_freshness == "missing":
+        return "Capture an initial combined care check and fleet snapshot."
+    if snapshot_freshness == "missing":
+        return "Capture an initial fleet snapshot before relying on site health."
+    if care_check_freshness == "missing":
+        return "Capture an initial care check before relying on site health."
+    return "Capture a fresh combined care check and fleet snapshot before relying on site health."
+
+
+@app.get("/api/monitoring-coverage")
+def api_monitoring_coverage():
+    """Return per-site paired fleet and care evidence for monitoring audits."""
+    now = datetime.now(timezone.utc)
+    tracked_sites = store.list_sites()
+    snapshots_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {row["url"]: row for row in store.latest_care_checks()}
+    sites = []
+    for site in tracked_sites:
+        snapshot = snapshots_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        snapshot_freshness, snapshot_age_hours = (
+            _snapshot_freshness(snapshot.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+            if snapshot
+            else ("missing", None)
+        )
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(care_check.get("checked_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+            if care_check
+            else ("missing", None)
+        )
+        coverage_status = (
+            "current"
+            if snapshot_freshness == "current" and care_check_freshness == "current"
+            else "gap"
+        )
+        sites.append(
+            {
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "coverage_status": coverage_status,
+                "snapshot_freshness": snapshot_freshness,
+                "snapshot_age_hours": snapshot_age_hours,
+                "latest_snapshot_at": snapshot.get("captured_at") if snapshot else None,
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": care_check.get("checked_at") if care_check else None,
+                "recommended_action": _monitoring_coverage_action(
+                    snapshot_freshness,
+                    care_check_freshness,
+                ),
+            }
+        )
+
+    sites.sort(
+        key=lambda site: (
+            site["coverage_status"] == "current",
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    current_evidence_count = sum(1 for site in sites if site["coverage_status"] == "current")
+    snapshot_current_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    care_check_current_count = sum(1 for site in sites if site["care_check_freshness"] == "current")
+    tracked_site_count = len(sites)
+    monitoring_gap_count = tracked_site_count - current_evidence_count
+    return {
+        "generated_at": now.isoformat(),
+        "status": "yellow" if monitoring_gap_count else "green",
+        "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "tracked_site_count": tracked_site_count,
+        "current_evidence_count": current_evidence_count,
+        "monitoring_gap_count": monitoring_gap_count,
+        "snapshot_current_count": snapshot_current_count,
+        "snapshot_gap_count": tracked_site_count - snapshot_current_count,
+        "care_check_current_count": care_check_current_count,
+        "care_check_gap_count": tracked_site_count - care_check_current_count,
+        "combined_coverage_percent": (
+            round((current_evidence_count / tracked_site_count) * 100) if tracked_site_count else 100
+        ),
+        "sites": sites,
+    }
+
+
 @app.get("/api/clients")
 def api_clients():
     """Return account-level health and monitoring coverage rollups."""

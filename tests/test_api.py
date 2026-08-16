@@ -5146,6 +5146,97 @@ def test_api_care_check_history_returns_paginated_checks_newest_first(tmp_path):
     assert payload["care_checks"][0]["actions"]
 
 
+def test_api_monitoring_coverage_reports_paired_evidence_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url in (
+        ("Current Coverage Site", "https://current-coverage.example"),
+        ("Stale Care Site", "https://stale-care-coverage.example"),
+        ("Stale Snapshot Site", "https://stale-snapshot-coverage.example"),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client="Coverage Client"),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Coverage Site",
+            "url": "https://missing-coverage.example",
+            "client": "Coverage Client",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-care-coverage.example"),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-snapshot-coverage.example"),
+        )
+
+    response = client.get("/api/monitoring-coverage")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["status"] == "yellow"
+    assert payload["tracked_site_count"] == 4
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 3
+    assert payload["snapshot_current_count"] == 2
+    assert payload["snapshot_gap_count"] == 2
+    assert payload["care_check_current_count"] == 2
+    assert payload["care_check_gap_count"] == 2
+    assert payload["combined_coverage_percent"] == 25
+
+    sites = {site["url"]: site for site in payload["sites"]}
+    current = sites["https://current-coverage.example"]
+    assert current["coverage_status"] == "current"
+    assert current["snapshot_freshness"] == "current"
+    assert current["care_check_freshness"] == "current"
+    assert current["recommended_action"] == "Continue normal monitoring cadence."
+
+    stale_care = sites["https://stale-care-coverage.example"]
+    assert stale_care["coverage_status"] == "gap"
+    assert stale_care["snapshot_freshness"] == "current"
+    assert stale_care["care_check_freshness"] == "stale"
+    assert stale_care["care_check_age_hours"] > 168
+    assert stale_care["recommended_action"] == (
+        "Capture a fresh combined care check and fleet snapshot before relying on site health."
+    )
+
+    stale_snapshot = sites["https://stale-snapshot-coverage.example"]
+    assert stale_snapshot["snapshot_freshness"] == "stale"
+    assert stale_snapshot["care_check_freshness"] == "current"
+    assert stale_snapshot["snapshot_age_hours"] > 168
+
+    missing = sites["https://missing-coverage.example"]
+    assert missing["coverage_status"] == "gap"
+    assert missing["snapshot_freshness"] == "missing"
+    assert missing["care_check_freshness"] == "missing"
+    assert missing["latest_snapshot_at"] is None
+    assert missing["latest_care_check_at"] is None
+    assert missing["recommended_action"] == "Capture an initial combined care check and fleet snapshot."
+
+
+def test_api_monitoring_coverage_is_green_for_an_empty_fleet(tmp_path):
+    client = make_test_client(tmp_path)
+
+    payload = client.get("/api/monitoring-coverage").json()
+
+    assert payload["status"] == "green"
+    assert payload["tracked_site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["combined_coverage_percent"] == 100
+    assert payload["sites"] == []
+
+
 def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
     client = make_test_client(tmp_path)
     for latency_ms in (200, 500, 800):
