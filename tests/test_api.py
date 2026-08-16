@@ -5207,13 +5207,16 @@ def test_api_monitoring_coverage_reports_paired_evidence_gaps(tmp_path):
     assert stale_care["care_check_freshness"] == "stale"
     assert stale_care["care_check_age_hours"] > 168
     assert stale_care["recommended_action"] == (
-        "Capture a fresh combined care check and fleet snapshot before relying on site health."
+        "Capture a fresh care check before relying on site health."
     )
 
     stale_snapshot = sites["https://stale-snapshot-coverage.example"]
     assert stale_snapshot["snapshot_freshness"] == "stale"
     assert stale_snapshot["care_check_freshness"] == "current"
     assert stale_snapshot["snapshot_age_hours"] > 168
+    assert stale_snapshot["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on site health."
+    )
 
     missing = sites["https://missing-coverage.example"]
     assert missing["coverage_status"] == "gap"

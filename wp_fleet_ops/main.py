@@ -401,16 +401,30 @@ def api_site_directory():
 
 
 def _monitoring_coverage_action(snapshot_freshness: str, care_check_freshness: str) -> str:
-    """Return the next step needed to restore paired site-health evidence."""
+    """Return the minimum next step needed to restore paired site-health evidence."""
     if snapshot_freshness == "current" and care_check_freshness == "current":
         return "Continue normal monitoring cadence."
     if snapshot_freshness == "missing" and care_check_freshness == "missing":
         return "Capture an initial combined care check and fleet snapshot."
-    if snapshot_freshness == "missing":
-        return "Capture an initial fleet snapshot before relying on site health."
-    if care_check_freshness == "missing":
-        return "Capture an initial care check before relying on site health."
-    return "Capture a fresh combined care check and fleet snapshot before relying on site health."
+
+    snapshot_action = (
+        "an initial fleet snapshot"
+        if snapshot_freshness == "missing"
+        else "a fresh fleet snapshot"
+    )
+    care_check_action = (
+        "an initial care check"
+        if care_check_freshness == "missing"
+        else "a fresh care check"
+    )
+    if snapshot_freshness == "current":
+        return f"Capture {care_check_action} before relying on site health."
+    if care_check_freshness == "current":
+        return f"Capture {snapshot_action} before relying on site health."
+    return (
+        f"Capture {snapshot_action} and {care_check_action} "
+        "before relying on site health."
+    )
 
 
 @app.get("/api/monitoring-coverage")
