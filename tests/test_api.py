@@ -4668,7 +4668,9 @@ def test_dispatch_and_daily_brief_route_monitoring_gaps_to_operators(tmp_path):
     assert dispatch["monitoring_gap_count"] == 2
     assert dispatch["top_client"] == "Client Dispatch Gap"
     assert dispatch["top_site"] == "Missing Dispatch Site"
-    assert dispatch["top_action"] == "Capture a fresh fleet snapshot and verify site health."
+    assert dispatch["missing_care_check_count"] == 1
+    assert dispatch["stale_care_check_count"] == 0
+    assert dispatch["top_action"] == "Capture an initial combined care check and fleet snapshot."
     assert dispatch["next_queue"] == "monitoring"
 
     brief = client.get("/api/daily-ops-brief").json()
@@ -4679,10 +4681,56 @@ def test_dispatch_and_daily_brief_route_monitoring_gaps_to_operators(tmp_path):
     )
     assert brief["missing_snapshot_count"] == 1
     assert brief["stale_snapshot_count"] == 1
+    assert brief["missing_care_check_count"] == 1
+    assert brief["stale_care_check_count"] == 0
     assert brief["monitoring_gap_count"] == 2
     assert brief["next_queue"] == "monitoring"
     assert brief["top_site"] == "Missing Dispatch Site"
-    assert brief["recommended_focus"] == "Capture a fresh fleet snapshot and verify site health."
+    assert brief["recommended_focus"] == "Capture an initial combined care check and fleet snapshot."
+
+
+def test_dispatch_and_daily_brief_route_stale_care_checks_to_operators(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Dispatch Site",
+            url="https://stale-care-dispatch.example",
+            client="Client Care Dispatch Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    dispatch = client.get("/api/dispatch-summary").json()
+
+    assert dispatch["status"] == "yellow"
+    assert dispatch["open_action_count"] == 0
+    assert dispatch["missing_snapshot_count"] == 0
+    assert dispatch["stale_snapshot_count"] == 0
+    assert dispatch["missing_care_check_count"] == 0
+    assert dispatch["stale_care_check_count"] == 1
+    assert dispatch["monitoring_gap_count"] == 1
+    assert dispatch["top_client"] == "Client Care Dispatch Gap"
+    assert dispatch["top_site"] == "Stale Care Dispatch Site"
+    assert dispatch["top_action"] == "Capture a fresh care check before relying on site health."
+    assert dispatch["next_queue"] == "monitoring"
+    assert dispatch["monitoring_sites"][0]["snapshot_freshness"] == "current"
+    assert dispatch["monitoring_sites"][0]["care_check_freshness"] == "stale"
+
+    brief = client.get("/api/daily-ops-brief").json()
+
+    assert brief["status"] == "yellow"
+    assert brief["headline"] == (
+        "Yellow shift brief: 1 monitoring gap needs follow-up. Start with Stale Care Dispatch Site."
+    )
+    assert brief["missing_snapshot_count"] == 0
+    assert brief["stale_snapshot_count"] == 0
+    assert brief["missing_care_check_count"] == 0
+    assert brief["stale_care_check_count"] == 1
+    assert brief["monitoring_gap_count"] == 1
+    assert brief["recommended_focus"] == "Capture a fresh care check before relying on site health."
 
 
 def test_api_daily_ops_brief_returns_shift_ready_summary(tmp_path):

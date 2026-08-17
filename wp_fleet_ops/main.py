@@ -4003,7 +4003,7 @@ def _dispatch_summary_status(
 
 @app.get("/api/dispatch-summary")
 def api_dispatch_summary():
-    """Return a queue-level dispatch summary for daily operator routing."""
+    """Return a queue-level dispatch summary using paired monitoring evidence."""
     actions = _current_actions()
     immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
     scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
@@ -4013,12 +4013,33 @@ def api_dispatch_summary():
     client_workload = _client_workload_rows()
     top_client = client_workload[0] if client_workload else None
     top_action = actions[0] if actions else None
-    monitoring_payload = api_stale_snapshots()
-    monitoring_sites = monitoring_payload["sites"][:5]
+    monitoring_payload = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(monitoring_payload, dict)
+    monitoring_sites = [
+        site
+        for site in monitoring_payload["sites"]
+        if site["coverage_status"] == "gap"
+    ][:5]
     top_monitoring_site = monitoring_sites[0] if monitoring_sites else None
-    monitoring_gap_count = monitoring_payload["stale_count"]
-    missing_snapshot_count = monitoring_payload["missing_snapshot_count"]
-    stale_snapshot_count = monitoring_gap_count - missing_snapshot_count
+    monitoring_gap_count = monitoring_payload["monitoring_gap_count"]
+    missing_snapshot_count = sum(
+        1 for site in monitoring_payload["sites"] if site["snapshot_freshness"] == "missing"
+    )
+    stale_snapshot_count = sum(
+        1
+        for site in monitoring_payload["sites"]
+        if site["snapshot_freshness"] not in {"current", "missing"}
+    )
+    missing_care_check_count = sum(
+        1 for site in monitoring_payload["sites"] if site["care_check_freshness"] == "missing"
+    )
+    stale_care_check_count = sum(
+        1
+        for site in monitoring_payload["sites"]
+        if site["care_check_freshness"] not in {"current", "missing"}
+    )
     if top_action:
         dispatch_top_client = top_client["client"] if top_client else top_action.get("client")
         dispatch_top_site = priority_sites[0]["name"] if priority_sites else top_action["site"]
@@ -4056,6 +4077,8 @@ def api_dispatch_summary():
         "watch_action_count": len(watch_actions),
         "missing_snapshot_count": missing_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
+        "missing_care_check_count": missing_care_check_count,
+        "stale_care_check_count": stale_care_check_count,
         "monitoring_gap_count": monitoring_gap_count,
         "priority_site_count": priority_payload["priority_site_count"],
         "top_client": dispatch_top_client,
@@ -4115,6 +4138,8 @@ def api_daily_ops_brief():
         "scheduled_action_count": dispatch["scheduled_action_count"],
         "missing_snapshot_count": dispatch["missing_snapshot_count"],
         "stale_snapshot_count": dispatch["stale_snapshot_count"],
+        "missing_care_check_count": dispatch["missing_care_check_count"],
+        "stale_care_check_count": dispatch["stale_care_check_count"],
         "monitoring_gap_count": dispatch["monitoring_gap_count"],
         "next_queue": dispatch["next_queue"],
         "top_client": dispatch["top_client"],
