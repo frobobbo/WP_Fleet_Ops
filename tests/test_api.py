@@ -4239,6 +4239,9 @@ def test_api_client_update_briefs_warn_about_monitoring_gaps(tmp_path):
     assert payload["yellow_count"] == 1
     assert payload["missing_snapshot_count"] == 1
     assert payload["stale_snapshot_count"] == 1
+    assert payload["missing_care_check_count"] == 1
+    assert payload["stale_care_check_count"] == 0
+    assert payload["monitoring_gap_count"] == 2
     brief = payload["clients"][0]
     assert brief["client"] == "Client Update Gap"
     assert brief["status"] == "yellow"
@@ -4247,15 +4250,71 @@ def test_api_client_update_briefs_warn_about_monitoring_gaps(tmp_path):
     assert brief["current_snapshot_count"] == 0
     assert brief["missing_snapshot_count"] == 1
     assert brief["stale_snapshot_count"] == 1
+    assert brief["current_care_check_count"] == 1
+    assert brief["missing_care_check_count"] == 1
+    assert brief["stale_care_check_count"] == 0
+    assert brief["current_evidence_count"] == 0
+    assert brief["monitoring_gap_count"] == 2
+    assert brief["combined_coverage_percent"] == 0
     assert brief["monitoring_coverage_percent"] == 50
     assert brief["snapshot_freshness_percent"] == 0
     assert brief["healthy_site_count"] == 0
     assert brief["open_action_count"] == 0
     assert brief["top_site"] == "Missing Update Site"
-    assert brief["next_action"] == "Capture initial fleet snapshots for unmonitored sites."
+    assert brief["next_action"] == "Capture an initial combined care check and fleet snapshot."
     assert brief["client_message"] == (
-        "0 of 2 tracked sites have current snapshots; 2 monitoring gaps require follow-up."
+        "0 of 2 tracked sites have current paired evidence; 2 monitoring gaps require follow-up."
     )
+
+
+def test_client_account_workflows_fail_closed_on_stale_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Account Site",
+            url="https://stale-care-account.example",
+            client="Client Care Evidence Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    update_payload = client.get("/api/client-update-briefs").json()
+
+    assert update_payload["yellow_count"] == 1
+    assert update_payload["missing_care_check_count"] == 0
+    assert update_payload["stale_care_check_count"] == 1
+    assert update_payload["monitoring_gap_count"] == 1
+    brief = update_payload["clients"][0]
+    assert brief["status"] == "yellow"
+    assert brief["current_snapshot_count"] == 1
+    assert brief["current_evidence_count"] == 0
+    assert brief["missing_care_check_count"] == 0
+    assert brief["stale_care_check_count"] == 1
+    assert brief["monitoring_gap_count"] == 1
+    assert brief["combined_coverage_percent"] == 0
+    assert brief["top_site"] == "Stale Care Account Site"
+    assert brief["next_action"] == "Capture a fresh care check before relying on site health."
+    assert brief["client_message"] == (
+        "0 of 1 tracked site has current paired evidence; 1 monitoring gap requires follow-up."
+    )
+
+    review_payload = client.get("/api/client-service-reviews").json()
+    review = review_payload["clients"][0]
+    assert review_payload["monitoring_gap_client_count"] == 1
+    assert review["review_priority"] == "scheduled"
+    assert review["monitoring_gap_count"] == 1
+    assert review["stale_care_check_count"] == 1
+    assert review["next_action"] == "Capture a fresh care check before relying on site health."
+
+    agenda_payload = client.get("/api/account-agenda").json()
+    agenda = agenda_payload["agenda"][0]
+    assert agenda_payload["monitoring_gap_count"] == 1
+    assert agenda["focus"] == "monitoring restoration"
+    assert agenda["stale_care_check_count"] == 1
+    assert agenda["next_action"] == "Capture a fresh care check before relying on site health."
 
 
 def test_api_client_service_reviews_prioritizes_account_checkins(tmp_path):
@@ -4350,6 +4409,9 @@ def test_api_client_service_reviews_schedule_monitoring_gap_follow_up(tmp_path):
     assert payload["client_count"] == 1
     assert payload["scheduled_review_count"] == 1
     assert payload["monitoring_gap_client_count"] == 1
+    assert payload["missing_care_check_count"] == 1
+    assert payload["stale_care_check_count"] == 0
+    assert payload["monitoring_gap_count"] == 2
     review = payload["clients"][0]
     assert review["client"] == "Client Review Gap"
     assert review["status"] == "yellow"
@@ -4358,9 +4420,13 @@ def test_api_client_service_reviews_schedule_monitoring_gap_follow_up(tmp_path):
     assert review["missing_snapshot_count"] == 1
     assert review["stale_snapshot_count"] == 1
     assert review["current_snapshot_count"] == 0
+    assert review["current_evidence_count"] == 0
+    assert review["missing_care_check_count"] == 1
+    assert review["stale_care_check_count"] == 0
+    assert review["combined_coverage_percent"] == 0
     assert review["top_site"] == "Missing Review Site"
     assert review["talking_point"] == "Restore monitoring coverage before the next client review."
-    assert review["next_action"] == "Capture initial fleet snapshots for unmonitored sites."
+    assert review["next_action"] == "Capture an initial combined care check and fleet snapshot."
 
 
 def test_api_client_follow_ups_adds_due_dates_and_channels(tmp_path):
@@ -4882,9 +4948,13 @@ def test_api_account_agenda_prioritizes_monitoring_restoration(tmp_path):
     assert item["current_snapshot_count"] == 0
     assert item["missing_snapshot_count"] == 2
     assert item["stale_snapshot_count"] == 0
+    assert item["current_evidence_count"] == 0
+    assert item["missing_care_check_count"] == 2
+    assert item["stale_care_check_count"] == 0
     assert item["monitoring_gap_count"] == 2
+    assert item["combined_coverage_percent"] == 0
     assert item["top_site"] == "First Multi Gap Site"
-    assert item["next_action"] == "Capture initial fleet snapshots for unmonitored sites."
+    assert item["next_action"] == "Capture an initial combined care check and fleet snapshot."
 
 
 def test_dashboard_exposes_live_care_check_action(tmp_path):

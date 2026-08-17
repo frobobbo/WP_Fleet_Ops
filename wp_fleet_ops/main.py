@@ -3651,11 +3651,19 @@ def api_operations_kpis():
 
 
 def _client_update_brief_rows() -> list[dict]:
-    """Return client-facing status briefs with current wins, risks, and next steps."""
+    """Return client-facing status briefs backed by paired monitoring evidence."""
     status_rank = {"red": 0, "yellow": 1, "green": 2}
     actions_by_client: dict[str, list[dict]] = {}
     for action in _current_actions():
         actions_by_client.setdefault(action.get("client") or "Unassigned", []).append(action)
+
+    coverage_payload = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage_payload, dict)
+    coverage_by_client: dict[str, list[dict]] = {}
+    for site in coverage_payload["sites"]:
+        coverage_by_client.setdefault(site["client"], []).append(site)
 
     briefs = []
     for digest in api_client_digest()["clients"]:
@@ -3663,11 +3671,24 @@ def _client_update_brief_rows() -> list[dict]:
         actions = actions_by_client.get(client_name, [])
         immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
         scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
-        monitoring_gap_count = digest["missing_snapshot_count"] + digest["stale_snapshot_count"]
+        coverage_sites = coverage_by_client.get(client_name, [])
+        gap_sites = [site for site in coverage_sites if site["coverage_status"] == "gap"]
+        current_evidence_count = len(coverage_sites) - len(gap_sites)
+        monitoring_gap_count = len(gap_sites)
+        current_care_check_count = sum(
+            1 for site in coverage_sites if site["care_check_freshness"] == "current"
+        )
+        missing_care_check_count = sum(
+            1 for site in coverage_sites if site["care_check_freshness"] == "missing"
+        )
+        stale_care_check_count = len(coverage_sites) - current_care_check_count - missing_care_check_count
+        current_evidence_urls = {
+            site["url"] for site in coverage_sites if site["coverage_status"] == "current"
+        }
         healthy_site_count = sum(
             1
             for site in digest["sites"]
-            if site["snapshot_freshness"] == "current"
+            if site["url"] in current_evidence_urls
             and site["score"] is not None
             and site["score"] >= 85
         )
@@ -3678,18 +3699,12 @@ def _client_update_brief_rows() -> list[dict]:
             monitoring_gap_count,
         )
         top_action = actions[0] if actions else None
-        gap_site = next(
-            (site for site in digest["sites"] if site["snapshot_freshness"] != "current"),
-            None,
-        )
+        gap_site = gap_sites[0] if gap_sites else None
         if top_action:
             next_action = top_action["recommended_action"]
             top_site = top_action["site"]
-        elif digest["missing_snapshot_count"]:
-            next_action = "Capture initial fleet snapshots for unmonitored sites."
-            top_site = gap_site["name"] if gap_site else None
-        elif digest["stale_snapshot_count"]:
-            next_action = "Refresh stale fleet snapshots before the next client update."
+        elif gap_site:
+            next_action = gap_site["recommended_action"]
             top_site = gap_site["name"] if gap_site else None
         else:
             next_action = "Continue normal monitoring cadence."
@@ -3697,12 +3712,13 @@ def _client_update_brief_rows() -> list[dict]:
 
         if monitoring_gap_count:
             site_label = "site" if digest["site_count"] == 1 else "sites"
-            snapshot_verb = "has" if digest["site_count"] == 1 else "have"
+            evidence_verb = "has" if digest["site_count"] == 1 else "have"
             gap_label = "gap" if monitoring_gap_count == 1 else "gaps"
             gap_verb = "requires" if monitoring_gap_count == 1 else "require"
             client_message = (
-                f"{digest['current_snapshot_count']} of {digest['site_count']} tracked {site_label} "
-                f"{snapshot_verb} current snapshots; {monitoring_gap_count} monitoring {gap_label} {gap_verb} follow-up."
+                f"{current_evidence_count} of {digest['site_count']} tracked {site_label} "
+                f"{evidence_verb} current paired evidence; {monitoring_gap_count} monitoring "
+                f"{gap_label} {gap_verb} follow-up."
             )
         else:
             healthy_site_label = "site" if healthy_site_count == 1 else "sites"
@@ -3722,6 +3738,16 @@ def _client_update_brief_rows() -> list[dict]:
                 "current_snapshot_count": digest["current_snapshot_count"],
                 "missing_snapshot_count": digest["missing_snapshot_count"],
                 "stale_snapshot_count": digest["stale_snapshot_count"],
+                "current_care_check_count": current_care_check_count,
+                "missing_care_check_count": missing_care_check_count,
+                "stale_care_check_count": stale_care_check_count,
+                "current_evidence_count": current_evidence_count,
+                "monitoring_gap_count": monitoring_gap_count,
+                "combined_coverage_percent": (
+                    round((current_evidence_count / digest["site_count"]) * 100)
+                    if digest["site_count"]
+                    else 100
+                ),
                 "monitoring_coverage_percent": digest["monitoring_coverage_percent"],
                 "snapshot_freshness_percent": digest["snapshot_freshness_percent"],
                 "average_score": digest["average_score"],
@@ -3765,6 +3791,9 @@ def api_client_update_briefs():
         "green_count": sum(1 for client in clients if client["status"] == "green"),
         "missing_snapshot_count": sum(client["missing_snapshot_count"] for client in clients),
         "stale_snapshot_count": sum(client["stale_snapshot_count"] for client in clients),
+        "missing_care_check_count": sum(client["missing_care_check_count"] for client in clients),
+        "stale_care_check_count": sum(client["stale_care_check_count"] for client in clients),
+        "monitoring_gap_count": sum(client["monitoring_gap_count"] for client in clients),
         "clients": clients,
     }
 
@@ -3779,7 +3808,7 @@ def _client_service_review_rows() -> list[dict]:
     rows = []
     for brief in _client_update_brief_rows():
         action_count = brief["open_action_count"]
-        monitoring_gap_count = brief["missing_snapshot_count"] + brief["stale_snapshot_count"]
+        monitoring_gap_count = brief["monitoring_gap_count"]
         if brief["immediate_action_count"]:
             review_priority = "urgent"
         elif brief["scheduled_action_count"] or monitoring_gap_count or brief["average_score"] < 85:
@@ -3802,7 +3831,11 @@ def _client_service_review_rows() -> list[dict]:
                 "current_snapshot_count": brief["current_snapshot_count"],
                 "missing_snapshot_count": brief["missing_snapshot_count"],
                 "stale_snapshot_count": brief["stale_snapshot_count"],
+                "current_evidence_count": brief["current_evidence_count"],
+                "missing_care_check_count": brief["missing_care_check_count"],
+                "stale_care_check_count": brief["stale_care_check_count"],
                 "monitoring_gap_count": monitoring_gap_count,
+                "combined_coverage_percent": brief["combined_coverage_percent"],
                 "average_score": brief["average_score"],
                 "healthy_site_count": brief["healthy_site_count"],
                 "open_action_count": action_count,
@@ -3837,6 +3870,9 @@ def api_client_service_reviews():
         "scheduled_review_count": sum(1 for client in clients if client["review_priority"] == "scheduled"),
         "routine_review_count": sum(1 for client in clients if client["review_priority"] == "routine"),
         "monitoring_gap_client_count": sum(1 for client in clients if client["monitoring_gap_count"]),
+        "missing_care_check_count": sum(client["missing_care_check_count"] for client in clients),
+        "stale_care_check_count": sum(client["stale_care_check_count"] for client in clients),
+        "monitoring_gap_count": sum(client["monitoring_gap_count"] for client in clients),
         "clients": clients,
     }
 
@@ -4180,7 +4216,11 @@ def api_account_agenda(limit: int = 10):
                 "current_snapshot_count": review["current_snapshot_count"],
                 "missing_snapshot_count": review["missing_snapshot_count"],
                 "stale_snapshot_count": review["stale_snapshot_count"],
+                "current_evidence_count": review["current_evidence_count"],
+                "missing_care_check_count": review["missing_care_check_count"],
+                "stale_care_check_count": review["stale_care_check_count"],
                 "monitoring_gap_count": review["monitoring_gap_count"],
+                "combined_coverage_percent": review["combined_coverage_percent"],
                 "open_action_count": review["open_action_count"],
                 "immediate_action_count": review["immediate_action_count"],
                 "scheduled_action_count": review["scheduled_action_count"],
