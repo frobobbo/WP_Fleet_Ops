@@ -4497,6 +4497,45 @@ def test_api_client_follow_ups_adds_due_dates_and_channels(tmp_path):
     assert routine["open_action_count"] == 0
 
 
+def test_api_client_follow_ups_exposes_paired_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Follow Up Site",
+            url="https://stale-care-follow-up.example",
+            client="Client Follow Care Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/client-follow-ups")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["follow_up_count"] == 1
+    assert payload["monitoring_gap_client_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["missing_care_check_count"] == 0
+    assert payload["stale_care_check_count"] == 1
+    follow_up = payload["follow_ups"][0]
+    assert follow_up["client"] == "Client Follow Care Gap"
+    assert follow_up["priority"] == "scheduled"
+    assert follow_up["channel"] == "ticket"
+    assert follow_up["current_snapshot_count"] == 1
+    assert follow_up["missing_snapshot_count"] == 0
+    assert follow_up["stale_snapshot_count"] == 0
+    assert follow_up["current_evidence_count"] == 0
+    assert follow_up["missing_care_check_count"] == 0
+    assert follow_up["stale_care_check_count"] == 1
+    assert follow_up["monitoring_gap_count"] == 1
+    assert follow_up["combined_coverage_percent"] == 0
+    assert follow_up["talking_point"] == "Restore monitoring coverage before the next client review."
+    assert follow_up["next_action"] == "Capture a fresh care check before relying on site health."
+
+
 def test_api_maintenance_approval_packets_summarizes_client_approvals(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -3897,7 +3897,7 @@ def _follow_up_due(priority: str) -> str:
 
 @app.get("/api/client-follow-ups")
 def api_client_follow_ups():
-    """Return client follow-up prompts with channel and due-date guidance."""
+    """Return client follow-up prompts with paired monitoring evidence."""
     follow_ups = []
     for review in _client_service_review_rows():
         priority = review["review_priority"]
@@ -3909,6 +3909,14 @@ def api_client_follow_ups():
                 "due": _follow_up_due(priority),
                 "channel": _follow_up_channel(priority, review["open_action_count"]),
                 "site_count": review["site_count"],
+                "current_snapshot_count": review["current_snapshot_count"],
+                "missing_snapshot_count": review["missing_snapshot_count"],
+                "stale_snapshot_count": review["stale_snapshot_count"],
+                "current_evidence_count": review["current_evidence_count"],
+                "missing_care_check_count": review["missing_care_check_count"],
+                "stale_care_check_count": review["stale_care_check_count"],
+                "monitoring_gap_count": review["monitoring_gap_count"],
+                "combined_coverage_percent": review["combined_coverage_percent"],
                 "open_action_count": review["open_action_count"],
                 "top_site": review["top_site"],
                 "talking_point": review["talking_point"],
@@ -3922,6 +3930,13 @@ def api_client_follow_ups():
         "urgent_count": sum(1 for item in follow_ups if item["priority"] == "urgent"),
         "scheduled_count": sum(1 for item in follow_ups if item["priority"] == "scheduled"),
         "routine_count": sum(1 for item in follow_ups if item["priority"] == "routine"),
+        "monitoring_gap_client_count": sum(1 for item in follow_ups if item["monitoring_gap_count"]),
+        "current_evidence_count": sum(item["current_evidence_count"] for item in follow_ups),
+        "missing_snapshot_count": sum(item["missing_snapshot_count"] for item in follow_ups),
+        "stale_snapshot_count": sum(item["stale_snapshot_count"] for item in follow_ups),
+        "missing_care_check_count": sum(item["missing_care_check_count"] for item in follow_ups),
+        "stale_care_check_count": sum(item["stale_care_check_count"] for item in follow_ups),
+        "monitoring_gap_count": sum(item["monitoring_gap_count"] for item in follow_ups),
         "follow_ups": follow_ups,
     }
 
