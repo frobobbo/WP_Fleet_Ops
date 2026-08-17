@@ -3413,6 +3413,64 @@ def test_api_site_scorecards_fail_closed_on_stale_snapshot_evidence(tmp_path):
     assert scorecard["next_action"] == "Capture a fresh fleet snapshot before relying on this scorecard."
 
 
+def test_api_site_scorecards_include_sites_missing_initial_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Scorecard Evidence",
+            "url": "https://missing-scorecard.example",
+            "client": "Client Scorecard Gap",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Scorecard Evidence",
+            url="https://current-scorecard.example",
+            client="Client Scorecard Current",
+        ),
+        follow_redirects=False,
+    )
+
+    payload = client.get("/api/site-scorecards").json()
+
+    assert payload["site_count"] == 2
+    assert payload["monitored_site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["scorecard_evidence_percent"] == 50
+    assert payload["healthy_count"] == 1
+    assert payload["unknown_count"] == 1
+    missing = payload["sites"][0]
+    assert missing == {
+        "name": "Missing Scorecard Evidence",
+        "url": "https://missing-scorecard.example",
+        "client": "Client Scorecard Gap",
+        "score": None,
+        "observed_score": None,
+        "status": "unknown",
+        "observed_status": None,
+        "badges": {
+            "availability": "unknown",
+            "tls": "unknown",
+            "updates": "unknown",
+            "backups": "unknown",
+            "performance": "unknown",
+            "security": "unknown",
+        },
+        "observed_badges": None,
+        "alert_count": 0,
+        "observed_alert_count": 0,
+        "next_action": "Capture an initial fleet snapshot before relying on this scorecard.",
+        "latest_snapshot_at": None,
+        "snapshot_freshness": "missing",
+        "snapshot_age_hours": None,
+    }
+
+
 def test_api_snapshot_history_returns_recent_snapshots_newest_first(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -2999,11 +2999,43 @@ def _site_scorecard_evidence_action(freshness: str) -> str:
 
 
 def _site_scorecard_rows() -> list[dict]:
-    """Build compact cards without treating stale observations as current health."""
+    """Build cards for every site without treating incomplete evidence as health."""
     now = datetime.now(timezone.utc)
     status_rank = {"unknown": 0, "critical": 1, "warning": 2, "healthy": 3}
+    freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
+    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     rows = []
-    for row in store.latest_dashboard():
+    for site in store.list_sites():
+        row = latest_by_url.get(site["url"])
+        if row is None:
+            badges = {
+                "availability": "unknown",
+                "tls": "unknown",
+                "updates": "unknown",
+                "backups": "unknown",
+                "performance": "unknown",
+                "security": "unknown",
+            }
+            rows.append(
+                {
+                    "name": site["name"],
+                    "url": site["url"],
+                    "client": site.get("client") or "Unassigned",
+                    "score": None,
+                    "observed_score": None,
+                    "status": "unknown",
+                    "observed_status": None,
+                    "badges": badges,
+                    "observed_badges": None,
+                    "alert_count": 0,
+                    "observed_alert_count": 0,
+                    "next_action": "Capture an initial fleet snapshot before relying on this scorecard.",
+                    "latest_snapshot_at": None,
+                    "snapshot_freshness": "missing",
+                    "snapshot_age_hours": None,
+                }
+            )
+            continue
         observed_badges = {
             "availability": "healthy" if row["uptime_ok"] else "critical",
             "tls": _certificate_status(row["ssl_days"]),
@@ -3044,7 +3076,16 @@ def _site_scorecard_rows() -> list[dict]:
                 "snapshot_age_hours": age_hours,
             }
         )
-    rows.sort(key=lambda site: (status_rank.get(site["status"], 99), site["observed_score"], -site["alert_count"], site["client"].lower(), site["name"].lower()))
+    rows.sort(
+        key=lambda site: (
+            status_rank.get(site["status"], 99),
+            freshness_rank.get(site["snapshot_freshness"], 99),
+            site["observed_score"] if site["observed_score"] is not None else -1,
+            -site["alert_count"],
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
     return rows
 
 
@@ -3052,9 +3093,22 @@ def _site_scorecard_rows() -> list[dict]:
 def api_site_scorecards():
     """Return compact per-site operational status cards for portals and widgets."""
     sites = _site_scorecard_rows()
+    current_snapshot_count = sum(
+        1 for site in sites if site["snapshot_freshness"] == "current"
+    )
+    missing_snapshot_count = sum(
+        1 for site in sites if site["snapshot_freshness"] == "missing"
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "site_count": len(sites),
+        "monitored_site_count": len(sites) - missing_snapshot_count,
+        "current_snapshot_count": current_snapshot_count,
+        "missing_snapshot_count": missing_snapshot_count,
+        "stale_snapshot_count": len(sites) - current_snapshot_count - missing_snapshot_count,
+        "scorecard_evidence_percent": (
+            round((current_snapshot_count / len(sites)) * 100) if sites else 100
+        ),
         "critical_count": sum(1 for site in sites if site["status"] == "critical"),
         "warning_count": sum(1 for site in sites if site["status"] == "warning"),
         "healthy_count": sum(1 for site in sites if site["status"] == "healthy"),
