@@ -2864,6 +2864,60 @@ def test_api_remediation_plan_groups_actions_by_operational_timing(tmp_path):
     assert scheduled["actions"][0]["due"] == "next maintenance window"
 
 
+def test_api_remediation_plan_surfaces_missing_and_stale_snapshot_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Plan Site",
+            url="https://stale-plan.example",
+            client="Client Plan Gap",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Plan Site",
+            "url": "https://missing-plan.example",
+            "client": "Client Plan Gap",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/remediation-plan").json()
+
+    assert payload["status"] == "yellow"
+    assert payload["current_action_count"] == 0
+    assert payload["action_count"] == 2
+    assert payload["monitoring_count"] == 2
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 1
+    assert [bucket["bucket"] for bucket in payload["buckets"]] == ["monitoring"]
+    monitoring = payload["buckets"][0]
+    assert monitoring["label"] == "Monitoring evidence"
+    assert monitoring["action_count"] == 2
+    assert [action["site"] for action in monitoring["actions"]] == [
+        "Missing Plan Site",
+        "Stale Plan Site",
+    ]
+    assert [action["snapshot_freshness"] for action in monitoring["actions"]] == [
+        "missing",
+        "stale",
+    ]
+    assert all(action["score"] is None for action in monitoring["actions"])
+    assert all(action["due"] == "before relying on site health" for action in monitoring["actions"])
+
+
 def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

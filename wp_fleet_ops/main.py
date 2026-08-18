@@ -2441,16 +2441,47 @@ def _remediation_due(bucket: str) -> str:
 
 @app.get("/api/remediation-plan")
 def api_remediation_plan():
-    """Return current fleet actions grouped into operator timing buckets."""
+    """Return current fleet actions and evidence gaps grouped by operator timing."""
     labels = {
         "immediate": "Immediate remediation",
         "scheduled": "Scheduled maintenance",
+        "monitoring": "Monitoring evidence",
         "watch": "Monitoring watchlist",
     }
-    buckets: dict[str, list[dict]] = {"immediate": [], "scheduled": [], "watch": []}
-    for action in _current_actions():
+    buckets: dict[str, list[dict]] = {
+        "immediate": [],
+        "scheduled": [],
+        "monitoring": [],
+        "watch": [],
+    }
+    current_actions = _current_actions()
+    for action in current_actions:
         bucket = _remediation_bucket(action)
         buckets[bucket].append({**action, "due": _remediation_due(bucket)})
+
+    gap_inventory = api_stale_snapshots()
+    gap_messages = {
+        "missing": "Fleet snapshot evidence is missing.",
+        "stale": "Fleet snapshot evidence is stale.",
+        "invalid": "Fleet snapshot evidence has an invalid timestamp.",
+        "clock_skew": "Fleet snapshot evidence is future-dated.",
+    }
+    for site in gap_inventory["sites"]:
+        freshness = site["staleness_status"]
+        buckets["monitoring"].append(
+            {
+                "site": site["name"],
+                "url": site["url"],
+                "client": site["client"],
+                "score": None,
+                "severity": "warning",
+                "message": gap_messages[freshness],
+                "recommended_action": site["recommended_action"],
+                "latest_snapshot_at": site["latest_snapshot_at"],
+                "snapshot_freshness": freshness,
+                "due": "before relying on site health",
+            }
+        )
 
     bucket_rows = [
         {
@@ -2462,11 +2493,27 @@ def api_remediation_plan():
         for bucket, actions in buckets.items()
         if actions
     ]
+    current_action_count = len(current_actions)
+    monitoring_count = len(buckets["monitoring"])
+    immediate_count = len(buckets["immediate"])
+    status = "red" if immediate_count else ("yellow" if current_action_count or monitoring_count else "green")
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "action_count": sum(len(actions) for actions in buckets.values()),
-        "immediate_count": len(buckets["immediate"]),
+        "status": status,
+        "tracked_site_count": gap_inventory["site_count"],
+        "current_snapshot_count": gap_inventory["current_snapshot_count"],
+        "missing_snapshot_count": gap_inventory["missing_snapshot_count"],
+        "stale_snapshot_count": sum(
+            1 for site in gap_inventory["sites"] if site["staleness_status"] == "stale"
+        ),
+        "invalid_timestamp_count": gap_inventory["invalid_timestamp_count"],
+        "clock_skew_count": gap_inventory["clock_skew_count"],
+        "monitoring_gap_count": monitoring_count,
+        "current_action_count": current_action_count,
+        "action_count": current_action_count + monitoring_count,
+        "immediate_count": immediate_count,
         "scheduled_count": len(buckets["scheduled"]),
+        "monitoring_count": monitoring_count,
         "watch_count": len(buckets["watch"]),
         "buckets": bucket_rows,
     }
