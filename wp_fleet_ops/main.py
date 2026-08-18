@@ -959,16 +959,85 @@ def _client_workload_rows() -> list[dict]:
     return rows
 
 
+def _client_monitoring_gap_rows(coverage_sites: list[dict]) -> list[dict]:
+    """Group incomplete paired monitoring evidence by client for triage."""
+    clients: dict[str, dict] = {}
+    for site in coverage_sites:
+        if site["coverage_status"] == "current":
+            continue
+        client_name = site.get("client") or "Unassigned"
+        summary = clients.setdefault(
+            client_name,
+            {
+                "client": client_name,
+                "status": "yellow",
+                "monitoring_gap_count": 0,
+                "snapshot_gap_count": 0,
+                "care_check_gap_count": 0,
+                "sites": [],
+            },
+        )
+        summary["monitoring_gap_count"] += 1
+        summary["snapshot_gap_count"] += site["snapshot_freshness"] != "current"
+        summary["care_check_gap_count"] += site["care_check_freshness"] != "current"
+        summary["sites"].append(
+            {
+                "name": site["name"],
+                "url": site["url"],
+                "snapshot_freshness": site["snapshot_freshness"],
+                "snapshot_age_hours": site["snapshot_age_hours"],
+                "latest_snapshot_at": site["latest_snapshot_at"],
+                "care_check_freshness": site["care_check_freshness"],
+                "care_check_age_hours": site["care_check_age_hours"],
+                "latest_care_check_at": site["latest_care_check_at"],
+                "recommended_action": site["recommended_action"],
+            }
+        )
+
+    rows = list(clients.values())
+    for row in rows:
+        row["sites"].sort(key=lambda site: site["name"].lower())
+    rows.sort(
+        key=lambda row: (
+            -row["monitoring_gap_count"],
+            -row["snapshot_gap_count"],
+            -row["care_check_gap_count"],
+            row["client"].lower(),
+        )
+    )
+    return rows
+
+
 @app.get("/api/client-workload")
 def api_client_workload():
-    """Return account-level open action counts for client triage."""
+    """Return account actions and paired monitoring gaps for client triage."""
     clients = _client_workload_rows()
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    monitoring_clients = _client_monitoring_gap_rows(coverage["sites"])
+    critical_action_count = sum(client["critical_action_count"] for client in clients)
+    open_action_count = sum(client["open_action_count"] for client in clients)
+    monitoring_gap_count = coverage["monitoring_gap_count"]
+    status = "red" if critical_action_count else (
+        "yellow" if open_action_count or monitoring_gap_count else "green"
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "tracked_client_count": len({site["client"] for site in coverage["sites"]}),
         "client_count": len(clients),
-        "open_action_count": sum(client["open_action_count"] for client in clients),
-        "critical_action_count": sum(client["critical_action_count"] for client in clients),
+        "open_action_count": open_action_count,
+        "critical_action_count": critical_action_count,
+        "current_evidence_count": coverage["current_evidence_count"],
+        "monitoring_gap_client_count": len(monitoring_clients),
+        "monitoring_gap_count": monitoring_gap_count,
+        "snapshot_gap_count": coverage["snapshot_gap_count"],
+        "care_check_gap_count": coverage["care_check_gap_count"],
+        "paired_coverage_percent": coverage["combined_coverage_percent"],
         "clients": clients,
+        "monitoring_clients": monitoring_clients,
     }
 
 

@@ -1224,6 +1224,74 @@ def test_api_client_workload_groups_open_actions_by_account(tmp_path):
     assert commerce["latest_snapshot_at"]
 
 
+def test_api_client_workload_surfaces_paired_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Workload Evidence",
+            url="https://current-workload-evidence.example",
+            client="Current Workload Client",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Workload Evidence",
+            url="https://stale-care-workload-evidence.example",
+            client="Gap Workload Client",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Workload Evidence",
+            "url": "https://missing-workload-evidence.example",
+            "client": "Gap Workload Client",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-care-workload-evidence.example"),
+        )
+
+    response = client.get("/api/client-workload")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["tracked_client_count"] == 2
+    assert payload["client_count"] == 0
+    assert payload["open_action_count"] == 0
+    assert payload["monitoring_gap_client_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["snapshot_gap_count"] == 1
+    assert payload["care_check_gap_count"] == 2
+    assert payload["clients"] == []
+
+    assert len(payload["monitoring_clients"]) == 1
+    gap_client = payload["monitoring_clients"][0]
+    assert gap_client["client"] == "Gap Workload Client"
+    assert gap_client["monitoring_gap_count"] == 2
+    assert gap_client["snapshot_gap_count"] == 1
+    assert gap_client["care_check_gap_count"] == 2
+    assert [site["name"] for site in gap_client["sites"]] == [
+        "Missing Workload Evidence",
+        "Stale Care Workload Evidence",
+    ]
+    assert gap_client["sites"][0]["recommended_action"] == (
+        "Capture an initial combined care check and fleet snapshot."
+    )
+    assert gap_client["sites"][1]["recommended_action"] == (
+        "Capture a fresh care check before relying on site health."
+    )
+
+
 def test_api_incidents_returns_only_critical_alerts(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
