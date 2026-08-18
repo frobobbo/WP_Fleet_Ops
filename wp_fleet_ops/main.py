@@ -2439,6 +2439,22 @@ def _remediation_due(bucket: str) -> str:
     return "monitoring review"
 
 
+def _monitoring_gap_message(snapshot_freshness: str, care_check_freshness: str) -> str:
+    """Describe only the evidence sources that require operator follow-up."""
+    labels = {
+        "missing": "is missing",
+        "stale": "is stale",
+        "invalid": "has an invalid timestamp",
+        "clock_skew": "is future-dated",
+    }
+    messages = []
+    if snapshot_freshness != "current":
+        messages.append(f"Fleet snapshot evidence {labels[snapshot_freshness]}.")
+    if care_check_freshness != "current":
+        messages.append(f"Care check evidence {labels[care_check_freshness]}.")
+    return " ".join(messages)
+
+
 @app.get("/api/remediation-plan")
 def api_remediation_plan():
     """Return current fleet actions and evidence gaps grouped by operator timing."""
@@ -2459,15 +2475,12 @@ def api_remediation_plan():
         bucket = _remediation_bucket(action)
         buckets[bucket].append({**action, "due": _remediation_due(bucket)})
 
-    gap_inventory = api_stale_snapshots()
-    gap_messages = {
-        "missing": "Fleet snapshot evidence is missing.",
-        "stale": "Fleet snapshot evidence is stale.",
-        "invalid": "Fleet snapshot evidence has an invalid timestamp.",
-        "clock_skew": "Fleet snapshot evidence is future-dated.",
-    }
-    for site in gap_inventory["sites"]:
-        freshness = site["staleness_status"]
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    gap_sites = [site for site in coverage["sites"] if site["coverage_status"] == "gap"]
+    for site in gap_sites:
         buckets["monitoring"].append(
             {
                 "site": site["name"],
@@ -2475,10 +2488,17 @@ def api_remediation_plan():
                 "client": site["client"],
                 "score": None,
                 "severity": "warning",
-                "message": gap_messages[freshness],
+                "message": _monitoring_gap_message(
+                    site["snapshot_freshness"],
+                    site["care_check_freshness"],
+                ),
                 "recommended_action": site["recommended_action"],
                 "latest_snapshot_at": site["latest_snapshot_at"],
-                "snapshot_freshness": freshness,
+                "snapshot_freshness": site["snapshot_freshness"],
+                "snapshot_age_hours": site["snapshot_age_hours"],
+                "latest_care_check_at": site["latest_care_check_at"],
+                "care_check_freshness": site["care_check_freshness"],
+                "care_check_age_hours": site["care_check_age_hours"],
                 "due": "before relying on site health",
             }
         )
@@ -2500,14 +2520,34 @@ def api_remediation_plan():
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": status,
-        "tracked_site_count": gap_inventory["site_count"],
-        "current_snapshot_count": gap_inventory["current_snapshot_count"],
-        "missing_snapshot_count": gap_inventory["missing_snapshot_count"],
-        "stale_snapshot_count": sum(
-            1 for site in gap_inventory["sites"] if site["staleness_status"] == "stale"
+        "tracked_site_count": coverage["tracked_site_count"],
+        "current_evidence_count": coverage["current_evidence_count"],
+        "current_snapshot_count": coverage["snapshot_current_count"],
+        "missing_snapshot_count": sum(
+            1 for site in coverage["sites"] if site["snapshot_freshness"] == "missing"
         ),
-        "invalid_timestamp_count": gap_inventory["invalid_timestamp_count"],
-        "clock_skew_count": gap_inventory["clock_skew_count"],
+        "stale_snapshot_count": sum(
+            1 for site in coverage["sites"] if site["snapshot_freshness"] == "stale"
+        ),
+        "invalid_timestamp_count": sum(
+            1 for site in coverage["sites"] if site["snapshot_freshness"] == "invalid"
+        ),
+        "clock_skew_count": sum(
+            1 for site in coverage["sites"] if site["snapshot_freshness"] == "clock_skew"
+        ),
+        "current_care_check_count": coverage["care_check_current_count"],
+        "missing_care_check_count": sum(
+            1 for site in coverage["sites"] if site["care_check_freshness"] == "missing"
+        ),
+        "stale_care_check_count": sum(
+            1 for site in coverage["sites"] if site["care_check_freshness"] == "stale"
+        ),
+        "invalid_care_check_timestamp_count": sum(
+            1 for site in coverage["sites"] if site["care_check_freshness"] == "invalid"
+        ),
+        "care_check_clock_skew_count": sum(
+            1 for site in coverage["sites"] if site["care_check_freshness"] == "clock_skew"
+        ),
         "monitoring_gap_count": monitoring_count,
         "current_action_count": current_action_count,
         "action_count": current_action_count + monitoring_count,

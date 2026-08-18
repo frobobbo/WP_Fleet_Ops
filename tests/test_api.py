@@ -2918,6 +2918,75 @@ def test_api_remediation_plan_surfaces_missing_and_stale_snapshot_evidence(tmp_p
     assert all(action["due"] == "before relying on site health" for action in monitoring["actions"])
 
 
+def test_api_remediation_plan_surfaces_missing_and_stale_care_check_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Missing Care Plan Site",
+            url="https://missing-care-plan.example",
+            client="Client Care Plan Gap",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Plan Site",
+            url="https://stale-care-plan.example",
+            client="Client Care Plan Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "delete from care_checks where site_id = (select id from sites where url = ?)",
+            ("https://missing-care-plan.example",),
+        )
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-care-plan.example"),
+        )
+
+    payload = client.get("/api/remediation-plan").json()
+
+    assert payload["status"] == "yellow"
+    assert payload["current_action_count"] == 0
+    assert payload["action_count"] == 2
+    assert payload["current_snapshot_count"] == 2
+    assert payload["missing_snapshot_count"] == 0
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["current_care_check_count"] == 0
+    assert payload["missing_care_check_count"] == 1
+    assert payload["stale_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 2
+    monitoring = payload["buckets"][0]
+    assert monitoring["bucket"] == "monitoring"
+    assert [action["site"] for action in monitoring["actions"]] == [
+        "Missing Care Plan Site",
+        "Stale Care Plan Site",
+    ]
+    assert [action["snapshot_freshness"] for action in monitoring["actions"]] == [
+        "current",
+        "current",
+    ]
+    assert [action["care_check_freshness"] for action in monitoring["actions"]] == [
+        "missing",
+        "stale",
+    ]
+    assert [action["message"] for action in monitoring["actions"]] == [
+        "Care check evidence is missing.",
+        "Care check evidence is stale.",
+    ]
+    assert monitoring["actions"][0]["recommended_action"] == (
+        "Capture an initial care check before relying on site health."
+    )
+    assert monitoring["actions"][1]["recommended_action"] == (
+        "Capture a fresh care check before relying on site health."
+    )
+
+
 def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
