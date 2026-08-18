@@ -3755,6 +3755,62 @@ def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     assert improving["recommended_action"] == "Continue monitoring the site trend."
 
 
+def test_api_site_trends_includes_tracked_sites_missing_snapshot_history(tmp_path):
+    client = make_test_client(tmp_path)
+    for index in range(3):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"Current Trend Site {index}",
+                url=f"https://current-trend-{index}.example",
+                client="Client Trend Coverage",
+            ),
+            follow_redirects=False,
+        )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Trend Site",
+            "url": "https://missing-trend.example",
+            "client": "Client Trend Coverage",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get("/api/site-trends?limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 4
+    assert payload["monitored_site_count"] == 3
+    assert payload["current_evidence_count"] == 3
+    assert payload["missing_snapshot_count"] == 1
+    assert payload["unknown_count"] == 1
+    assert payload["trend_evidence_percent"] == 75
+    missing = payload["trends"][0]
+    assert missing == {
+        "name": "Missing Trend Site",
+        "url": "https://missing-trend.example",
+        "client": "Client Trend Coverage",
+        "latest_score": None,
+        "previous_score": None,
+        "score_delta": None,
+        "trend_status": "unknown",
+        "observed_latest_score": None,
+        "observed_previous_score": None,
+        "observed_score_delta": None,
+        "observed_trend_status": None,
+        "snapshot_freshness": "missing",
+        "snapshot_age_hours": None,
+        "latest_snapshot_at": None,
+        "previous_snapshot_at": None,
+        "recommended_action": (
+            "Capture an initial fleet snapshot before relying on site trend status."
+        ),
+    }
+
+
 def test_api_site_trends_fail_closed_when_latest_snapshot_is_stale(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

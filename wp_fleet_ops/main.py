@@ -3288,6 +3288,8 @@ def _site_trend_status(score_delta: int | None) -> str:
 
 def _site_trend_evidence_action(freshness: str) -> str:
     """Return a safe next step when the latest trend evidence is not current."""
+    if freshness == "missing":
+        return "Capture an initial fleet snapshot before relying on site trend status."
     if freshness == "clock_skew":
         return "Correct the latest snapshot timestamp or source clock before relying on site trend status."
     if freshness == "invalid":
@@ -3298,9 +3300,16 @@ def _site_trend_evidence_action(freshness: str) -> str:
 def _site_trend_rows(limit: int) -> list[dict]:
     """Compare each site's latest snapshot with its prior snapshot for trend triage."""
     now = datetime.now(timezone.utc)
+    tracked_sites = store.list_sites()
     history_by_url: dict[str, list[dict]] = {}
     for snapshot in store.recent_trend_snapshots(limit):
         history_by_url.setdefault(snapshot["url"], []).append(snapshot)
+    # The comparison query is globally bounded, so an older site's history may
+    # be omitted even though that site is monitored. Preserve an accurate fleet
+    # inventory by backfilling only its latest snapshot; the row remains a
+    # current/stale "new" trend without pretending a prior comparison exists.
+    for snapshot in store.latest_dashboard():
+        history_by_url.setdefault(snapshot["url"], [snapshot])
 
     rows = []
     for snapshots in history_by_url.values():
@@ -3343,12 +3352,36 @@ def _site_trend_rows(limit: int) -> list[dict]:
             }
         )
 
+    for site in tracked_sites:
+        if site["url"] in history_by_url:
+            continue
+        rows.append(
+            {
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "latest_score": None,
+                "previous_score": None,
+                "score_delta": None,
+                "trend_status": "unknown",
+                "observed_latest_score": None,
+                "observed_previous_score": None,
+                "observed_score_delta": None,
+                "observed_trend_status": None,
+                "snapshot_freshness": "missing",
+                "snapshot_age_hours": None,
+                "latest_snapshot_at": None,
+                "previous_snapshot_at": None,
+                "recommended_action": _site_trend_evidence_action("missing"),
+            }
+        )
+
     trend_rank = {"unknown": 0, "regressing": 1, "new": 2, "stable": 3, "improving": 4}
     rows.sort(
         key=lambda row: (
             trend_rank.get(row["trend_status"], 99),
             row["observed_score_delta"] if row["observed_score_delta"] is not None else 0,
-            row["observed_latest_score"],
+            row["observed_latest_score"] if row["observed_latest_score"] is not None else -1,
             row["client"].lower(),
             row["name"].lower(),
         )
@@ -3364,6 +3397,9 @@ def api_site_trends(limit: int = 100):
     current_evidence_count = sum(
         1 for trend in trends if trend["snapshot_freshness"] == "current"
     )
+    missing_snapshot_count = sum(
+        1 for trend in trends if trend["snapshot_freshness"] == "missing"
+    )
     unknown_count = len(trends) - current_evidence_count
     regressing_count = sum(1 for trend in trends if trend["trend_status"] == "regressing")
     return {
@@ -3372,7 +3408,9 @@ def api_site_trends(limit: int = 100):
         "snapshot_limit": bounded_limit,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(trends),
+        "monitored_site_count": len(trends) - missing_snapshot_count,
         "current_evidence_count": current_evidence_count,
+        "missing_snapshot_count": missing_snapshot_count,
         "unknown_count": unknown_count,
         "trend_evidence_percent": round((current_evidence_count / len(trends)) * 100) if trends else 100,
         "regressing_count": regressing_count,
