@@ -3866,9 +3866,13 @@ def _operations_kpi_status(
 
 @app.get("/api/operations-kpis")
 def api_operations_kpis():
-    """Return compact fleet KPIs for status pages and recurring ops reports."""
+    """Return compact fleet KPIs backed by paired monitoring evidence."""
     rows = _current_snapshot_rows(store.latest_dashboard())
     fleet_summary = api_summary()
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
     actions = _current_actions()
     average_score = round(sum(row["score"] or 0 for row in rows) / len(rows)) if rows else 100
     immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
@@ -3877,7 +3881,7 @@ def api_operations_kpis():
     approval_packets = _maintenance_approval_packet_rows()
     priority_sites = [row for row in rows if _site_priority_score(row) > 0]
     priority_sites.sort(key=lambda row: (-_site_priority_score(row), row["score"], row["name"].lower()))
-    monitoring_gap_count = fleet_summary["missing_snapshot_count"] + fleet_summary["stale_snapshot_count"]
+    monitoring_gap_count = coverage["monitoring_gap_count"]
     status = _operations_kpi_status(
         len(immediate_actions),
         len(scheduled_actions),
@@ -3892,6 +3896,12 @@ def api_operations_kpis():
         recommended_focus = "Capture initial fleet snapshots for unmonitored sites."
     elif fleet_summary["stale_snapshot_count"]:
         recommended_focus = "Refresh stale fleet snapshots before the next operations review."
+    elif monitoring_gap_count:
+        recommended_focus = next(
+            site["recommended_action"]
+            for site in coverage["sites"]
+            if site["coverage_status"] == "gap"
+        )
     else:
         recommended_focus = "Continue normal monitoring cadence."
     return {
@@ -3903,6 +3913,11 @@ def api_operations_kpis():
         "stale_snapshot_count": fleet_summary["stale_snapshot_count"],
         "monitoring_coverage_percent": fleet_summary["monitoring_coverage_percent"],
         "snapshot_freshness_percent": fleet_summary["snapshot_freshness_percent"],
+        "current_evidence_count": coverage["current_evidence_count"],
+        "monitoring_gap_count": monitoring_gap_count,
+        "snapshot_gap_count": coverage["snapshot_gap_count"],
+        "care_check_gap_count": coverage["care_check_gap_count"],
+        "paired_coverage_percent": coverage["combined_coverage_percent"],
         "average_score": average_score,
         "green_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "green"),
         "yellow_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "yellow"),

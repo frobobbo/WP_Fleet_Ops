@@ -4513,6 +4513,37 @@ def test_api_operations_kpis_warns_about_monitoring_gaps(tmp_path):
     assert payload["recommended_focus"] == "Capture initial fleet snapshots for unmonitored sites."
 
 
+def test_api_operations_kpis_warns_when_care_check_evidence_is_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care KPI Site",
+            url="https://stale-care-kpi.example",
+            client="Client KPI Care Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/operations-kpis")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["open_action_count"] == 0
+    assert payload["recommended_focus"] == (
+        "Capture a fresh care check before relying on site health."
+    )
+
+
 def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
