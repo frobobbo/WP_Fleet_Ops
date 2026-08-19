@@ -4147,6 +4147,76 @@ def test_api_action_matrix_groups_open_actions_by_client_and_site(tmp_path):
     assert matrix["sites"][1]["top_severity"] == "warning"
 
 
+def test_api_action_matrix_surfaces_paired_monitoring_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Current Matrix Evidence",
+            url="https://current-matrix-evidence.example",
+            client="Current Matrix Client",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Matrix Evidence",
+            url="https://stale-care-matrix-evidence.example",
+            client="Gap Matrix Client",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Matrix Evidence",
+            "url": "https://missing-matrix-evidence.example",
+            "client": "Gap Matrix Client",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-care-matrix-evidence.example"),
+        )
+
+    response = client.get("/api/action-matrix")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["tracked_client_count"] == 2
+    assert payload["client_count"] == 0
+    assert payload["site_count"] == 0
+    assert payload["open_action_count"] == 0
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_client_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["snapshot_gap_count"] == 1
+    assert payload["care_check_gap_count"] == 2
+    assert payload["clients"] == []
+
+    assert len(payload["monitoring_clients"]) == 1
+    gap_client = payload["monitoring_clients"][0]
+    assert gap_client["client"] == "Gap Matrix Client"
+    assert gap_client["monitoring_gap_count"] == 2
+    assert gap_client["snapshot_gap_count"] == 1
+    assert gap_client["care_check_gap_count"] == 2
+    assert [site["name"] for site in gap_client["sites"]] == [
+        "Missing Matrix Evidence",
+        "Stale Care Matrix Evidence",
+    ]
+    assert gap_client["sites"][0]["recommended_action"] == (
+        "Capture an initial combined care check and fleet snapshot."
+    )
+    assert gap_client["sites"][1]["recommended_action"] == (
+        "Capture a fresh care check before relying on site health."
+    )
+
+
 def test_api_site_priorities_returns_bounded_dispatch_queue(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

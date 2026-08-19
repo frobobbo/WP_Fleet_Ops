@@ -3653,16 +3653,36 @@ def _action_matrix_rows() -> list[dict]:
 
 @app.get("/api/action-matrix")
 def api_action_matrix():
-    """Return open actions grouped by client and site for dispatch planning."""
+    """Return grouped actions and paired monitoring gaps for dispatch planning."""
     clients = _action_matrix_rows()
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    monitoring_clients = _client_monitoring_gap_rows(coverage["sites"])
+    critical_action_count = sum(client["critical_action_count"] for client in clients)
+    open_action_count = sum(client["open_action_count"] for client in clients)
+    monitoring_gap_count = coverage["monitoring_gap_count"]
+    status = "red" if critical_action_count else (
+        "yellow" if open_action_count or monitoring_gap_count else "green"
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "tracked_client_count": len({site["client"] for site in coverage["sites"]}),
         "client_count": len(clients),
         "site_count": sum(client["site_count"] for client in clients),
-        "open_action_count": sum(client["open_action_count"] for client in clients),
-        "critical_action_count": sum(client["critical_action_count"] for client in clients),
+        "open_action_count": open_action_count,
+        "critical_action_count": critical_action_count,
         "warning_action_count": sum(client["warning_action_count"] for client in clients),
+        "current_evidence_count": coverage["current_evidence_count"],
+        "monitoring_gap_client_count": len(monitoring_clients),
+        "monitoring_gap_count": monitoring_gap_count,
+        "snapshot_gap_count": coverage["snapshot_gap_count"],
+        "care_check_gap_count": coverage["care_check_gap_count"],
+        "paired_coverage_percent": coverage["combined_coverage_percent"],
         "clients": clients,
+        "monitoring_clients": monitoring_clients,
     }
 
 
