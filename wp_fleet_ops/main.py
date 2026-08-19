@@ -2908,7 +2908,7 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
 
 
 def _executive_risk_rows() -> list[dict]:
-    """Return compact account-level risk rows for leadership review."""
+    """Return compact account risks backed by paired monitoring evidence."""
     action_counts: dict[str, dict[str, int]] = {}
     for action in _current_actions():
         client_name = action.get("client") or "Unassigned"
@@ -2916,6 +2916,13 @@ def _executive_risk_rows() -> list[dict]:
         severity = action.get("severity", "info")
         counts[severity] = counts.get(severity, 0) + 1
 
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    monitoring_clients = {
+        row["client"]: row for row in _client_monitoring_gap_rows(coverage["sites"])
+    }
     clients = {
         account["client"]: {
             "client": account["client"],
@@ -2924,7 +2931,6 @@ def _executive_risk_rows() -> list[dict]:
             "current_snapshot_count": account["current_snapshot_count"],
             "missing_snapshot_count": account["missing_snapshot_count"],
             "stale_snapshot_count": account["stale_snapshot_count"],
-            "monitoring_gap_count": account["missing_snapshot_count"] + account["stale_snapshot_count"],
             "average_score": account["average_score"],
             "lowest_score": None,
             "critical_site_count": 0,
@@ -2932,6 +2938,26 @@ def _executive_risk_rows() -> list[dict]:
         }
         for account in api_clients()["clients"]
     }
+    for client_name, summary in clients.items():
+        monitoring = monitoring_clients.get(client_name)
+        monitoring_gap_count = monitoring["monitoring_gap_count"] if monitoring else 0
+        summary.update(
+            {
+                "current_evidence_count": summary["site_count"] - monitoring_gap_count,
+                "monitoring_gap_count": monitoring_gap_count,
+                "snapshot_gap_count": monitoring["snapshot_gap_count"] if monitoring else 0,
+                "care_check_gap_count": monitoring["care_check_gap_count"] if monitoring else 0,
+                "paired_coverage_percent": (
+                    round(
+                        ((summary["site_count"] - monitoring_gap_count) / summary["site_count"])
+                        * 100
+                    )
+                    if summary["site_count"]
+                    else 100
+                ),
+                "top_monitoring_gap": monitoring["sites"][0] if monitoring else None,
+            }
+        )
     for row in _current_snapshot_rows(store.latest_dashboard()):
         client_name = row.get("client") or "Unassigned"
         summary = clients[client_name]
@@ -2978,7 +3004,7 @@ def _executive_risk_rows() -> list[dict]:
 
 @app.get("/api/executive-risks")
 def api_executive_risks():
-    """Return a leadership-friendly client risk summary."""
+    """Return a leadership-friendly risk summary with paired evidence gaps."""
     clients = _executive_risk_rows()
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -2986,6 +3012,12 @@ def api_executive_risks():
         "critical_client_count": sum(1 for client in clients if client["risk_level"] == "critical"),
         "elevated_client_count": sum(1 for client in clients if client["risk_level"] == "elevated"),
         "stable_client_count": sum(1 for client in clients if client["risk_level"] == "stable"),
+        "monitoring_gap_client_count": sum(
+            1 for client in clients if client["monitoring_gap_count"]
+        ),
+        "monitoring_gap_count": sum(client["monitoring_gap_count"] for client in clients),
+        "snapshot_gap_count": sum(client["snapshot_gap_count"] for client in clients),
+        "care_check_gap_count": sum(client["care_check_gap_count"] for client in clients),
         "clients": clients,
     }
 
@@ -3006,14 +3038,17 @@ def _fleet_brief_status(
 
 @app.get("/api/fleet-brief")
 def api_fleet_brief():
-    """Return an operator-ready brief with risk, action, and SLO highlights."""
+    """Return an operator-ready brief with paired evidence and risk highlights."""
     client_risks = _executive_risk_rows()
     actions = _current_actions()
     slo = api_slo()
     fleet_summary = api_summary()
     critical_clients = sum(1 for client in client_risks if client["risk_level"] == "critical")
     immediate_actions = sum(1 for action in actions if _remediation_bucket(action) == "immediate")
-    monitoring_gap_count = fleet_summary["missing_snapshot_count"] + fleet_summary["stale_snapshot_count"]
+    current_evidence_count = sum(client["current_evidence_count"] for client in client_risks)
+    monitoring_gap_count = sum(client["monitoring_gap_count"] for client in client_risks)
+    snapshot_gap_count = sum(client["snapshot_gap_count"] for client in client_risks)
+    care_check_gap_count = sum(client["care_check_gap_count"] for client in client_risks)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": _fleet_brief_status(critical_clients, immediate_actions, len(actions), monitoring_gap_count),
@@ -3024,7 +3059,15 @@ def api_fleet_brief():
         "open_action_count": len(actions),
         "missing_snapshot_count": fleet_summary["missing_snapshot_count"],
         "stale_snapshot_count": fleet_summary["stale_snapshot_count"],
+        "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": monitoring_gap_count,
+        "snapshot_gap_count": snapshot_gap_count,
+        "care_check_gap_count": care_check_gap_count,
+        "paired_coverage_percent": (
+            round((current_evidence_count / fleet_summary["sites"]) * 100)
+            if fleet_summary["sites"]
+            else 100
+        ),
         "at_risk_objective_count": slo["at_risk_count"],
         "worst_objective": slo["worst_objective"],
         "top_clients": client_risks[:5],
@@ -3058,7 +3101,7 @@ def _operator_handoff_headline(
 
 @app.get("/api/operator-handoff")
 def api_operator_handoff():
-    """Return a shift-handoff summary with top clients, actions, and next notes."""
+    """Return a shift handoff backed by current paired monitoring evidence."""
     client_risks = _executive_risk_rows()
     actions = []
     for action in _current_actions():
@@ -3068,7 +3111,10 @@ def api_operator_handoff():
     fleet_summary = api_summary()
     critical_clients = sum(1 for client in client_risks if client["risk_level"] == "critical")
     immediate_actions = sum(1 for action in actions if action["urgency"] == "immediate")
-    monitoring_gap_count = fleet_summary["missing_snapshot_count"] + fleet_summary["stale_snapshot_count"]
+    current_evidence_count = sum(client["current_evidence_count"] for client in client_risks)
+    monitoring_gap_count = sum(client["monitoring_gap_count"] for client in client_risks)
+    snapshot_gap_count = sum(client["snapshot_gap_count"] for client in client_risks)
+    care_check_gap_count = sum(client["care_check_gap_count"] for client in client_risks)
     status = _fleet_brief_status(critical_clients, immediate_actions, len(actions), monitoring_gap_count)
     top_clients = client_risks[:3]
     priority_clients = [client for client in client_risks if client["risk_level"] != "stable"]
@@ -3076,12 +3122,16 @@ def api_operator_handoff():
     if priority_clients:
         top_client = priority_clients[0]
         if top_client["monitoring_gap_count"] and not top_client["open_action_count"]:
-            missing = top_client["missing_snapshot_count"]
-            stale = top_client["stale_snapshot_count"]
+            snapshot_gaps = top_client["snapshot_gap_count"]
+            care_check_gaps = top_client["care_check_gap_count"]
+            snapshot_label = "gap" if snapshot_gaps == 1 else "gaps"
+            care_check_label = "gap" if care_check_gaps == 1 else "gaps"
+            top_gap = top_client["top_monitoring_gap"]
             handoff_notes = [
-                f"Restore monitoring coverage for {top_client['client']}: "
-                f"{missing} missing snapshot{'s' if missing != 1 else ''} and "
-                f"{stale} stale snapshot{'s' if stale != 1 else ''}."
+                f"Restore paired monitoring coverage for {top_client['client']}: "
+                f"{snapshot_gaps} snapshot {snapshot_label} and "
+                f"{care_check_gaps} care-check {care_check_label}. "
+                f"Next: {top_gap['recommended_action']}"
             ]
         else:
             handoff_notes = [
@@ -3115,7 +3165,15 @@ def api_operator_handoff():
         "open_action_count": len(actions),
         "missing_snapshot_count": fleet_summary["missing_snapshot_count"],
         "stale_snapshot_count": fleet_summary["stale_snapshot_count"],
+        "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": monitoring_gap_count,
+        "snapshot_gap_count": snapshot_gap_count,
+        "care_check_gap_count": care_check_gap_count,
+        "paired_coverage_percent": (
+            round((current_evidence_count / fleet_summary["sites"]) * 100)
+            if fleet_summary["sites"]
+            else 100
+        ),
         "at_risk_objective_count": slo["at_risk_count"],
         "worst_objective": slo["worst_objective"],
         "top_clients": top_clients,

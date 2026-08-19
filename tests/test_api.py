@@ -3461,7 +3461,61 @@ def test_executive_handoffs_surface_monitoring_gaps_without_escalating_stale_ris
     assert handoff["headline"] == "Yellow: 2 monitoring gaps require operator follow-up."
     assert handoff["top_clients"][0]["client"] == "Client Executive Gap"
     assert handoff["handoff_notes"][0] == (
-        "Restore monitoring coverage for Client Executive Gap: 1 missing snapshot and 1 stale snapshot."
+        "Restore paired monitoring coverage for Client Executive Gap: "
+        "2 snapshot gaps and 1 care-check gap. Next: Capture an initial combined "
+        "care check and fleet snapshot."
+    )
+
+
+def test_executive_handoffs_surface_stale_care_check_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Executive Care Gap Site",
+            url="https://executive-care-gap.example",
+            client="Client Executive Care Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    risks = client.get("/api/executive-risks").json()
+
+    assert risks["monitoring_gap_client_count"] == 1
+    assert risks["monitoring_gap_count"] == 1
+    risk = risks["clients"][0]
+    assert risk["client"] == "Client Executive Care Gap"
+    assert risk["risk_level"] == "elevated"
+    assert risk["current_evidence_count"] == 0
+    assert risk["monitoring_gap_count"] == 1
+    assert risk["snapshot_gap_count"] == 0
+    assert risk["care_check_gap_count"] == 1
+    assert risk["paired_coverage_percent"] == 0
+
+    fleet_brief = client.get("/api/fleet-brief").json()
+
+    assert fleet_brief["status"] == "yellow"
+    assert fleet_brief["open_action_count"] == 0
+    assert fleet_brief["current_evidence_count"] == 0
+    assert fleet_brief["monitoring_gap_count"] == 1
+    assert fleet_brief["snapshot_gap_count"] == 0
+    assert fleet_brief["care_check_gap_count"] == 1
+    assert fleet_brief["paired_coverage_percent"] == 0
+
+    handoff = client.get("/api/operator-handoff").json()
+
+    assert handoff["status"] == "yellow"
+    assert handoff["open_action_count"] == 0
+    assert handoff["monitoring_gap_count"] == 1
+    assert handoff["snapshot_gap_count"] == 0
+    assert handoff["care_check_gap_count"] == 1
+    assert handoff["headline"] == "Yellow: 1 monitoring gap requires operator follow-up."
+    assert handoff["handoff_notes"][0] == (
+        "Restore paired monitoring coverage for Client Executive Care Gap: "
+        "0 snapshot gaps and 1 care-check gap. Next: Capture a fresh care check "
+        "before relying on site health."
     )
 
 
