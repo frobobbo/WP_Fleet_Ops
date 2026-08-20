@@ -215,6 +215,19 @@ def test_store_configures_connections_for_concurrent_requests(tmp_path):
     assert foreign_keys == 1
 
 
+def test_store_health_counts_rejects_read_only_database(tmp_path, monkeypatch):
+    db_path = tmp_path / "fleetops.sqlite3"
+    store = FleetOpsStore(db_path)
+
+    def read_only_connection():
+        return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+    monkeypatch.setattr(store, "_connect", read_only_connection)
+
+    with pytest.raises(sqlite3.OperationalError, match="readonly database"):
+        store.health_counts()
+
+
 def test_store_indexes_per_site_history_queries(tmp_path):
     db_path = tmp_path / "fleetops.sqlite3"
     FleetOpsStore(db_path)

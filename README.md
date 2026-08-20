@@ -37,6 +37,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Fail-closed fleet objectives at `/api/slo`, counting only current snapshots while treating missing or stale telemetry as objective misses.
 - Fail-closed combined reports at `/report` and `/api/report`, publishing health claims only for sites with current paired care-check and fleet-snapshot evidence, listing monitoring gaps separately, and exposing the highest current risk in the structured report status.
 - Fail-closed combined dashboard at `/`, excluding stale fleet and care observations from headline health metrics while retaining clearly labeled observed values for investigation, plus Markdown reports at `/report`.
+- Readiness checks at `/ready` verify both SQLite reads and a rolled-back no-op write transaction, preventing read-only or mis-mounted data volumes from receiving traffic.
 - Container image and Helm chart for Kubernetes deployment.
 
 ## Local development

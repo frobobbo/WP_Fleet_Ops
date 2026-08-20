@@ -122,13 +122,25 @@ class FleetOpsStore:
             return [dict(r) for r in con.execute("select * from sites order by name")]
 
     def health_counts(self) -> dict[str, int]:
-        """Return minimal persistence counters for readiness checks."""
+        """Return persistence counters after proving the database is writable.
+
+        A successful read is insufficient for readiness because a read-only PVC
+        mount would accept traffic but fail every care-check and snapshot write.
+        Acquire a write transaction and execute a no-op update, then roll it back
+        so the probe validates write authority without changing application data.
+        """
         with self._connect() as con:
-            return {
+            counts = {
                 "sites": int(con.execute("select count(*) from sites").fetchone()[0]),
                 "care_checks": int(con.execute("select count(*) from care_checks").fetchone()[0]),
                 "fleet_snapshots": int(con.execute("select count(*) from snapshots").fetchone()[0]),
             }
+            con.execute("begin immediate")
+            try:
+                con.execute("update sites set name=name where 0")
+            finally:
+                con.rollback()
+            return counts
 
     def save_care_check(self, site_id: int, check: SiteCheck) -> int:
         with self._connect() as con:
