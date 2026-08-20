@@ -3161,7 +3161,51 @@ def test_api_client_digest_warns_about_account_monitoring_gaps(tmp_path):
     assert stale_site["observed_score"] < 65
     assert stale_site["observed_status"] == "red"
     assert stale_site["observed_critical_alerts"] >= 1
-    assert "1 of 2 tracked sites have snapshots" in digest["executive_summary"]
+    assert "0 of 2 tracked sites have current paired evidence" in digest["executive_summary"]
+
+
+def test_api_client_digest_fails_closed_on_stale_care_check_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Digest Care Gap",
+            url="https://digest-care-gap.example",
+            client="Client Digest Care Gap",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/client-digest").json()
+
+    assert payload["yellow_count"] == 1
+    assert payload["green_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["stale_care_check_count"] == 1
+    digest = payload["clients"][0]
+    assert digest["status"] == "yellow"
+    assert digest["current_snapshot_count"] == 1
+    assert digest["current_evidence_count"] == 0
+    assert digest["monitoring_gap_count"] == 1
+    assert digest["current_care_check_count"] == 0
+    assert digest["stale_care_check_count"] == 1
+    assert digest["combined_coverage_percent"] == 0
+    assert digest["top_site"] == "Digest Care Gap"
+    assert digest["top_message"] == "Capture a fresh care check before relying on site health."
+    assert "0 of 1 tracked site has current paired evidence" in digest["executive_summary"]
+    site = digest["sites"][0]
+    assert site["coverage_status"] == "gap"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["status"] == "unknown"
+    assert site["score"] is None
+    assert site["observed_status"] == "green"
+    assert site["observed_score"] == 100
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on site health."
+    )
 
 
 def test_api_client_escalations_groups_critical_incidents_by_client(tmp_path):

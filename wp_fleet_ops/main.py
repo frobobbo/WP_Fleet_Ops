@@ -2644,7 +2644,7 @@ def _client_digest_status(
 
 @app.get("/api/client-digest")
 def api_client_digest():
-    """Return client-level executive summaries for account check-ins."""
+    """Return client-level executive summaries backed by paired evidence."""
     now = datetime.now(timezone.utc)
     actions_by_client: dict[str, list[dict]] = {}
     for action in _current_actions():
@@ -2652,6 +2652,11 @@ def api_client_digest():
 
     account_summaries = api_clients()["clients"]
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    coverage_by_url = {site["url"]: site for site in coverage["sites"]}
     clients = {
         account["client"]: {
             "client": account["client"],
@@ -2673,6 +2678,7 @@ def api_client_digest():
         client_name = site.get("client") or "Unassigned"
         digest = clients[client_name]
         row = latest_by_url.get(site["url"])
+        coverage_site = coverage_by_url[site["url"]]
         if row is None:
             digest["sites"].append(
                 {
@@ -2688,6 +2694,11 @@ def api_client_digest():
                     "snapshot_freshness": "missing",
                     "snapshot_age_hours": None,
                     "latest_snapshot_at": None,
+                    "care_check_freshness": coverage_site["care_check_freshness"],
+                    "care_check_age_hours": coverage_site["care_check_age_hours"],
+                    "latest_care_check_at": coverage_site["latest_care_check_at"],
+                    "coverage_status": coverage_site["coverage_status"],
+                    "recommended_action": coverage_site["recommended_action"],
                 }
             )
             continue
@@ -2702,14 +2713,14 @@ def api_client_digest():
         observed_critical_alerts = sum(
             1 for alert in row["alerts"] if alert.get("severity") == "critical"
         )
-        is_current = freshness == "current"
+        has_current_paired_evidence = coverage_site["coverage_status"] == "current"
         digest["sites"].append(
             {
                 "name": row["name"],
                 "url": row["url"],
-                "score": observed_score if is_current else None,
-                "status": observed_status if is_current else "unknown",
-                "critical_alerts": observed_critical_alerts if is_current else 0,
+                "score": observed_score if has_current_paired_evidence else None,
+                "status": observed_status if has_current_paired_evidence else "unknown",
+                "critical_alerts": observed_critical_alerts if has_current_paired_evidence else 0,
                 "observed_score": observed_score,
                 "observed_status": observed_status,
                 "observed_critical_alerts": observed_critical_alerts,
@@ -2717,6 +2728,11 @@ def api_client_digest():
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": row["captured_at"],
+                "care_check_freshness": coverage_site["care_check_freshness"],
+                "care_check_age_hours": coverage_site["care_check_age_hours"],
+                "latest_care_check_at": coverage_site["latest_care_check_at"],
+                "coverage_status": coverage_site["coverage_status"],
+                "recommended_action": coverage_site["recommended_action"],
             }
         )
 
@@ -2727,8 +2743,20 @@ def api_client_digest():
         immediate_count = sum(1 for action in actions if _remediation_bucket(action) == "immediate")
         scheduled_count = sum(1 for action in actions if _remediation_bucket(action) == "scheduled")
         watch_count = sum(1 for action in actions if _remediation_bucket(action) == "watch")
-        monitoring_gap_count = digest["missing_snapshot_count"] + digest["stale_snapshot_count"]
+        gap_sites = [site for site in digest["sites"] if site["coverage_status"] == "gap"]
+        monitoring_gap_count = len(gap_sites)
+        current_evidence_count = digest["site_count"] - monitoring_gap_count
+        current_care_check_count = sum(
+            1 for site in digest["sites"] if site["care_check_freshness"] == "current"
+        )
+        missing_care_check_count = sum(
+            1 for site in digest["sites"] if site["care_check_freshness"] == "missing"
+        )
+        stale_care_check_count = (
+            digest["site_count"] - current_care_check_count - missing_care_check_count
+        )
         top_action = actions[0] if actions else None
+        top_gap = gap_sites[0] if gap_sites else None
         status = _client_digest_status(
             immediate_count,
             scheduled_count,
@@ -2740,19 +2768,35 @@ def api_client_digest():
         digest["scheduled_action_count"] = scheduled_count
         digest["watch_action_count"] = watch_count
         digest["open_action_count"] = len(actions)
-        digest["top_site"] = top_action["site"] if top_action else None
-        digest["top_message"] = top_action["message"] if top_action else "No open fleet actions."
+        digest["current_evidence_count"] = current_evidence_count
+        digest["monitoring_gap_count"] = monitoring_gap_count
+        digest["current_care_check_count"] = current_care_check_count
+        digest["missing_care_check_count"] = missing_care_check_count
+        digest["stale_care_check_count"] = stale_care_check_count
+        digest["combined_coverage_percent"] = (
+            round((current_evidence_count / digest["site_count"]) * 100)
+            if digest["site_count"]
+            else 100
+        )
+        digest["top_site"] = top_action["site"] if top_action else (
+            top_gap["name"] if top_gap else None
+        )
+        digest["top_message"] = top_action["message"] if top_action else (
+            top_gap["recommended_action"] if top_gap else "No open fleet actions."
+        )
         site_label = "site" if digest["site_count"] == 1 else "sites"
-        snapshot_verb = "has" if digest["site_count"] == 1 else "have"
+        evidence_verb = "has" if digest["site_count"] == 1 else "have"
         digest["executive_summary"] = (
             f"{client_name} has {digest['site_count']} tracked {site_label}; "
-            f"{digest['monitored_site_count']} of {digest['site_count']} tracked {site_label} {snapshot_verb} snapshots, "
-            f"with an average score of {digest['average_score']} and "
+            f"{current_evidence_count} of {digest['site_count']} tracked {site_label} "
+            f"{evidence_verb} current paired evidence, with "
             f"{len(actions)} open action{'s' if len(actions) != 1 else ''}."
         )
         digest["sites"].sort(
             key=lambda site: (
+                site["coverage_status"] == "current",
                 freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
                 site["score"] if site["score"] is not None else -1,
                 site["name"].lower(),
             )
@@ -2776,6 +2820,10 @@ def api_client_digest():
         "green_count": sum(1 for client in digest_rows if client["status"] == "green"),
         "missing_snapshot_count": sum(client["missing_snapshot_count"] for client in digest_rows),
         "stale_snapshot_count": sum(client["stale_snapshot_count"] for client in digest_rows),
+        "current_evidence_count": sum(client["current_evidence_count"] for client in digest_rows),
+        "missing_care_check_count": sum(client["missing_care_check_count"] for client in digest_rows),
+        "stale_care_check_count": sum(client["stale_care_check_count"] for client in digest_rows),
+        "monitoring_gap_count": sum(client["monitoring_gap_count"] for client in digest_rows),
         "clients": digest_rows,
     }
 
