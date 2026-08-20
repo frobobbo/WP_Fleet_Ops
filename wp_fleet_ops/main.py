@@ -1043,14 +1043,32 @@ def api_client_workload():
 
 @app.get("/api/incidents")
 def api_incidents():
-    """Return critical current incidents for alerting and escalation."""
+    """Return critical current incidents without hiding monitoring blind spots."""
     incidents = [action for action in _current_actions() if action["severity"] == "critical"]
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    monitoring_sites = [
+        site for site in coverage["sites"] if site["coverage_status"] == "gap"
+    ]
+    status = "red" if incidents else (
+        "yellow" if coverage["monitoring_gap_count"] else "green"
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "tracked_site_count": coverage["tracked_site_count"],
+        "current_evidence_count": coverage["current_evidence_count"],
         "incident_count": len(incidents),
         "affected_site_count": len({incident["site"] for incident in incidents}),
         "affected_client_count": len({incident["client"] for incident in incidents}),
+        "monitoring_gap_count": coverage["monitoring_gap_count"],
+        "snapshot_gap_count": coverage["snapshot_gap_count"],
+        "care_check_gap_count": coverage["care_check_gap_count"],
+        "paired_coverage_percent": coverage["combined_coverage_percent"],
         "incidents": incidents,
+        "monitoring_sites": monitoring_sites,
     }
 
 

@@ -1329,8 +1329,81 @@ def test_api_incidents_returns_only_critical_alerts(tmp_path):
     assert payload["affected_client_count"] == 1
     assert all(incident["severity"] == "critical" for incident in payload["incidents"])
     assert {incident["site"] for incident in payload["incidents"]} == {"Critical Client Site"}
+    assert payload["status"] == "red"
+    assert payload["monitoring_gap_count"] == 0
     assert payload["incidents"][0]["client"] == "Client Critical"
     assert payload["incidents"][0]["recommended_action"]
+
+
+def test_api_incidents_surfaces_paired_monitoring_gaps_without_escalating_stale_alerts(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Incident Site",
+            url="https://expired-incident.example",
+            client="Client Expired Incident",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Care Incident Site",
+            url="https://expired-care-incident.example",
+            client="Client Expired Care",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Incident Evidence",
+            "url": "https://missing-incident-evidence.example",
+            "client": "Client Missing Incident",
+        },
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://expired-incident.example"),
+        )
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://expired-care-incident.example"),
+        )
+
+    response = client.get("/api/incidents")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["tracked_site_count"] == 3
+    assert payload["current_evidence_count"] == 0
+    assert payload["incident_count"] == 0
+    assert payload["affected_site_count"] == 0
+    assert payload["affected_client_count"] == 0
+    assert payload["monitoring_gap_count"] == 3
+    assert payload["snapshot_gap_count"] == 2
+    assert payload["care_check_gap_count"] == 2
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["incidents"] == []
+    assert [site["name"] for site in payload["monitoring_sites"]] == [
+        "Expired Care Incident Site",
+        "Expired Incident Site",
+        "Missing Incident Evidence",
+    ]
+    sites = {site["name"]: site for site in payload["monitoring_sites"]}
+    assert sites["Expired Incident Site"]["snapshot_freshness"] == "stale"
+    assert sites["Expired Incident Site"]["care_check_freshness"] == "current"
+    assert sites["Expired Care Incident Site"]["snapshot_freshness"] == "current"
+    assert sites["Expired Care Incident Site"]["care_check_freshness"] == "stale"
+    assert sites["Missing Incident Evidence"]["snapshot_freshness"] == "missing"
+    assert sites["Missing Incident Evidence"]["care_check_freshness"] == "missing"
 
 
 def test_api_availability_fails_closed_for_missing_and_stale_evidence(tmp_path):
