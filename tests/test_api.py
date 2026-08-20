@@ -425,6 +425,59 @@ def test_api_summary_excludes_stale_care_checks_from_current_client_risk(tmp_pat
     assert summary["overall_status"] == "yellow"
 
 
+def test_api_summary_separates_stale_invalid_and_clock_skew_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    evidence = (
+        ("Current Evidence", "https://current-summary-evidence.example"),
+        ("Stale Evidence", "https://stale-summary-evidence.example"),
+        ("Invalid Evidence", "https://invalid-summary-evidence.example"),
+        ("Future Evidence", "https://future-summary-evidence.example"),
+    )
+    for name, url in evidence:
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    future_timestamp = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        for table, timestamp_column in (
+            ("snapshots", "captured_at"),
+            ("care_checks", "checked_at"),
+        ):
+            con.execute(
+                f"update {table} set {timestamp_column} = ? where site_id = "
+                "(select id from sites where url = ?)",
+                ("2000-01-01 00:00:00", evidence[1][1]),
+            )
+            con.execute(
+                f"update {table} set {timestamp_column} = ? where site_id = "
+                "(select id from sites where url = ?)",
+                ("not-a-timestamp", evidence[2][1]),
+            )
+            con.execute(
+                f"update {table} set {timestamp_column} = ? where site_id = "
+                "(select id from sites where url = ?)",
+                (future_timestamp, evidence[3][1]),
+            )
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["current_snapshot_count"] == 1
+    assert summary["stale_snapshot_count"] == 1
+    assert summary["invalid_snapshot_count"] == 1
+    assert summary["clock_skew_snapshot_count"] == 1
+    assert summary["snapshot_freshness_percent"] == 25
+    assert summary["current_care_check_count"] == 1
+    assert summary["stale_care_check_count"] == 1
+    assert summary["invalid_care_check_count"] == 1
+    assert summary["clock_skew_care_check_count"] == 1
+    assert summary["care_check_freshness_percent"] == 25
+    assert summary["overall_status"] == "yellow"
+
+
 def test_dashboard_fails_closed_on_stale_health_observations(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -157,6 +157,24 @@ def _current_snapshot_rows(rows: list[dict], now: datetime | None = None) -> lis
     ]
 
 
+def _freshness_counts(
+    rows: list[dict],
+    timestamp_field: str,
+    now: datetime,
+    threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS,
+) -> dict[str, int]:
+    """Count persisted observations by freshness and timestamp integrity."""
+    counts = {"current": 0, "stale": 0, "invalid": 0, "clock_skew": 0}
+    for row in rows:
+        freshness, _ = _snapshot_freshness(
+            row.get(timestamp_field),
+            now,
+            threshold_hours,
+        )
+        counts[freshness] += 1
+    return counts
+
+
 def _normalize_client_filter(client: str | None) -> str | None:
     """Normalize an optional account filter while preserving stored client names."""
     if client is None:
@@ -220,25 +238,31 @@ def api_summary():
     now = datetime.now(timezone.utc)
     fleet_rows = store.latest_dashboard()
     current_rows = _current_snapshot_rows(fleet_rows, now)
+    snapshot_freshness_counts = _freshness_counts(fleet_rows, "captured_at", now)
     care_checks = store.latest_care_checks()
     current_care_checks = [
         check
         for check in care_checks
         if _snapshot_is_current(check.get("checked_at"), now, SNAPSHOT_FRESHNESS_HOURS)
     ]
+    care_check_freshness_counts = _freshness_counts(care_checks, "checked_at", now)
     sites = store.list_sites()
     monitored_urls = {row["url"] for row in fleet_rows}
     monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
     missing_snapshot_count = len(sites) - monitored_site_count
     monitoring_coverage_percent = round((monitored_site_count / len(sites)) * 100) if sites else 100
-    current_snapshot_count = len(current_rows)
-    stale_snapshot_count = len(fleet_rows) - current_snapshot_count
+    current_snapshot_count = snapshot_freshness_counts["current"]
+    stale_snapshot_count = snapshot_freshness_counts["stale"]
+    invalid_snapshot_count = snapshot_freshness_counts["invalid"]
+    clock_skew_snapshot_count = snapshot_freshness_counts["clock_skew"]
     snapshot_freshness_percent = round((current_snapshot_count / len(sites)) * 100) if sites else 100
     care_check_urls = {check["url"] for check in care_checks}
     monitored_care_check_count = sum(1 for site in sites if site["url"] in care_check_urls)
     missing_care_check_count = len(sites) - monitored_care_check_count
-    current_care_check_count = len(current_care_checks)
-    stale_care_check_count = len(care_checks) - current_care_check_count
+    current_care_check_count = care_check_freshness_counts["current"]
+    stale_care_check_count = care_check_freshness_counts["stale"]
+    invalid_care_check_count = care_check_freshness_counts["invalid"]
+    clock_skew_care_check_count = care_check_freshness_counts["clock_skew"]
     care_check_freshness_percent = round((current_care_check_count / len(sites)) * 100) if sites else 100
     score_total = sum(row["score"] or 0 for row in current_rows)
     critical_alerts = sum(
@@ -254,8 +278,12 @@ def api_summary():
     elif (
         missing_snapshot_count
         or stale_snapshot_count
+        or invalid_snapshot_count
+        or clock_skew_snapshot_count
         or missing_care_check_count
         or stale_care_check_count
+        or invalid_care_check_count
+        or clock_skew_care_check_count
         or average_score < 85
     ):
         overall_status = "yellow"
@@ -272,12 +300,16 @@ def api_summary():
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "current_snapshot_count": current_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
+        "invalid_snapshot_count": invalid_snapshot_count,
+        "clock_skew_snapshot_count": clock_skew_snapshot_count,
         "snapshot_freshness_percent": snapshot_freshness_percent,
         "care_checks": len(care_checks),
         "monitored_care_check_count": monitored_care_check_count,
         "missing_care_check_count": missing_care_check_count,
         "current_care_check_count": current_care_check_count,
         "stale_care_check_count": stale_care_check_count,
+        "invalid_care_check_count": invalid_care_check_count,
+        "clock_skew_care_check_count": clock_skew_care_check_count,
         "care_check_freshness_percent": care_check_freshness_percent,
         "healthy_sites": sum(1 for row in current_rows if row["score"] >= 85),
         "needs_attention": sum(1 for row in current_rows if _dashboard_status(row["score"]) == "red"),
