@@ -33,6 +33,26 @@ def test_helm_connection_test_checks_required_app_surfaces():
     assert "/health" not in helm_test
 
 
+def test_helm_connection_test_uses_restricted_security_context():
+    helm_test = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "templates"
+        / "tests"
+        / "test-connection.yaml"
+    ).read_text()
+
+    assert "automountServiceAccountToken: false" in helm_test
+    assert "runAsNonRoot: true" in helm_test
+    assert "runAsUser: 65534" in helm_test
+    assert "runAsGroup: 65534" in helm_test
+    assert "seccompProfile:\n      type: RuntimeDefault" in helm_test
+    assert "allowPrivilegeEscalation: false" in helm_test
+    assert "readOnlyRootFilesystem: true" in helm_test
+    assert "capabilities:\n          drop: [\"ALL\"]" in helm_test
+
+
 def test_helm_workload_disables_unused_service_account_token_by_default():
     chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
     values = (chart / "values.yaml").read_text()
