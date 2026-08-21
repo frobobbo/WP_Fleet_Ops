@@ -42,6 +42,19 @@ def test_helm_workload_disables_unused_service_account_token_by_default():
     assert "automountServiceAccountToken: {{ .Values.serviceAccount.automount }}" in deployment
 
 
+def test_helm_default_latest_image_is_always_pulled():
+    """A rollout must not silently reuse a node-cached mutable latest image."""
+    values = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "values.yaml"
+    ).read_text()
+
+    assert "  repository: ghcr.io/frobobbo/wp_fleet_ops\n" in values
+    assert "  pullPolicy: Always\n  tag: \"latest\"" in values
+
+
 def test_helm_source_bundle_init_container_uses_restricted_security_context():
     deployment = (
         Path(__file__).parents[1]

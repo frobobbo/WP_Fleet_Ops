@@ -6,7 +6,9 @@ deploymentStrategy:
 
 image:
   repository: ghcr.io/frobobbo/wp_fleet_ops
-  pullPolicy: IfNotPresent
+  # The default tag is mutable. Pull on every Pod start so a rollout cannot
+  # silently reuse an older node-cached image. Immutable tags may override this.
+  pullPolicy: Always
   tag: "latest"
 
 imagePullSecrets: []
