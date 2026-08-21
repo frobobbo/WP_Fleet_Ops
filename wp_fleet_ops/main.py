@@ -551,9 +551,10 @@ def api_monitoring_coverage(client: str | None = None):
 
 @app.get("/api/clients")
 def api_clients():
-    """Return account-level health and monitoring coverage rollups."""
+    """Return account health only when paired fleet and care evidence is current."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    latest_care_by_url = {row["url"]: row for row in store.latest_care_checks()}
     client_rows: dict[str, dict] = {}
     for site in store.list_sites():
         client_name = site.get("client") or "Unassigned"
@@ -566,6 +567,11 @@ def api_clients():
                 "current_snapshot_count": 0,
                 "missing_snapshot_count": 0,
                 "stale_snapshot_count": 0,
+                "monitored_care_check_count": 0,
+                "current_care_check_count": 0,
+                "missing_care_check_count": 0,
+                "stale_care_check_count": 0,
+                "current_evidence_count": 0,
                 "score_total": 0,
                 "healthy_sites": 0,
                 "needs_attention": 0,
@@ -578,42 +584,94 @@ def api_clients():
         row = latest_by_url.get(site["url"])
         if row is None:
             summary["missing_snapshot_count"] += 1
-            continue
-
-        summary["monitored_site_count"] += 1
-        freshness, _ = _snapshot_freshness(row.get("captured_at"), now, SNAPSHOT_FRESHNESS_HOURS)
-        if freshness == "current":
-            summary["current_snapshot_count"] += 1
-            summary["score_total"] += row["score"] or 0
-            summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
-            summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
-            summary["critical_alerts"] += sum(
-                1 for alert in row["alerts"] if alert.get("severity") == "critical"
-            )
+            snapshot_is_current = False
         else:
-            summary["stale_snapshot_count"] += 1
-        captured_dt = _parse_captured_at(row.get("captured_at"))
-        if captured_dt and (summary["_latest_snapshot_dt"] is None or captured_dt > summary["_latest_snapshot_dt"]):
-            summary["_latest_snapshot_dt"] = captured_dt
-            summary["latest_snapshot_at"] = row["captured_at"]
+            summary["monitored_site_count"] += 1
+            snapshot_freshness, _ = _snapshot_freshness(
+                row.get("captured_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            snapshot_is_current = snapshot_freshness == "current"
+            if snapshot_is_current:
+                summary["current_snapshot_count"] += 1
+            else:
+                summary["stale_snapshot_count"] += 1
+            captured_dt = _parse_captured_at(row.get("captured_at"))
+            if captured_dt and (
+                summary["_latest_snapshot_dt"] is None
+                or captured_dt > summary["_latest_snapshot_dt"]
+            ):
+                summary["_latest_snapshot_dt"] = captured_dt
+                summary["latest_snapshot_at"] = row["captured_at"]
+
+        care_check = latest_care_by_url.get(site["url"])
+        if care_check is None:
+            summary["missing_care_check_count"] += 1
+            care_check_is_current = False
+        else:
+            summary["monitored_care_check_count"] += 1
+            care_check_freshness, _ = _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            care_check_is_current = care_check_freshness == "current"
+            if care_check_is_current:
+                summary["current_care_check_count"] += 1
+            else:
+                summary["stale_care_check_count"] += 1
+
+        if not snapshot_is_current or not care_check_is_current:
+            continue
+        assert row is not None
+        summary["current_evidence_count"] += 1
+        summary["score_total"] += row["score"] or 0
+        summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
+        summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
+        summary["critical_alerts"] += sum(
+            1 for alert in row["alerts"] if alert.get("severity") == "critical"
+        )
 
     clients = []
     for summary in client_rows.values():
         monitored_site_count = summary["monitored_site_count"]
         current_snapshot_count = summary["current_snapshot_count"]
-        average_score = round(summary.pop("score_total") / current_snapshot_count) if current_snapshot_count else 100
+        monitored_care_check_count = summary["monitored_care_check_count"]
+        current_care_check_count = summary["current_care_check_count"]
+        current_evidence_count = summary["current_evidence_count"]
+        average_score = (
+            round(summary.pop("score_total") / current_evidence_count)
+            if current_evidence_count
+            else 100
+        )
         summary.pop("_latest_snapshot_dt")
         summary["average_score"] = average_score
         summary["monitoring_coverage_percent"] = round(
             (monitored_site_count / summary["site_count"]) * 100
         ) if summary["site_count"] else 100
         summary["snapshot_freshness_percent"] = round(
-            (summary["current_snapshot_count"] / summary["site_count"]) * 100
+            (current_snapshot_count / summary["site_count"]) * 100
         ) if summary["site_count"] else 100
-        monitoring_gap_count = summary["missing_snapshot_count"] + summary["stale_snapshot_count"]
+        summary["care_check_coverage_percent"] = round(
+            (monitored_care_check_count / summary["site_count"]) * 100
+        ) if summary["site_count"] else 100
+        summary["care_check_freshness_percent"] = round(
+            (current_care_check_count / summary["site_count"]) * 100
+        ) if summary["site_count"] else 100
+        summary["snapshot_gap_count"] = (
+            summary["missing_snapshot_count"] + summary["stale_snapshot_count"]
+        )
+        summary["care_check_gap_count"] = (
+            summary["missing_care_check_count"] + summary["stale_care_check_count"]
+        )
+        summary["monitoring_gap_count"] = summary["site_count"] - current_evidence_count
+        summary["paired_coverage_percent"] = round(
+            (current_evidence_count / summary["site_count"]) * 100
+        ) if summary["site_count"] else 100
         if summary["critical_alerts"] or average_score < 65:
             summary["status"] = "red"
-        elif monitoring_gap_count or average_score < 85:
+        elif summary["monitoring_gap_count"] or average_score < 85:
             summary["status"] = "yellow"
         else:
             summary["status"] = "green"
@@ -621,12 +679,23 @@ def api_clients():
 
     status_rank = {"red": 0, "yellow": 1, "green": 2}
     clients.sort(key=lambda row: (status_rank[row["status"]], row["average_score"], row["client"].lower()))
+    site_count = sum(client["site_count"] for client in clients)
+    current_evidence_count = sum(client["current_evidence_count"] for client in clients)
     return {
         "generated_at": now.isoformat(),
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "client_count": len(clients),
         "missing_snapshot_count": sum(client["missing_snapshot_count"] for client in clients),
         "stale_snapshot_count": sum(client["stale_snapshot_count"] for client in clients),
+        "snapshot_gap_count": sum(client["snapshot_gap_count"] for client in clients),
+        "missing_care_check_count": sum(client["missing_care_check_count"] for client in clients),
+        "stale_care_check_count": sum(client["stale_care_check_count"] for client in clients),
+        "care_check_gap_count": sum(client["care_check_gap_count"] for client in clients),
+        "current_evidence_count": current_evidence_count,
+        "monitoring_gap_count": site_count - current_evidence_count,
+        "paired_coverage_percent": (
+            round((current_evidence_count / site_count) * 100) if site_count else 100
+        ),
         "clients": clients,
     }
 

@@ -732,6 +732,47 @@ def test_api_clients_excludes_stale_risk_from_current_account_health(tmp_path):
     assert account["status"] == "yellow"
 
 
+def test_api_clients_requires_current_paired_care_evidence_for_health_claims(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Expired Care Risk",
+            url="https://expired-care-risk.example",
+            client="Client Care Gap",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="7",
+            backup_age_hours="120",
+            response_ms="2500",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01T00:00:00+00:00",))
+
+    payload = client.get("/api/clients").json()
+
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["care_check_gap_count"] == 1
+    account = payload["clients"][0]
+    assert account["client"] == "Client Care Gap"
+    assert account["current_snapshot_count"] == 1
+    assert account["monitored_care_check_count"] == 1
+    assert account["current_care_check_count"] == 0
+    assert account["stale_care_check_count"] == 1
+    assert account["current_evidence_count"] == 0
+    assert account["monitoring_gap_count"] == 1
+    assert account["paired_coverage_percent"] == 0
+    assert account["average_score"] == 100
+    assert account["healthy_sites"] == 0
+    assert account["needs_attention"] == 0
+    assert account["critical_alerts"] == 0
+    assert account["status"] == "yellow"
+
+
 def test_api_operator_handoff_summarizes_current_shift_priorities(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
