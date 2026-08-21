@@ -1,3 +1,4 @@
+from dataclasses import replace
 from email.message import Message
 from pathlib import Path
 import sqlite3
@@ -189,6 +190,52 @@ def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     assert store.save_snapshot(site_id, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site)) > 0
     assert store.latest_care_checks()[0]["client"] == "Church Client"
     assert store.latest_dashboard()[0]["name"] == "Church"
+
+
+def test_store_rolls_back_entire_paired_observation_when_care_insert_fails(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+    fleet_site = FleetSite(
+        "Atomic Site",
+        "https://atomic.example",
+        True,
+        90,
+        0,
+        12,
+        180,
+        3,
+    )
+    check = evaluate_site(
+        "Atomic Site",
+        "https://atomic.example",
+        200,
+        180,
+        90,
+        "6.6.1",
+        0,
+        12,
+        {
+            "strict-transport-security": "max-age=31536000",
+            "x-frame-options": "SAMEORIGIN",
+        },
+    )
+    oversized_check = replace(check, latency_ms=1 << 63)
+
+    with pytest.raises(OverflowError, match="too large to convert to SQLite INTEGER"):
+        store.save_observation(
+            "Atomic Site",
+            "https://atomic.example",
+            "Atomic Client",
+            fleet_site,
+            calculate_health_score(fleet_site),
+            generate_alerts(fleet_site),
+            oversized_check,
+        )
+
+    assert store.health_counts() == {
+        "sites": 0,
+        "care_checks": 0,
+        "fleet_snapshots": 0,
+    }
 
 
 def test_store_rejects_orphan_check_and_snapshot_rows(tmp_path):

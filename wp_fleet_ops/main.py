@@ -4778,7 +4778,6 @@ def manual_care_check(
 ):
     name = normalize_site_name(name)
     url = normalize_site_url(url)
-    site_id = store.upsert_site(name, url, client)
     check = evaluate_site(
         name,
         url,
@@ -4790,18 +4789,23 @@ def manual_care_check(
         backup_age_hours,
         {},
     )
-    store.save_care_check(site_id, check)
     fleet_site = FleetSite(name, check.url, http_status < 400 and http_status >= 200, ssl_days_remaining, update_count, backup_age_hours, latency_ms, 0)
-    store.save_snapshot(site_id, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site))
+    store.save_observation(
+        name,
+        url,
+        client,
+        fleet_site,
+        calculate_health_score(fleet_site),
+        generate_alerts(fleet_site),
+        check,
+    )
     return RedirectResponse("/", status_code=303)
 
 
 @app.post("/care/fetch-check")
 def fetch_care_check(name: str = Form(...), url: str = Form(...), client: str = Form("")):
     name = normalize_site_name(name)
-    site_id = store.upsert_site(name, url, client)
     check = fetch_basic_site_check(name, url)
-    store.save_care_check(site_id, check)
     security_header_count = sum(
         1
         for header in ("strict-transport-security", "x-frame-options", "content-security-policy")
@@ -4817,7 +4821,15 @@ def fetch_care_check(name: str = Form(...), url: str = Form(...), client: str = 
         check.latency_ms,
         security_header_count,
     )
-    store.save_snapshot(site_id, fleet_site, calculate_health_score(fleet_site), generate_alerts(fleet_site))
+    store.save_observation(
+        name,
+        check.url,
+        client,
+        fleet_site,
+        calculate_health_score(fleet_site),
+        generate_alerts(fleet_site),
+        check,
+    )
     return RedirectResponse("/", status_code=303)
 
 
@@ -4847,8 +4859,6 @@ def snapshot(
     name = normalize_site_name(name)
     url = normalize_site_url(url)
     site = FleetSite(name, url, uptime_ok, ssl_days, wp_updates, backup_age_hours, response_ms, security_header_count)
-    site_id = store.upsert_site(name, url, client)
-    store.save_snapshot(site_id, site, calculate_health_score(site), generate_alerts(site))
     check = evaluate_site(
         name,
         url,
@@ -4860,7 +4870,15 @@ def snapshot(
         backup_age_hours,
         _security_headers_from_count(security_header_count),
     )
-    store.save_care_check(site_id, check)
+    store.save_observation(
+        name,
+        url,
+        client,
+        site,
+        calculate_health_score(site),
+        generate_alerts(site),
+        check,
+    )
     return RedirectResponse("/", status_code=303)
 
 

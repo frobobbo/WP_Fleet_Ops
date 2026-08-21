@@ -111,11 +111,22 @@ class FleetOpsStore:
         client = client.strip()
         url = normalize_site_url(url)
         with self._connect() as con:
-            cur = con.execute("insert or ignore into sites(name,url,client) values(?,?,?)", (name, url, client))
-            if cur.lastrowid:
-                return int(cur.lastrowid)
-            con.execute("update sites set name=?, client=coalesce(nullif(?, ''), client) where url=?", (name, client, url))
-            return int(con.execute("select id from sites where url=?", (url,)).fetchone()["id"])
+            return self._upsert_site(con, name, url, client)
+
+    @staticmethod
+    def _upsert_site(con: sqlite3.Connection, name: str, url: str, client: str) -> int:
+        """Upsert a normalized site using the caller's active transaction."""
+        cur = con.execute(
+            "insert or ignore into sites(name,url,client) values(?,?,?)",
+            (name, url, client),
+        )
+        if cur.lastrowid:
+            return int(cur.lastrowid)
+        con.execute(
+            "update sites set name=?, client=coalesce(nullif(?, ''), client) where url=?",
+            (name, client, url),
+        )
+        return int(con.execute("select id from sites where url=?", (url,)).fetchone()["id"])
 
     def list_sites(self) -> list[dict]:
         with self._connect() as con:
@@ -144,29 +155,40 @@ class FleetOpsStore:
 
     def save_care_check(self, site_id: int, check: SiteCheck) -> int:
         with self._connect() as con:
-            cur = con.execute(
-                """
-                insert into care_checks(site_id,checked_at,status,score,http_status,latency_ms,ssl_days_remaining,
-                wordpress_version,update_count,backup_age_hours,summary,actions_json,raw_json)
-                values(?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    site_id,
-                    check.checked_at,
-                    check.status,
-                    check.score,
-                    check.http_status,
-                    check.latency_ms,
-                    check.ssl_days_remaining,
-                    check.wordpress_version,
-                    check.update_count,
-                    check.backup_age_hours,
-                    check.summary,
-                    json.dumps(check.actions),
-                    json.dumps(check.to_dict()),
-                ),
-            )
-            return int(cur.lastrowid)
+            return self._insert_care_check(con, site_id, check)
+
+    @staticmethod
+    def _insert_care_check(
+        con: sqlite3.Connection,
+        site_id: int,
+        check: SiteCheck,
+    ) -> int:
+        """Insert one care check using the caller's active transaction."""
+        cur = con.execute(
+            """
+            insert into care_checks(site_id,checked_at,status,score,http_status,latency_ms,ssl_days_remaining,
+            wordpress_version,update_count,backup_age_hours,summary,actions_json,raw_json)
+            values(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                site_id,
+                check.checked_at,
+                check.status,
+                check.score,
+                check.http_status,
+                check.latency_ms,
+                check.ssl_days_remaining,
+                check.wordpress_version,
+                check.update_count,
+                check.backup_age_hours,
+                check.summary,
+                json.dumps(check.actions),
+                json.dumps(check.to_dict()),
+            ),
+        )
+        if cur.lastrowid is None:
+            raise RuntimeError("Care check insert did not return a row ID.")
+        return int(cur.lastrowid)
 
     def latest_care_checks(self) -> list[dict]:
         sql = """
@@ -239,25 +261,74 @@ class FleetOpsStore:
 
     def save_snapshot(self, site_id: int, site: FleetSite, score: int, alerts: list[Alert]) -> int:
         with self._connect() as con:
-            cur = con.execute(
-                """
-                insert into snapshots(site_id,score,uptime_ok,ssl_days,wp_updates,backup_age_hours,response_ms,
-                security_header_count,alerts_json,raw_json) values(?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    site_id,
-                    score,
-                    int(site.uptime_ok),
-                    site.ssl_days,
-                    site.wp_updates,
-                    site.backup_age_hours,
-                    site.response_ms,
-                    site.security_header_count,
-                    json.dumps([a.__dict__ for a in alerts]),
-                    json.dumps(site.to_dict()),
-                ),
-            )
-            return int(cur.lastrowid)
+            return self._insert_snapshot(con, site_id, site, score, alerts)
+
+    @staticmethod
+    def _insert_snapshot(
+        con: sqlite3.Connection,
+        site_id: int,
+        site: FleetSite,
+        score: int,
+        alerts: list[Alert],
+    ) -> int:
+        """Insert one fleet snapshot using the caller's active transaction."""
+        cur = con.execute(
+            """
+            insert into snapshots(site_id,score,uptime_ok,ssl_days,wp_updates,backup_age_hours,response_ms,
+            security_header_count,alerts_json,raw_json) values(?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                site_id,
+                score,
+                int(site.uptime_ok),
+                site.ssl_days,
+                site.wp_updates,
+                site.backup_age_hours,
+                site.response_ms,
+                site.security_header_count,
+                json.dumps([a.__dict__ for a in alerts]),
+                json.dumps(site.to_dict()),
+            ),
+        )
+        if cur.lastrowid is None:
+            raise RuntimeError("Fleet snapshot insert did not return a row ID.")
+        return int(cur.lastrowid)
+
+    def save_observation(
+        self,
+        name: str,
+        url: str,
+        client: str,
+        site: FleetSite,
+        score: int,
+        alerts: list[Alert],
+        check: SiteCheck,
+    ) -> dict[str, int]:
+        """Atomically persist a site and its paired fleet and care evidence.
+
+        Combined capture endpoints derive both records from one observation. If
+        either insert fails, retaining only its partner creates an artificial
+        monitoring gap and can mislead operational reports. Keep the site upsert
+        and both inserts in one SQLite transaction so they commit or roll back as
+        a unit.
+        """
+        name = normalize_site_name(name)
+        url = normalize_site_url(url)
+        client = client.strip()
+        if normalize_site_name(site.name) != name or normalize_site_name(check.name) != name:
+            raise ValueError("Paired observation names must match the tracked site.")
+        if normalize_site_url(site.url) != url or normalize_site_url(check.url) != url:
+            raise ValueError("Paired observation URLs must match the tracked site.")
+
+        with self._connect() as con:
+            site_id = self._upsert_site(con, name, url, client)
+            snapshot_id = self._insert_snapshot(con, site_id, site, score, alerts)
+            care_check_id = self._insert_care_check(con, site_id, check)
+            return {
+                "site_id": site_id,
+                "snapshot_id": snapshot_id,
+                "care_check_id": care_check_id,
+            }
 
     def latest_dashboard(self) -> list[dict]:
         sql = """
