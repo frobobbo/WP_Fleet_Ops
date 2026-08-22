@@ -69,6 +69,9 @@ docker build -t wp-fleet-ops:local .
 docker run --rm -p 8000:8000 -v wp-fleet-ops-data:/data wp-fleet-ops:local
 ```
 
+The image health check uses `/ready`, so container runtimes mark the service
+unhealthy when its SQLite data volume cannot be read and written.
+
 ## Helm
 
 ```bash

@@ -11,6 +11,16 @@ from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alert
 from wp_fleet_ops.storage import FleetOpsStore
 
 
+def test_container_healthcheck_requires_database_readiness():
+    dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
+    healthcheck = next(
+        line for line in dockerfile.splitlines() if line.startswith("HEALTHCHECK ")
+    )
+
+    assert "/ready" in healthcheck
+    assert "/health" not in healthcheck
+
+
 def test_helm_connection_test_checks_required_app_surfaces():
     helm_test = (
         Path(__file__).parents[1]
