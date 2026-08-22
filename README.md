@@ -108,4 +108,6 @@ helm upgrade --install wp-fleet-ops ./charts/wp-fleet-ops \
 The builder includes only `pyproject.toml`, `uv.lock`, `wp_fleet_ops/`, and
 `templates/`; rejects symlinks; omits caches; and writes the archive atomically
 with mode `0600`. It fails before deployment if the compressed archive exceeds
-the conservative ConfigMap size limit.
+the conservative ConfigMap size limit. If the ConfigMap uses a different archive
+key, set `sourceBundle.fileName` to that key; the chart projects it to the stable
+`/bundle/app.tar.gz` runtime path expected by the init container.

@@ -103,6 +103,19 @@ def test_helm_source_bundle_init_container_uses_restricted_security_context():
     ) in deployment
 
 
+def test_helm_source_bundle_projects_configured_archive_key():
+    deployment = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "templates"
+        / "deployment.yaml"
+    ).read_text()
+
+    assert "key: {{ .Values.sourceBundle.fileName | quote }}" in deployment
+    assert "path: app.tar.gz" in deployment
+
+
 def test_helm_workload_uses_read_only_root_with_bounded_runtime_tmp():
     chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
     values = (chart / "values.yaml").read_text()

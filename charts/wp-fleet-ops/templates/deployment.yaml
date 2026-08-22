@@ -102,6 +102,9 @@ spec:
         - name: source-bundle
           configMap:
             name: {{ required "sourceBundle.configMapName is required when sourceBundle.enabled=true" .Values.sourceBundle.configMapName | quote }}
+            items:
+              - key: {{ .Values.sourceBundle.fileName | quote }}
+                path: app.tar.gz
         - name: source-work
           emptyDir: {}
         {{- end }}
