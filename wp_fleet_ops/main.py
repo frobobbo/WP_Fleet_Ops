@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -40,6 +41,10 @@ def template_dir() -> Path:
 
 
 app = FastAPI(title="WP FleetOps", version="0.1.0")
+# Fleet inventories and reports grow with every managed site. Compress larger
+# responses for clients that support gzip while leaving small health probes
+# untouched so Kubernetes checks stay cheap and easy to inspect.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 templates = Jinja2Templates(directory=str(template_dir()))
 store = FleetOpsStore(DB_PATH)
 

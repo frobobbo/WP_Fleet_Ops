@@ -96,6 +96,33 @@ def test_responses_include_browser_security_headers(tmp_path):
         assert "form-action 'self'" in response.headers["content-security-policy"]
 
 
+def test_large_api_responses_support_gzip_without_compressing_health_probes(tmp_path):
+    client = make_test_client(tmp_path)
+    for index in range(20):
+        response = client.post(
+            "/sites",
+            data={
+                "name": f"Compression Site {index}",
+                "url": f"https://compression-{index}.example",
+                "client": "Compression Client",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    compressed = client.get(
+        "/api/site-directory",
+        headers={"Accept-Encoding": "gzip"},
+    )
+    health = client.get("/health", headers={"Accept-Encoding": "gzip"})
+
+    assert compressed.status_code == 200
+    assert compressed.headers["content-encoding"] == "gzip"
+    assert "Accept-Encoding" in compressed.headers["vary"]
+    assert compressed.json()["site_count"] == 20
+    assert "content-encoding" not in health.headers
+
+
 def test_dashboard_has_no_third_party_asset_dependencies(tmp_path):
     client = make_test_client(tmp_path)
 
