@@ -48,10 +48,10 @@ CONTENT_SECURITY_POLICY = (
     "base-uri 'self'; "
     "form-action 'self'; "
     "frame-ancestors 'none'; "
-    "img-src 'self' data: https://fastapi.tiangolo.com; "
-    "font-src 'self' https://fonts.gstatic.com; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
-    "script-src 'self' https://cdn.jsdelivr.net; "
+    "img-src 'self' data:; "
+    "font-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'none'; "
     "connect-src 'self'"
 )
 SNAPSHOT_FRESHNESS_HOURS = 168

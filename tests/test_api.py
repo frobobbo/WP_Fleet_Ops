@@ -96,6 +96,23 @@ def test_responses_include_browser_security_headers(tmp_path):
         assert "form-action 'self'" in response.headers["content-security-policy"]
 
 
+def test_dashboard_has_no_third_party_asset_dependencies(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/")
+    policy = response.headers["content-security-policy"]
+
+    assert response.status_code == 200
+    assert "fonts.googleapis.com" not in response.text
+    assert "fonts.gstatic.com" not in response.text
+    assert "cdn.jsdelivr.net" not in response.text
+    assert "font-src 'self'" in policy
+    assert "style-src 'self' 'unsafe-inline'" in policy
+    assert "script-src 'none'" in policy
+    assert "connect-src 'self'" in policy
+    assert "https://" not in policy
+
+
 def test_api_report_returns_structured_report_export(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
