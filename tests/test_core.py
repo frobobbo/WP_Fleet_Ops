@@ -72,6 +72,18 @@ def test_helm_workload_disables_unused_service_account_token_by_default():
     assert "automountServiceAccountToken: {{ .Values.serviceAccount.automount }}" in deployment
 
 
+def test_helm_persistent_data_is_retained_by_default():
+    """Removing a Helm release must not silently delete FleetOps history."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    pvc = (chart / "templates" / "pvc.yaml").read_text()
+
+    assert "persistence:\n  enabled: true" in values
+    assert "\n  keep: true" in values
+    assert "{{- if .Values.persistence.keep }}" in pvc
+    assert '"helm.sh/resource-policy": keep' in pvc
+
+
 def test_helm_default_latest_image_is_always_pulled():
     """A rollout must not silently reuse a node-cached mutable latest image."""
     values = (

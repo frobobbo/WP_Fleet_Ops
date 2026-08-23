@@ -91,6 +91,11 @@ immutable digest or `sha-*` tags, operators may override the policy to
 
 Then open http://127.0.0.1:8080/health or http://127.0.0.1:8080/.
 
+The chart retains its SQLite PVC on `helm uninstall` by default, preventing
+release removal from silently deleting FleetOps history. To opt into destructive
+PVC cleanup for an intentionally disposable installation, set
+`persistence.keep=false` before uninstalling the release.
+
 ### Source-bundle fallback
 
 When the application image is unavailable, build the fallback archive with the

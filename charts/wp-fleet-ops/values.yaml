@@ -64,6 +64,9 @@ resources:
 
 persistence:
   enabled: true
+  # Preserve the SQLite PVC when the Helm release is removed. Set false only
+  # when release deletion is intentionally allowed to delete FleetOps history.
+  keep: true
   accessMode: ReadWriteOnce
   size: 1Gi
   storageClass: ""
