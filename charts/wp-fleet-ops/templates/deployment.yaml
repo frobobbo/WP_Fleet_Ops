@@ -6,6 +6,7 @@ metadata:
     {{- include "wp-fleet-ops.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   strategy:
     type: {{ .Values.deploymentStrategy.type | default "RollingUpdate" | quote }}
   selector:

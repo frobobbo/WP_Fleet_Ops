@@ -89,7 +89,10 @@ kubectl -n wp-fleet-ops port-forward svc/wp-fleet-ops 8080:80
 The chart defaults to `imagePullPolicy: Always` because `latest` is mutable;
 this prevents a rollout from silently reusing an older node-cached image. For
 immutable digest or `sha-*` tags, operators may override the policy to
-`IfNotPresent`.
+`IfNotPresent`. The Deployment retains three ReplicaSet revisions by default,
+providing short rollback history without accumulating the Kubernetes default
+of ten revisions during frequent maintenance rollouts. Set
+`revisionHistoryLimit` to tune that retention.
 
 Then open http://127.0.0.1:8080/health or http://127.0.0.1:8080/.
 

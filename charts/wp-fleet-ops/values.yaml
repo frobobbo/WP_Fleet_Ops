@@ -1,5 +1,9 @@
 replicaCount: 1
 
+# Keep enough ReplicaSets for short rollback history without accumulating the
+# Kubernetes default of ten revisions across frequent maintenance deployments.
+revisionHistoryLimit: 3
+
 deploymentStrategy:
   # Recreate avoids RWO PVC multi-attach stalls during single-replica upgrades.
   type: Recreate

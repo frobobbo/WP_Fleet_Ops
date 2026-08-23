@@ -110,6 +110,16 @@ def test_helm_default_latest_image_is_always_pulled():
     assert "  pullPolicy: Always\n  tag: \"latest\"" in values
 
 
+def test_helm_deployment_bounds_retained_revisions():
+    """Frequent maintenance rollouts should retain bounded rollback history."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "revisionHistoryLimit: 3" in values
+    assert "revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}" in deployment
+
+
 def test_helm_source_bundle_init_container_uses_restricted_security_context():
     deployment = (
         Path(__file__).parents[1]
