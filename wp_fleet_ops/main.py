@@ -237,21 +237,21 @@ def _recommended_action(alert: dict) -> str:
     return "Review the site dashboard and resolve the reported condition."
 
 
-@app.get("/api/summary")
-def api_summary():
-    """Return compact dashboard rollups for automation and lightweight checks."""
-    now = datetime.now(timezone.utc)
-    fleet_rows = store.latest_dashboard()
+def _summary_payload(
+    fleet_rows: list[dict],
+    care_checks: list[dict],
+    sites: list[dict],
+    now: datetime,
+) -> dict:
+    """Build compact rollups from one coherent set of inventory reads."""
     current_rows = _current_snapshot_rows(fleet_rows, now)
     snapshot_freshness_counts = _freshness_counts(fleet_rows, "captured_at", now)
-    care_checks = store.latest_care_checks()
     current_care_checks = [
         check
         for check in care_checks
         if _snapshot_is_current(check.get("checked_at"), now, SNAPSHOT_FRESHNESS_HOURS)
     ]
     care_check_freshness_counts = _freshness_counts(care_checks, "checked_at", now)
-    sites = store.list_sites()
     monitored_urls = {row["url"] for row in fleet_rows}
     monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
     missing_snapshot_count = len(sites) - monitored_site_count
@@ -323,6 +323,17 @@ def api_summary():
         "average_score": average_score,
         "last_snapshot_at": last_snapshot_at,
     }
+
+
+@app.get("/api/summary")
+def api_summary():
+    """Return compact dashboard rollups for automation and lightweight checks."""
+    return _summary_payload(
+        store.latest_dashboard(),
+        store.latest_care_checks(),
+        store.list_sites(),
+        datetime.now(timezone.utc),
+    )
 
 
 @app.get("/api/sites")
@@ -4802,14 +4813,15 @@ def index(request: Request):
         )
         check["check_freshness"] = freshness
         check["check_age_hours"] = age_hours
+    sites = store.list_sites()
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             "fleet_rows": fleet_rows,
             "care_checks": care_checks,
-            "sites": store.list_sites(),
-            "fleet_summary": api_summary(),
+            "sites": sites,
+            "fleet_summary": _summary_payload(fleet_rows, care_checks, sites, now),
         },
     )
 

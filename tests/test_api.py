@@ -140,6 +140,31 @@ def test_dashboard_has_no_third_party_asset_dependencies(tmp_path):
     assert "https://" not in policy
 
 
+def test_dashboard_reuses_one_consistent_inventory_snapshot(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    calls = {}
+    for method_name in ("latest_dashboard", "latest_care_checks", "list_sites"):
+        original = getattr(main.store, method_name)
+        calls[method_name] = 0
+
+        def counted(*args, _method_name=method_name, _original=original, **kwargs):
+            calls[_method_name] += 1
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(main.store, method_name, counted)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert calls == {
+        "latest_dashboard": 1,
+        "latest_care_checks": 1,
+        "list_sites": 1,
+    }
+
+
 def test_api_report_returns_structured_report_export(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
