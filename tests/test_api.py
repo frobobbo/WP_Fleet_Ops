@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 
-def make_test_client(tmp_path):
+def make_test_client(tmp_path, revision="test-revision"):
     os.environ["WP_FLEET_OPS_DB"] = str(tmp_path / "test.sqlite3")
+    os.environ["WP_FLEET_OPS_REVISION"] = revision
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Using `httpx` with `starlette.testclient` is deprecated.*")
         from fastapi.testclient import TestClient
@@ -35,7 +36,11 @@ def valid_snapshot_payload(**overrides):
 
 def test_health_and_report_endpoints(tmp_path):
     client = make_test_client(tmp_path)
-    assert client.get("/health").json() == {"status": "ok", "app": "wp-fleet-ops"}
+    assert client.get("/health").json() == {
+        "status": "ok",
+        "app": "wp-fleet-ops",
+        "revision": "test-revision",
+    }
     response = client.post("/care/manual-check", data={"name": "A", "url": "https://a.example", "client": "Client A"}, follow_redirects=False)
     assert response.status_code == 303
     report = client.get("/report").text
@@ -73,6 +78,7 @@ def test_write_forms_reject_telemetry_too_large_for_sqlite_without_partial_state
     assert client.get("/ready").json() == {
         "status": "ready",
         "app": "wp-fleet-ops",
+        "revision": "test-revision",
         "database": "ok",
         "sites": 0,
         "care_checks": 0,
@@ -306,6 +312,7 @@ def test_ready_reports_database_access_and_current_counts(tmp_path):
     assert payload == {
         "status": "ready",
         "app": "wp-fleet-ops",
+        "revision": "test-revision",
         "database": "ok",
         "sites": 1,
         "care_checks": 1,
@@ -328,6 +335,7 @@ def test_ready_returns_service_unavailable_when_database_probe_fails(tmp_path, m
     assert response.json() == {
         "status": "not_ready",
         "app": "wp-fleet-ops",
+        "revision": "test-revision",
         "database": "unavailable",
     }
     assert "sensitive database path" not in response.text

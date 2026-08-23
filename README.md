@@ -55,6 +55,7 @@ Environment variables:
 
 - `WP_FLEET_OPS_DATA_DIR`: directory for SQLite data, defaults to `./data` locally and `/data` in the container.
 - `WP_FLEET_OPS_DB`: explicit SQLite database path.
+- `WP_FLEET_OPS_REVISION`: deployed Git revision reported by `/health` and `/ready`; defaults to `unknown`.
 - `PORT`: used by the console script runner.
 
 ### History API pagination
@@ -80,7 +81,8 @@ unhealthy when its SQLite data volume cannot be read and written.
 helm upgrade --install wp-fleet-ops ./charts/wp-fleet-ops \
   --namespace wp-fleet-ops --create-namespace \
   --set image.repository=ghcr.io/frobobbo/wp_fleet_ops \
-  --set image.tag=latest
+  --set image.tag=latest \
+  --set-string config.revision="$(git rev-parse HEAD)"
 kubectl -n wp-fleet-ops port-forward svc/wp-fleet-ops 8080:80
 ```
 

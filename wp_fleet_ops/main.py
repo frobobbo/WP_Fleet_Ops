@@ -24,6 +24,7 @@ from .storage import FleetOpsStore
 BASE = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("WP_FLEET_OPS_DATA_DIR", BASE / "data"))
 DB_PATH = Path(os.getenv("WP_FLEET_OPS_DB", DATA_DIR / "fleetops.sqlite3"))
+APP_REVISION = os.getenv("WP_FLEET_OPS_REVISION", "unknown").strip() or "unknown"
 
 
 def template_dir() -> Path:
@@ -87,7 +88,7 @@ async def invalid_input_error(_request: Request, exc: ValueError):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "app": "wp-fleet-ops"}
+    return {"status": "ok", "app": "wp-fleet-ops", "revision": APP_REVISION}
 
 
 @app.get("/ready")
@@ -101,10 +102,17 @@ def ready():
             content={
                 "status": "not_ready",
                 "app": "wp-fleet-ops",
+                "revision": APP_REVISION,
                 "database": "unavailable",
             },
         )
-    return {"status": "ready", "app": "wp-fleet-ops", "database": "ok", **counts}
+    return {
+        "status": "ready",
+        "app": "wp-fleet-ops",
+        "revision": APP_REVISION,
+        "database": "ok",
+        **counts,
+    }
 
 
 def _dashboard_status(score: int) -> str:

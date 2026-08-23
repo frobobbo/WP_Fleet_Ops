@@ -31,6 +31,9 @@ spec:
       args:
         - |
           base_url="http://{{ include "wp-fleet-ops.fullname" . }}:{{ .Values.service.port }}"
-          wget -qO- "${base_url}/ready" | grep -q '"status":"ready"'
+          expected_revision={{ .Values.config.revision | default "unknown" | quote }}
+          ready_response="$(wget -qO- "${base_url}/ready")"
+          printf '%s' "${ready_response}" | grep -q '"status":"ready"'
+          printf '%s' "${ready_response}" | grep -Fq '"revision":"${expected_revision}"'
           wget -qO- "${base_url}/" | grep -q 'WP FleetOps'
           wget -qO- "${base_url}/report" | grep -q 'WP FleetOps Maintenance Report'

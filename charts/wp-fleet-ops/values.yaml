@@ -73,6 +73,9 @@ persistence:
 
 config:
   dataDir: /data
+  # Set to the deployed Git SHA so health/readiness responses identify the
+  # exact source revision even when using a mutable image tag or source bundle.
+  revision: unknown
 
 # Development/bootstrapping mode for clusters where the final app image has
 # not been pushed yet. Create a ConfigMap containing app.tar.gz and set this to

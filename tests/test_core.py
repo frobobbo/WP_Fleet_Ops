@@ -33,6 +33,7 @@ def test_helm_connection_test_checks_required_app_surfaces():
 
     assert "command: ['/bin/sh', '-ec']" in helm_test
     assert '"status":"ready"' in helm_test
+    assert '"revision":"${expected_revision}"' in helm_test
     assert '"${base_url}/ready"' in helm_test
     assert '"${base_url}/"' in helm_test
     assert '"${base_url}/report"' in helm_test
@@ -70,6 +71,17 @@ def test_helm_workload_disables_unused_service_account_token_by_default():
 
     assert "serviceAccount:\n  create: true\n  automount: false" in values
     assert "automountServiceAccountToken: {{ .Values.serviceAccount.automount }}" in deployment
+
+
+def test_helm_workload_exposes_configured_git_revision():
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "config:\n  dataDir: /data" in values
+    assert "  revision: unknown" in values
+    assert "- name: WP_FLEET_OPS_REVISION" in deployment
+    assert 'value: {{ .Values.config.revision | default "unknown" | quote }}' in deployment
 
 
 def test_helm_persistent_data_is_retained_by_default():
