@@ -33,7 +33,8 @@ def test_helm_connection_test_checks_required_app_surfaces():
 
     assert "command: ['/bin/sh', '-ec']" in helm_test
     assert '"status":"ready"' in helm_test
-    assert '"revision":"${expected_revision}"' in helm_test
+    assert 'grep -Fq "\\\"revision\\\":\\\"${expected_revision}\\\""' in helm_test
+    assert "grep -Fq '\"revision\":\"${expected_revision}\"'" not in helm_test
     assert '"${base_url}/ready"' in helm_test
     assert '"${base_url}/"' in helm_test
     assert '"${base_url}/report"' in helm_test
