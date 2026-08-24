@@ -95,6 +95,9 @@ of ten revisions during frequent maintenance rollouts. Set
 `revisionHistoryLimit` to tune that retention. A bounded startup probe allows
 up to three minutes for image initialization or source-bundle dependency
 installation and requires SQLite readiness before liveness checks begin.
+The default Pod security context uses `fsGroupChangePolicy: OnRootMismatch`, so
+the retained SQLite volume is recursively relabeled only when its root ownership
+does not match the configured group instead of on every maintenance rollout.
 
 Then open http://127.0.0.1:8080/health or http://127.0.0.1:8080/.
 

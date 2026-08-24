@@ -74,6 +74,19 @@ def test_helm_workload_disables_unused_service_account_token_by_default():
     assert "automountServiceAccountToken: {{ .Values.serviceAccount.automount }}" in deployment
 
 
+def test_helm_workload_avoids_recursive_pvc_ownership_changes_on_every_start():
+    """Retained SQLite data should not be recursively relabeled every rollout."""
+    values = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "values.yaml"
+    ).read_text()
+
+    assert "podSecurityContext:\n  fsGroup: 1000" in values
+    assert "  fsGroupChangePolicy: OnRootMismatch\n" in values
+
+
 def test_helm_workload_exposes_configured_git_revision():
     chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
     values = (chart / "values.yaml").read_text()

@@ -32,6 +32,9 @@ podLabels: {}
 
 podSecurityContext:
   fsGroup: 1000
+  # Retained SQLite history can grow over time. Only relabel the volume when its
+  # root ownership is wrong instead of recursively walking it on every rollout.
+  fsGroupChangePolicy: OnRootMismatch
   seccompProfile:
     type: RuntimeDefault
 
