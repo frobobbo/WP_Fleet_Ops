@@ -120,6 +120,24 @@ def test_helm_deployment_bounds_retained_revisions():
     assert "revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}" in deployment
 
 
+def test_helm_workload_has_bounded_database_ready_startup_probe():
+    """Slow source-bundle setup must not be killed by liveness checks."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert (
+        "startupProbe:\n"
+        "  httpGet:\n"
+        "    path: /ready\n"
+        "    port: http\n"
+        "  periodSeconds: 5\n"
+        "  timeoutSeconds: 2\n"
+        "  failureThreshold: 36"
+    ) in values
+    assert "startupProbe:\n            {{- toYaml .Values.startupProbe | nindent 12 }}" in deployment
+
+
 def test_helm_source_bundle_init_container_uses_restricted_security_context():
     deployment = (
         Path(__file__).parents[1]

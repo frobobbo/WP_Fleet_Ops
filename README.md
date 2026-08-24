@@ -92,7 +92,9 @@ immutable digest or `sha-*` tags, operators may override the policy to
 `IfNotPresent`. The Deployment retains three ReplicaSet revisions by default,
 providing short rollback history without accumulating the Kubernetes default
 of ten revisions during frequent maintenance rollouts. Set
-`revisionHistoryLimit` to tune that retention.
+`revisionHistoryLimit` to tune that retention. A bounded startup probe allows
+up to three minutes for image initialization or source-bundle dependency
+installation and requires SQLite readiness before liveness checks begin.
 
 Then open http://127.0.0.1:8080/health or http://127.0.0.1:8080/.
 

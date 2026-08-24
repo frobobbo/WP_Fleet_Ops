@@ -93,6 +93,17 @@ sourceBundle:
   prepareCommand: "mkdir -p /work/app /work/site && tar -xzf /bundle/app.tar.gz -C /work/app && chmod -R a+rX /work/app && python -m pip install --no-cache-dir --target /work/site /work/app && chmod -R a+rX /work/site"
   runCommand: "PYTHONPATH=/work/site:/work/app python -m uvicorn wp_fleet_ops.main:app --host 0.0.0.0 --port 8000"
 
+# Give image startup and source-bundle dependency installation up to three
+# minutes before liveness checks may restart the container. Readiness proves
+# that the SQLite data volume is readable and writable before startup succeeds.
+startupProbe:
+  httpGet:
+    path: /ready
+    port: http
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 36
+
 livenessProbe:
   httpGet:
     path: /health
