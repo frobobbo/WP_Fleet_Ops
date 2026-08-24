@@ -466,7 +466,8 @@ def test_api_summary_warns_when_healthy_snapshot_is_stale(tmp_path):
 
     summary = client.get("/api/summary").json()
 
-    assert summary["average_score"] == 100
+    assert summary["average_score"] is None
+    assert summary["observed_average_score"] == 100
     assert summary["missing_snapshot_count"] == 0
     assert summary["stale_snapshot_count"] == 1
     assert summary["current_snapshot_count"] == 0
@@ -1276,7 +1277,8 @@ def test_stale_critical_snapshot_does_not_pollute_current_priority_views(tmp_pat
     assert summary["critical_alerts"] == 0
     assert summary["needs_attention"] == 0
     assert summary["healthy_sites"] == 0
-    assert summary["average_score"] == 100
+    assert summary["average_score"] is None
+    assert summary["observed_average_score"] < 65
     assert watchlist["status"] == "yellow"
     assert watchlist["tracked_site_count"] == 1
     assert watchlist["current_snapshot_count"] == 0

@@ -298,6 +298,7 @@ def _summary_payload(
     clock_skew_care_check_count = care_check_freshness_counts["clock_skew"]
     care_check_freshness_percent = round((current_care_check_count / len(sites)) * 100) if sites else 100
     score_total = sum(row["score"] or 0 for row in current_rows)
+    observed_score_total = sum(row["score"] or 0 for row in fleet_rows)
     critical_alerts = sum(
         1
         for row in current_rows
@@ -305,8 +306,11 @@ def _summary_payload(
         if alert.get("severity") == "critical"
     )
     last_snapshot_at = _latest_trusted_timestamp(fleet_rows, "captured_at", now)
-    average_score = round(score_total / len(current_rows)) if current_rows else 100
-    if critical_alerts or average_score < 65:
+    average_score = round(score_total / len(current_rows)) if current_rows else None
+    observed_average_score = (
+        round(observed_score_total / len(fleet_rows)) if fleet_rows else None
+    )
+    if critical_alerts or (average_score is not None and average_score < 65):
         overall_status = "red"
     elif (
         missing_snapshot_count
@@ -317,7 +321,7 @@ def _summary_payload(
         or stale_care_check_count
         or invalid_care_check_count
         or clock_skew_care_check_count
-        or average_score < 85
+        or (average_score is not None and average_score < 85)
     ):
         overall_status = "yellow"
     else:
@@ -349,6 +353,7 @@ def _summary_payload(
         "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,
+        "observed_average_score": observed_average_score,
         "last_snapshot_at": last_snapshot_at,
     }
 
