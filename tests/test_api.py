@@ -555,6 +555,48 @@ def test_api_summary_separates_stale_invalid_and_clock_skew_evidence(tmp_path):
     assert summary["overall_status"] == "yellow"
 
 
+def test_api_summary_last_snapshot_ignores_invalid_and_future_timestamps(tmp_path):
+    client = make_test_client(tmp_path)
+    observations = (
+        ("Trusted Latest", "https://trusted-latest.example"),
+        ("Invalid Latest", "https://invalid-latest.example"),
+        ("Future Latest", "https://future-latest.example"),
+    )
+    for name, url in observations:
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    trusted_timestamp = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    future_timestamp = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            (trusted_timestamp, observations[0][1]),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("not-a-timestamp", observations[1][1]),
+        )
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            (future_timestamp, observations[2][1]),
+        )
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["current_snapshot_count"] == 1
+    assert summary["invalid_snapshot_count"] == 1
+    assert summary["clock_skew_snapshot_count"] == 1
+    assert summary["last_snapshot_at"] == trusted_timestamp
+
+
 def test_dashboard_fails_closed_on_stale_health_observations(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

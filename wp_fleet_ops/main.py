@@ -188,6 +188,26 @@ def _freshness_counts(
     return counts
 
 
+def _latest_trusted_timestamp(
+    rows: list[dict],
+    timestamp_field: str,
+    now: datetime,
+) -> str | None:
+    """Return the newest parseable, non-future observation timestamp."""
+    latest: tuple[datetime, str] | None = None
+    for row in rows:
+        value = row.get(timestamp_field)
+        if not isinstance(value, str):
+            continue
+        parsed = _parse_captured_at(value)
+        if parsed is None or parsed > now:
+            continue
+        candidate = (parsed, value)
+        if latest is None or candidate[0] > latest[0]:
+            latest = candidate
+    return latest[1] if latest else None
+
+
 def _normalize_client_filter(client: str | None) -> str | None:
     """Normalize an optional account filter while preserving stored client names."""
     if client is None:
@@ -284,7 +304,7 @@ def _summary_payload(
         for alert in row["alerts"]
         if alert.get("severity") == "critical"
     )
-    last_snapshot_at = max((row["captured_at"] for row in fleet_rows if row.get("captured_at")), default=None)
+    last_snapshot_at = _latest_trusted_timestamp(fleet_rows, "captured_at", now)
     average_score = round(score_total / len(current_rows)) if current_rows else 100
     if critical_alerts or average_score < 65:
         overall_status = "red"
