@@ -141,6 +141,11 @@ class FleetOpsStore:
         so the probe validates write authority without changing application data.
         """
         with self._connect() as con:
+            # Ordinary writes may wait up to 30 seconds for brief contention, but
+            # Kubernetes gives /ready two seconds. Bound this connection's wait so
+            # the endpoint can return 503 instead of leaving a timed-out probe's
+            # worker thread blocked long after kubelet has abandoned the request.
+            con.execute("pragma busy_timeout = 1000")
             counts = {
                 "sites": int(con.execute("select count(*) from sites").fetchone()[0]),
                 "care_checks": int(con.execute("select count(*) from care_checks").fetchone()[0]),

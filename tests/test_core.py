@@ -407,6 +407,19 @@ def test_store_health_counts_rejects_read_only_database(tmp_path, monkeypatch):
         store.health_counts()
 
 
+def test_store_health_counts_bounds_database_lock_wait(tmp_path, monkeypatch):
+    """Readiness must fail before Kubernetes times out its two-second probe."""
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+    connection = store._connect()
+    assert connection.execute("pragma busy_timeout").fetchone()[0] == 30_000
+    monkeypatch.setattr(store, "_connect", lambda: connection)
+
+    store.health_counts()
+
+    assert connection.execute("pragma busy_timeout").fetchone()[0] == 1_000
+    connection.close()
+
+
 def test_store_indexes_per_site_history_queries(tmp_path):
     db_path = tmp_path / "fleetops.sqlite3"
     FleetOpsStore(db_path)
