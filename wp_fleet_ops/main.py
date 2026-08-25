@@ -272,12 +272,23 @@ def _summary_payload(
     now: datetime,
 ) -> dict:
     """Build compact rollups from one coherent set of inventory reads."""
-    current_rows = _current_snapshot_rows(fleet_rows, now)
+    current_snapshot_rows = _current_snapshot_rows(fleet_rows, now)
     snapshot_freshness_counts = _freshness_counts(fleet_rows, "captured_at", now)
     current_care_checks = [
         check
         for check in care_checks
         if _snapshot_is_current(check.get("checked_at"), now, SNAPSHOT_FRESHNESS_HOURS)
+    ]
+    current_evidence_urls = (
+        {row["url"] for row in current_snapshot_rows}
+        & {check["url"] for check in current_care_checks}
+    )
+    # Health claims need both sides of the combined observation. Keep the
+    # independent freshness counters below for diagnosis, but do not let one
+    # fresh half make a site look currently healthy or risky by itself.
+    current_rows = [row for row in current_snapshot_rows if row["url"] in current_evidence_urls]
+    current_care_checks = [
+        check for check in current_care_checks if check["url"] in current_evidence_urls
     ]
     care_check_freshness_counts = _freshness_counts(care_checks, "checked_at", now)
     monitored_urls = {row["url"] for row in fleet_rows}
@@ -297,6 +308,13 @@ def _summary_payload(
     invalid_care_check_count = care_check_freshness_counts["invalid"]
     clock_skew_care_check_count = care_check_freshness_counts["clock_skew"]
     care_check_freshness_percent = round((current_care_check_count / len(sites)) * 100) if sites else 100
+    current_evidence_count = sum(
+        1 for site in sites if site["url"] in current_evidence_urls
+    )
+    monitoring_gap_count = len(sites) - current_evidence_count
+    paired_coverage_percent = (
+        round((current_evidence_count / len(sites)) * 100) if sites else 100
+    )
     score_total = sum(row["score"] or 0 for row in current_rows)
     observed_score_total = sum(row["score"] or 0 for row in fleet_rows)
     critical_alerts = sum(
@@ -348,6 +366,9 @@ def _summary_payload(
         "invalid_care_check_count": invalid_care_check_count,
         "clock_skew_care_check_count": clock_skew_care_check_count,
         "care_check_freshness_percent": care_check_freshness_percent,
+        "current_evidence_count": current_evidence_count,
+        "monitoring_gap_count": monitoring_gap_count,
+        "paired_coverage_percent": paired_coverage_percent,
         "healthy_sites": sum(1 for row in current_rows if row["score"] >= 85),
         "needs_attention": sum(1 for row in current_rows if _dashboard_status(row["score"]) == "red"),
         "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),

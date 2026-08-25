@@ -463,6 +463,7 @@ def test_api_summary_warns_when_healthy_snapshot_is_stale(tmp_path):
     )
     with sqlite3.connect(tmp_path / "test.sqlite3") as con:
         con.execute("update snapshots set captured_at = ?", ("2000-01-01 00:00:00",))
+        con.execute("update care_checks set status = ?", ("red",))
 
     summary = client.get("/api/summary").json()
 
@@ -472,6 +473,10 @@ def test_api_summary_warns_when_healthy_snapshot_is_stale(tmp_path):
     assert summary["stale_snapshot_count"] == 1
     assert summary["current_snapshot_count"] == 0
     assert summary["snapshot_freshness_percent"] == 0
+    assert summary["current_evidence_count"] == 0
+    assert summary["monitoring_gap_count"] == 1
+    assert summary["paired_coverage_percent"] == 0
+    assert summary["client_risks"] == 0
     assert summary["overall_status"] == "yellow"
 
 
@@ -499,6 +504,14 @@ def test_api_summary_excludes_stale_care_checks_from_current_client_risk(tmp_pat
     assert summary["stale_care_check_count"] == 1
     assert summary["missing_care_check_count"] == 0
     assert summary["care_check_freshness_percent"] == 0
+    assert summary["current_evidence_count"] == 0
+    assert summary["monitoring_gap_count"] == 1
+    assert summary["paired_coverage_percent"] == 0
+    assert summary["average_score"] is None
+    assert summary["observed_average_score"] == 100
+    assert summary["healthy_sites"] == 0
+    assert summary["needs_attention"] == 0
+    assert summary["critical_alerts"] == 0
     assert summary["client_risks"] == 0
     assert summary["overall_status"] == "yellow"
 
