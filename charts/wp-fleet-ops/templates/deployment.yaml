@@ -27,6 +27,7 @@ spec:
     spec:
       serviceAccountName: {{ include "wp-fleet-ops.serviceAccountName" . }}
       automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
+      enableServiceLinks: {{ .Values.enableServiceLinks }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

@@ -74,6 +74,16 @@ def test_helm_workload_disables_unused_service_account_token_by_default():
     assert "automountServiceAccountToken: {{ .Values.serviceAccount.automount }}" in deployment
 
 
+def test_helm_workload_disables_unused_service_link_environment_variables():
+    """The app uses DNS and must not inherit ambient Service metadata."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "enableServiceLinks: false" in values
+    assert "enableServiceLinks: {{ .Values.enableServiceLinks }}" in deployment
+
+
 def test_helm_workload_avoids_recursive_pvc_ownership_changes_on_every_start():
     """Retained SQLite data should not be recursively relabeled every rollout."""
     values = (

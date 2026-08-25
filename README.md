@@ -102,6 +102,8 @@ window.
 The default Pod security context uses `fsGroupChangePolicy: OnRootMismatch`, so
 the retained SQLite volume is recursively relabeled only when its root ownership
 does not match the configured group instead of on every maintenance rollout.
+Service-link environment injection is disabled by default because FleetOps uses
+DNS-based Service discovery and does not need ambient cluster Service metadata.
 
 Then open http://127.0.0.1:8080/health or http://127.0.0.1:8080/.
 

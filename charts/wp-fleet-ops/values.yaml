@@ -31,6 +31,10 @@ serviceAccount:
   annotations: {}
   name: ""
 
+# The app discovers its own Service through DNS and does not consume the
+# automatically injected *_SERVICE_HOST/PORT environment variables.
+enableServiceLinks: false
+
 podAnnotations: {}
 podLabels: {}
 
