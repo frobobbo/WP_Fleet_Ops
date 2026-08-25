@@ -95,6 +95,10 @@ of ten revisions during frequent maintenance rollouts. Set
 `revisionHistoryLimit` to tune that retention. A bounded startup probe allows
 up to three minutes for image initialization or source-bundle dependency
 installation and requires SQLite readiness before liveness checks begin.
+The Deployment also requires five seconds of sustained readiness before a new
+Pod is counted as available, so a single transient probe cannot prematurely
+complete a Helm rollout. Set `minReadySeconds` to tune that stabilization
+window.
 The default Pod security context uses `fsGroupChangePolicy: OnRootMismatch`, so
 the retained SQLite volume is recursively relabeled only when its root ownership
 does not match the configured group instead of on every maintenance rollout.

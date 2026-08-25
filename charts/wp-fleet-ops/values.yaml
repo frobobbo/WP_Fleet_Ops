@@ -4,6 +4,10 @@ replicaCount: 1
 # Kubernetes default of ten revisions across frequent maintenance deployments.
 revisionHistoryLimit: 3
 
+# Require sustained readiness before a new Pod is counted as available. This
+# prevents a single transient readiness success from completing the rollout.
+minReadySeconds: 5
+
 deploymentStrategy:
   # Recreate avoids RWO PVC multi-attach stalls during single-replica upgrades.
   type: Recreate

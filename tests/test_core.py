@@ -151,6 +151,16 @@ def test_helm_workload_has_bounded_database_ready_startup_probe():
     assert "startupProbe:\n            {{- toYaml .Values.startupProbe | nindent 12 }}" in deployment
 
 
+def test_helm_rollout_requires_sustained_readiness_before_availability():
+    """A single successful probe must not prematurely complete the rollout."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "minReadySeconds: 5" in values
+    assert "minReadySeconds: {{ .Values.minReadySeconds }}" in deployment
+
+
 def test_helm_source_bundle_init_container_uses_restricted_security_context():
     deployment = (
         Path(__file__).parents[1]
