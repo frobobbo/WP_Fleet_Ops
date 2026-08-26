@@ -51,6 +51,9 @@ securityContext:
   readOnlyRootFilesystem: true
   runAsNonRoot: true
   runAsUser: 100
+  # Pin the primary group for both the application image and the stock Python
+  # source-bundle fallback; otherwise the fallback inherits image-default GID 0.
+  runAsGroup: 1000
   capabilities:
     drop: ["ALL"]
 

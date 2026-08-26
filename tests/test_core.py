@@ -206,6 +206,20 @@ def test_helm_source_bundle_init_container_uses_restricted_security_context():
     ) in deployment
 
 
+def test_helm_workload_pins_nonroot_primary_group():
+    """Stock fallback images must not inherit GID 0 from their image default."""
+    values = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "values.yaml"
+    ).read_text()
+
+    security_context = values.split("\nsecurityContext:\n", 1)[1].split("\nservice:\n", 1)[0]
+    assert "  runAsUser: 100\n" in security_context
+    assert "  runAsGroup: 1000\n" in security_context
+
+
 def test_helm_source_bundle_projects_configured_archive_key():
     deployment = (
         Path(__file__).parents[1]
