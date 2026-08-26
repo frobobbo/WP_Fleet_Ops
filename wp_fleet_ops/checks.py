@@ -14,6 +14,7 @@ from urllib.parse import urlparse, urlunparse
 MAX_SITE_NAME_LENGTH = 200
 MAX_SITE_URL_LENGTH = 2048
 MAX_CLIENT_NAME_LENGTH = 200
+MAX_WORDPRESS_VERSION_LENGTH = 100
 
 
 def normalize_site_name(name: str) -> str:
@@ -128,6 +129,10 @@ def evaluate_site(
     security_headers: dict[str, str] | None = None,
 ) -> SiteCheck:
     name = normalize_site_name(name)
+    if len(wordpress_version) > MAX_WORDPRESS_VERSION_LENGTH:
+        raise ValueError(
+            f"WordPress version must be {MAX_WORDPRESS_VERSION_LENGTH} characters or fewer."
+        )
     headers = {k.lower(): v for k, v in (security_headers or {}).items()}
     score = 100
     actions: list[str] = []

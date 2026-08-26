@@ -14,6 +14,7 @@ from .checks import (
     MAX_CLIENT_NAME_LENGTH,
     MAX_SITE_NAME_LENGTH,
     MAX_SITE_URL_LENGTH,
+    MAX_WORDPRESS_VERSION_LENGTH,
     SiteCheck,
     evaluate_site,
     fetch_basic_site_check,
@@ -4919,7 +4920,7 @@ def manual_care_check(
     http_status: int = Form(200, ge=100, le=599),
     latency_ms: int = Form(250, ge=0, le=SQLITE_INTEGER_MAX),
     ssl_days_remaining: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
-    wordpress_version: str = Form("unknown"),
+    wordpress_version: str = Form("unknown", max_length=MAX_WORDPRESS_VERSION_LENGTH),
     update_count: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),
     backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),
 ):

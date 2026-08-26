@@ -256,6 +256,30 @@ def test_care_score_and_report_are_client_friendly():
     assert "Needs attention" in report
 
 
+def test_care_evaluation_rejects_oversized_wordpress_versions():
+    with pytest.raises(
+        ValueError,
+        match="WordPress version must be 100 characters or fewer",
+    ):
+        evaluate_site(
+            "Bounded Version",
+            "https://bounded-version.example",
+            200,
+            250,
+            60,
+            "v" * 101,
+            0,
+            24,
+            {},
+        )
+
+
+def test_dashboard_bounds_manual_wordpress_version_input():
+    dashboard = (Path(__file__).parents[1] / "templates" / "index.html").read_text()
+
+    assert 'name="wordpress_version" maxlength="100"' in dashboard
+
+
 def test_fleet_alerts_and_report_group_operational_risk():
     site = FleetSite("Client", "https://client.example", False, 5, 6, 100, 2600, 0)
 

@@ -136,6 +136,31 @@ def test_write_forms_reject_oversized_identifiers_without_partial_state(tmp_path
     }
 
 
+def test_manual_check_rejects_oversized_wordpress_version_without_partial_state(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/care/manual-check",
+        data={
+            "name": "Bounded Version",
+            "url": "https://bounded-version.example",
+            "wordpress_version": "v" * 101,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert client.get("/ready").json() == {
+        "status": "ready",
+        "app": "wp-fleet-ops",
+        "revision": "test-revision",
+        "database": "ok",
+        "sites": 0,
+        "care_checks": 0,
+        "fleet_snapshots": 0,
+    }
+
+
 def test_responses_include_browser_security_headers(tmp_path):
     client = make_test_client(tmp_path)
 
