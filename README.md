@@ -95,6 +95,8 @@ of ten revisions during frequent maintenance rollouts. Set
 `revisionHistoryLimit` to tune that retention. A bounded startup probe allows
 up to three minutes for image initialization or source-bundle dependency
 installation and requires SQLite readiness before liveness checks begin.
+The normal readiness probe allows two seconds for FleetOps' one-second bounded
+SQLite lock wait to return a controlled response during brief contention.
 The Deployment also requires five seconds of sustained readiness before a new
 Pod is counted as available, so a single transient probe cannot prematurely
 complete a Helm rollout. Set `minReadySeconds` to tune that stabilization

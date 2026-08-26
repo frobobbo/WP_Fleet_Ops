@@ -161,6 +161,23 @@ def test_helm_workload_has_bounded_database_ready_startup_probe():
     assert "startupProbe:\n            {{- toYaml .Values.startupProbe | nindent 12 }}" in deployment
 
 
+def test_helm_readiness_probe_outlives_bounded_database_lock_wait():
+    """The probe must let /ready return its bounded SQLite contention result."""
+    values = (
+        Path(__file__).parents[1]
+        / "charts"
+        / "wp-fleet-ops"
+        / "values.yaml"
+    ).read_text()
+
+    readiness_values = values.split("\nreadinessProbe:\n", 1)[1].split(
+        "\nnodeSelector:", 1
+    )[0]
+
+    assert "    path: /ready" in readiness_values
+    assert "  timeoutSeconds: 2" in readiness_values
+
+
 def test_helm_rollout_requires_sustained_readiness_before_availability():
     """A single successful probe must not prematurely complete the rollout."""
     chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"

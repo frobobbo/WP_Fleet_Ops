@@ -128,6 +128,9 @@ readinessProbe:
     port: http
   initialDelaySeconds: 5
   periodSeconds: 10
+  # FleetOps bounds SQLite lock waits at one second. Allow enough time for the
+  # endpoint to return its explicit 503 instead of timing out at the kubelet.
+  timeoutSeconds: 2
 
 nodeSelector: {}
 tolerations: []
