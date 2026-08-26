@@ -4,7 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from .checks import SiteCheck, normalize_site_name, normalize_site_url
+from .checks import SiteCheck, normalize_client_name, normalize_site_name, normalize_site_url
 from .fleet import Alert, FleetSite
 
 
@@ -108,7 +108,7 @@ class FleetOpsStore:
 
     def upsert_site(self, name: str, url: str, client: str = "") -> int:
         name = normalize_site_name(name)
-        client = client.strip()
+        client = normalize_client_name(client)
         url = normalize_site_url(url)
         with self._connect() as con:
             return self._upsert_site(con, name, url, client)
@@ -319,7 +319,7 @@ class FleetOpsStore:
         """
         name = normalize_site_name(name)
         url = normalize_site_url(url)
-        client = client.strip()
+        client = normalize_client_name(client)
         if normalize_site_name(site.name) != name or normalize_site_name(check.name) != name:
             raise ValueError("Paired observation names must match the tracked site.")
         if normalize_site_url(site.url) != url or normalize_site_url(check.url) != url:

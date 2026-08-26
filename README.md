@@ -5,6 +5,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 ## Features
 
 - Site/client registry with SQLite persistence; sites can be removed with a `DELETE /sites?url=<url>` call that cascades to all care checks and fleet snapshots.
+- Bounded site identifiers (200-character site/client labels and 2,048-character URLs) reject accidental oversized submissions before they can inflate persistent dashboard and report data.
 - Client care health checks for HTTP status, latency, SSL days remaining, WordPress updates, backup age, and security headers.
 - Fleet operations snapshots for uptime, SSL, pending updates, backup freshness, response time, security headers, and alerts.
 - Atomic combined evidence capture: manual, fetched, and snapshot submissions commit the site, fleet snapshot, and paired care check together, preventing partial observations when persistence fails.

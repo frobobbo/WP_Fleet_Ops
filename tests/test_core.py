@@ -573,6 +573,28 @@ def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("name", "url", "client", "message"),
+    [
+        ("n" * 201, "https://bounded.example", "Client", "Site name must be 200 characters or fewer"),
+        (
+            "Bounded Site",
+            "https://bounded.example/" + "p" * 2048,
+            "Client",
+            "Site URL must be 2048 characters or fewer",
+        ),
+        ("Bounded Site", "https://bounded.example", "c" * 201, "Client name must be 200 characters or fewer"),
+    ],
+)
+def test_store_rejects_oversized_site_identifiers(tmp_path, name, url, client, message):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    with pytest.raises(ValueError, match=message):
+        store.upsert_site(name, url, client)
+
+    assert store.list_sites() == []
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "file:///etc/passwd",

@@ -11,6 +11,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 
 from .checks import (
+    MAX_CLIENT_NAME_LENGTH,
+    MAX_SITE_NAME_LENGTH,
+    MAX_SITE_URL_LENGTH,
     SiteCheck,
     evaluate_site,
     fetch_basic_site_check,
@@ -4881,7 +4884,11 @@ def index(request: Request):
 
 
 @app.post("/sites")
-def add_site(name: str = Form(...), url: str = Form(...), client: str = Form("")):
+def add_site(
+    name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
+    url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
+    client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
+):
     store.upsert_site(name, url, client)
     return RedirectResponse("/", status_code=303)
 
@@ -4906,9 +4913,9 @@ def delete_site(url: str):
 
 @app.post("/care/manual-check")
 def manual_care_check(
-    name: str = Form(..., min_length=1),
-    url: str = Form(..., min_length=1),
-    client: str = Form(""),
+    name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
+    url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
+    client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
     http_status: int = Form(200, ge=100, le=599),
     latency_ms: int = Form(250, ge=0, le=SQLITE_INTEGER_MAX),
     ssl_days_remaining: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
@@ -4943,7 +4950,11 @@ def manual_care_check(
 
 
 @app.post("/care/fetch-check")
-def fetch_care_check(name: str = Form(...), url: str = Form(...), client: str = Form("")):
+def fetch_care_check(
+    name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
+    url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
+    client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
+):
     name = normalize_site_name(name)
     check = fetch_basic_site_check(name, url)
     security_header_count = sum(
@@ -4986,9 +4997,9 @@ def _security_headers_from_count(security_header_count: int) -> dict[str, str]:
 
 @app.post("/snapshot")
 def snapshot(
-    name: str = Form(..., min_length=1),
-    url: str = Form(..., min_length=1),
-    client: str = Form(""),
+    name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
+    url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
+    client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
     uptime_ok: bool = Form(True),
     ssl_days: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
     wp_updates: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),

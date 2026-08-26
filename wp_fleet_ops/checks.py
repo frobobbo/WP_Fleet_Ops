@@ -11,17 +11,34 @@ import urllib.request
 from urllib.parse import urlparse, urlunparse
 
 
+MAX_SITE_NAME_LENGTH = 200
+MAX_SITE_URL_LENGTH = 2048
+MAX_CLIENT_NAME_LENGTH = 200
+
+
 def normalize_site_name(name: str) -> str:
     """Return a canonical non-empty site label for persisted operational data."""
     normalized = name.strip()
     if not normalized:
         raise ValueError("Site name must not be blank.")
+    if len(normalized) > MAX_SITE_NAME_LENGTH:
+        raise ValueError(f"Site name must be {MAX_SITE_NAME_LENGTH} characters or fewer.")
+    return normalized
+
+
+def normalize_client_name(client: str) -> str:
+    """Return a bounded client label while preserving an empty assignment."""
+    normalized = client.strip()
+    if len(normalized) > MAX_CLIENT_NAME_LENGTH:
+        raise ValueError(f"Client name must be {MAX_CLIENT_NAME_LENGTH} characters or fewer.")
     return normalized
 
 
 def normalize_site_url(url: str) -> str:
     candidate = url.strip()
     error = "Site URL must be a valid HTTP or HTTPS URL."
+    if len(candidate) > MAX_SITE_URL_LENGTH:
+        raise ValueError(f"Site URL must be {MAX_SITE_URL_LENGTH} characters or fewer.")
     if not candidate or any(char.isspace() for char in candidate):
         raise ValueError(error)
     if "://" not in candidate:
