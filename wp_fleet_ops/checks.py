@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from ipaddress import AddressValueError, IPv6Address
 import re
 import socket
 import ssl
@@ -68,7 +69,14 @@ def normalize_site_url(url: str) -> str:
     # A terminal dot marks an absolute DNS name but resolves to the same host.
     # Canonicalize it so FQDN and ordinary spellings do not create two sites.
     hostname = parsed.hostname.lower()
-    if ":" not in hostname:
+    if ":" in hostname:
+        try:
+            # IPv6 has many equivalent textual spellings. Persist the RFC 5952-
+            # style compressed form so one endpoint cannot become several sites.
+            hostname = IPv6Address(hostname).compressed
+        except AddressValueError as exc:
+            raise ValueError(error) from exc
+    else:
         try:
             # Network clients use the ASCII-compatible form of international
             # domains. Persist it too so Unicode and punycode inputs dedupe.
