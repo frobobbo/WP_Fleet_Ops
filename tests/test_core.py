@@ -643,6 +643,8 @@ def test_store_rejects_oversized_site_identifiers(tmp_path, name, url, client, m
         "https://",
         "https://admin@example.com",
         "https://admin:secret@example.com",
+        r"https://example.com\misleading.example/status",
+        r"https://example.com/status\archive",
         "https://example.com/path with space",
         "https://example.com/search?q=hello world",
     ],

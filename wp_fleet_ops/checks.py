@@ -41,7 +41,10 @@ def normalize_site_url(url: str) -> str:
     error = "Site URL must be a valid HTTP or HTTPS URL."
     if len(candidate) > MAX_SITE_URL_LENGTH:
         raise ValueError(f"Site URL must be {MAX_SITE_URL_LENGTH} characters or fewer.")
-    if not candidate or any(char.isspace() for char in candidate):
+    # WHATWG-style HTTP clients may treat a raw backslash as a slash while
+    # urllib.parse preserves it inside the authority or path. Reject that
+    # ambiguous spelling instead of persisting or probing a misleading target.
+    if not candidate or "\\" in candidate or any(char.isspace() for char in candidate):
         raise ValueError(error)
     if "://" not in candidate:
         explicit_scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate)
