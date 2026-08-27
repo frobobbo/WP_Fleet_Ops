@@ -137,9 +137,9 @@
         <div class="card-head"><div><h3>Care check</h3><p>Capture client-report numbers manually or run a live HTTP, TLS, and security-header check.</p></div><span class="tag">CarePulse</span></div>
         <form method="post" action="/care/manual-check">
           <div class="form-grid">
-            <div class="field"><label>Site name</label><input name="name" placeholder="Strategy Plus" required></div>
-            <div class="field"><label>URL</label><input name="url" placeholder="https://example.com" required></div>
-            <div class="field"><label>Client</label><input name="client" placeholder="Client or brand"></div>
+            <div class="field"><label>Site name</label><input name="name" maxlength="200" placeholder="Strategy Plus" required></div>
+            <div class="field"><label>URL</label><input name="url" maxlength="2048" placeholder="https://example.com" required></div>
+            <div class="field"><label>Client</label><input name="client" maxlength="200" placeholder="Client or brand"></div>
             <div class="field"><label>HTTP status</label><input name="http_status" type="number" value="200"></div>
             <div class="field"><label>Latency ms</label><input name="latency_ms" type="number" value="250"></div>
             <div class="field"><label>SSL days</label><input name="ssl_days_remaining" type="number" value="60"></div>
@@ -158,9 +158,9 @@
         <div class="card-head"><div><h3>Fleet snapshot</h3><p>Log the operational posture of a site and generate alerts automatically.</p></div><span class="tag">FleetOps</span></div>
         <form method="post" action="/snapshot">
           <div class="form-grid">
-            <div class="field"><label>Site</label><input name="name" placeholder="Site" required></div>
-            <div class="field"><label>URL</label><input name="url" type="url" placeholder="https://example.com" pattern="https?://.*" required></div>
-            <div class="field"><label>Client</label><input name="client" placeholder="Client"></div>
+            <div class="field"><label>Site</label><input name="name" maxlength="200" placeholder="Site" required></div>
+            <div class="field"><label>URL</label><input name="url" maxlength="2048" type="url" placeholder="https://example.com" pattern="https?://.*" required></div>
+            <div class="field"><label>Client</label><input name="client" maxlength="200" placeholder="Client"></div>
             <label class="check-field"><input name="uptime_ok" type="checkbox" checked value="true"> Site is up</label>
             <div class="field"><label>SSL days</label><input name="ssl_days" type="number" min="0" value="60"></div>
             <div class="field"><label>WP updates</label><input name="wp_updates" type="number" min="0" value="0"></div>

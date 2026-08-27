@@ -274,9 +274,12 @@ def test_care_evaluation_rejects_oversized_wordpress_versions():
         )
 
 
-def test_dashboard_bounds_manual_wordpress_version_input():
+def test_dashboard_bounds_persisted_text_inputs():
     dashboard = (Path(__file__).parents[1] / "templates" / "index.html").read_text()
 
+    assert dashboard.count('name="name" maxlength="200"') == 2
+    assert dashboard.count('name="url" maxlength="2048"') == 2
+    assert dashboard.count('name="client" maxlength="200"') == 2
     assert 'name="wordpress_version" maxlength="100"' in dashboard
 
 
