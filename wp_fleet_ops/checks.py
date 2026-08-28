@@ -44,7 +44,13 @@ def normalize_site_url(url: str) -> str:
     # WHATWG-style HTTP clients may treat a raw backslash as a slash while
     # urllib.parse preserves it inside the authority or path. Reject that
     # ambiguous spelling instead of persisting or probing a misleading target.
-    if not candidate or "\\" in candidate or any(char.isspace() for char in candidate):
+    # Also reject C0/DEL control bytes: urlparse preserves several of them, but
+    # downstream HTTP clients cannot safely or consistently request such URLs.
+    if (
+        not candidate
+        or "\\" in candidate
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in candidate)
+    ):
         raise ValueError(error)
     if "://" not in candidate:
         explicit_scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate)

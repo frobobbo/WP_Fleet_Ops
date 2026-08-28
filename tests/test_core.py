@@ -689,6 +689,8 @@ def test_normalize_site_url_rejects_canonical_url_over_length_limit():
         r"https://example.com/status\archive",
         "https://example.com/path with space",
         "https://example.com/search?q=hello world",
+        "https://example.com/status\x00hidden",
+        "https://example.com/status\x7fhidden",
     ],
 )
 def test_normalize_site_url_rejects_unsafe_or_hostless_urls(url):
