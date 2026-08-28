@@ -669,6 +669,14 @@ def test_store_rejects_oversized_site_identifiers(tmp_path, name, url, client, m
     assert store.list_sites() == []
 
 
+def test_normalize_site_url_rejects_canonical_url_over_length_limit():
+    bare_url = "example.com/" + "p" * (2048 - len("example.com/"))
+    assert len(bare_url) == 2048
+
+    with pytest.raises(ValueError, match="Site URL must be 2048 characters or fewer"):
+        normalize_site_url(bare_url)
+
+
 @pytest.mark.parametrize(
     "url",
     [

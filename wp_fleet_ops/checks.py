@@ -118,7 +118,13 @@ def normalize_site_url(url: str) -> str:
     # A root path is implicit even when a query string is present. Both URL
     # spellings produce the same HTTP request target, so persist one form.
     path = "" if parsed.path == "/" else parsed.path
-    return urlunparse((scheme, netloc, path, "", parsed.query, ""))
+    normalized = urlunparse((scheme, netloc, path, "", parsed.query, ""))
+    # A bare host gains an implicit ``https://`` prefix, and IDNA conversion may
+    # expand Unicode labels. Bound the canonical value that will actually be
+    # persisted, not only the shorter operator-supplied spelling.
+    if len(normalized) > MAX_SITE_URL_LENGTH:
+        raise ValueError(f"Site URL must be {MAX_SITE_URL_LENGTH} characters or fewer.")
+    return normalized
 
 
 @dataclass(frozen=True)
