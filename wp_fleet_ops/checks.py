@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from ipaddress import AddressValueError, IPv6Address
+from ipaddress import AddressValueError, IPv4Address, IPv6Address
 import re
 import socket
 import ssl
@@ -71,7 +71,9 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     # A terminal dot marks an absolute DNS name but resolves to the same host.
     # Canonicalize it so FQDN and ordinary spellings do not create two sites.
-    hostname = parsed.hostname.lower()
+    hostname = parsed.hostname.lower().removesuffix(".")
+    if not hostname:
+        raise ValueError(error)
     if ":" in hostname:
         try:
             # IPv6 has many equivalent textual spellings. Persist the RFC 5952-
@@ -86,9 +88,17 @@ def normalize_site_url(url: str) -> str:
             hostname = hostname.encode("idna").decode("ascii")
         except UnicodeError as exc:
             raise ValueError(error) from exc
-    hostname = hostname.removesuffix(".")
-    if not hostname:
-        raise ValueError(error)
+        try:
+            hostname = IPv4Address(hostname).compressed
+        except AddressValueError:
+            # POSIX resolvers may interpret shortened, integer, octal, and hex
+            # host spellings as IPv4 addresses (for example 127.1 resolves to
+            # 127.0.0.1). Reject those ambiguous legacy forms rather than
+            # persisting a hostname that points somewhere different than it
+            # appears to. Ordinary DNS names remain accepted.
+            numeric_component = r"(?:0x[0-9a-f]+|[0-9]+)"
+            if re.fullmatch(rf"{numeric_component}(?:\.{numeric_component}){{0,3}}", hostname):
+                raise ValueError(error)
     netloc = f"[{hostname}]" if ":" in hostname else hostname
     default_port = 443 if scheme == "https" else 80
     if parsed_port is not None and parsed_port != default_port:

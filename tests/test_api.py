@@ -6021,7 +6021,14 @@ def test_snapshot_rejects_security_header_counts_above_monitored_set(tmp_path):
     assert client.get("/api/site-directory").json()["site_count"] == 0
 
 
-@pytest.mark.parametrize("url", ["file:///etc/passwd", "https://admin:secret@example.com"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/passwd",
+        "https://admin:secret@example.com",
+        "http://2130706433",
+    ],
+)
 def test_fetch_check_rejects_unsafe_urls_before_persisting(tmp_path, url):
     client = make_test_client(tmp_path)
 

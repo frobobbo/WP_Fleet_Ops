@@ -575,6 +575,25 @@ def test_store_deduplicates_equivalent_ipv6_hostnames(tmp_path):
     assert len(store.list_sites()) == 1
 
 
+def test_normalize_site_url_accepts_canonical_ipv4_hosts():
+    assert normalize_site_url("HTTP://127.0.0.1:80/") == "http://127.0.0.1"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.1",
+        "http://2130706433",
+        "http://0177.0.0.1",
+        "http://0x7f.0.0.1",
+        "https://192.168.015.005",
+    ],
+)
+def test_normalize_site_url_rejects_ambiguous_ipv4_hosts(url):
+    with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
+        normalize_site_url(url)
+
+
 def test_normalize_site_url_deduplicates_fully_qualified_hostnames():
     assert normalize_site_url("HTTPS://Example.COM./") == "https://example.com"
     assert normalize_site_url("https://Example.COM.:8443/status") == "https://example.com:8443/status"
