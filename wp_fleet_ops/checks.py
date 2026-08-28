@@ -99,6 +99,16 @@ def normalize_site_url(url: str) -> str:
             numeric_component = r"(?:0x[0-9a-f]+|[0-9]+)"
             if re.fullmatch(rf"{numeric_component}(?:\.{numeric_component}){{0,3}}", hostname):
                 raise ValueError(error)
+            # IDNA conversion alone does not reject every malformed DNS label;
+            # Python's built-in codec accepts leading/trailing hyphens and
+            # underscores. Keep persisted/fetched hosts within the ordinary DNS
+            # hostname grammar so operators cannot register misleading or
+            # predictably unresolvable targets.
+            dns_label = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+            if len(hostname) > 253 or any(
+                dns_label.fullmatch(label) is None for label in hostname.split(".")
+            ):
+                raise ValueError(error)
     netloc = f"[{hostname}]" if ":" in hostname else hostname
     default_port = 443 if scheme == "https" else 80
     if parsed_port is not None and parsed_port != default_port:

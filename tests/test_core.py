@@ -594,6 +594,21 @@ def test_normalize_site_url_rejects_ambiguous_ipv4_hosts(url):
         normalize_site_url(url)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example..com",
+        "https://-example.com",
+        "https://example-.com",
+        "https://example_.com",
+        f"https://{'a' * 64}.example",
+    ],
+)
+def test_normalize_site_url_rejects_malformed_dns_hostnames(url):
+    with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
+        normalize_site_url(url)
+
+
 def test_normalize_site_url_deduplicates_fully_qualified_hostnames():
     assert normalize_site_url("HTTPS://Example.COM./") == "https://example.com"
     assert normalize_site_url("https://Example.COM.:8443/status") == "https://example.com:8443/status"
