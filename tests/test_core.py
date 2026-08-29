@@ -245,6 +245,20 @@ def test_helm_workload_uses_read_only_root_with_bounded_runtime_tmp():
     assert "emptyDir:\n            sizeLimit: 64Mi" in deployment
 
 
+def test_helm_source_bundle_bounds_dependency_install_storage():
+    """Fallback installs must not consume unbounded node ephemeral storage."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "  workSizeLimit: 512Mi\n" in values
+    assert (
+        "- name: source-work\n"
+        "          emptyDir:\n"
+        "            sizeLimit: {{ .Values.sourceBundle.workSizeLimit }}"
+    ) in deployment
+
+
 def test_care_score_and_report_are_client_friendly():
     good = evaluate_site("Church", "church.example", 200, 200, 90, "6.6", 0, 12, {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"})
     bad = evaluate_site("Client", "https://client.example", 500, 1800, 5, "6.2", 6, 120, {})

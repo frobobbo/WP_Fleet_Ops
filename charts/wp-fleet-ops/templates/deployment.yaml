@@ -113,7 +113,8 @@ spec:
               - key: {{ .Values.sourceBundle.fileName | quote }}
                 path: app.tar.gz
         - name: source-work
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: {{ .Values.sourceBundle.workSizeLimit }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

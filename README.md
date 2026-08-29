@@ -140,4 +140,7 @@ The builder includes only `pyproject.toml`, `uv.lock`, `wp_fleet_ops/`, and
 with mode `0600`. It fails before deployment if the compressed archive exceeds
 the conservative ConfigMap size limit. If the ConfigMap uses a different archive
 key, set `sourceBundle.fileName` to that key; the chart projects it to the stable
-`/bundle/app.tar.gz` runtime path expected by the init container.
+`/bundle/app.tar.gz` runtime path expected by the init container. The unpacked
+source and installed dependencies use an ephemeral volume capped at 512 MiB by
+default; tune `sourceBundle.workSizeLimit` if a future dependency set needs more
+space rather than leaving node-local storage unbounded.
