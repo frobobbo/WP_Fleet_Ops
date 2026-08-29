@@ -648,6 +648,23 @@ def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("name", "client", "message"),
+    [
+        ("Church Site\n# Forged report heading", "Client", "Site name must contain only printable characters"),
+        ("Church Site", "Client\x00Hidden", "Client name must contain only printable characters"),
+        ("Church Site\u202e", "Client", "Site name must contain only printable characters"),
+    ],
+)
+def test_store_rejects_nonprinting_site_labels(tmp_path, name, client, message):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    with pytest.raises(ValueError, match=message):
+        store.upsert_site(name, "https://printable-labels.example", client)
+
+    assert store.list_sites() == []
+
+
+@pytest.mark.parametrize(
     ("name", "url", "client", "message"),
     [
         ("n" * 201, "https://bounded.example", "Client", "Site name must be 200 characters or fewer"),

@@ -23,6 +23,8 @@ def normalize_site_name(name: str) -> str:
     normalized = name.strip()
     if not normalized:
         raise ValueError("Site name must not be blank.")
+    if any(not char.isprintable() for char in normalized):
+        raise ValueError("Site name must contain only printable characters.")
     if len(normalized) > MAX_SITE_NAME_LENGTH:
         raise ValueError(f"Site name must be {MAX_SITE_NAME_LENGTH} characters or fewer.")
     return normalized
@@ -31,6 +33,8 @@ def normalize_site_name(name: str) -> str:
 def normalize_client_name(client: str) -> str:
     """Return a bounded client label while preserving an empty assignment."""
     normalized = client.strip()
+    if any(not char.isprintable() for char in normalized):
+        raise ValueError("Client name must contain only printable characters.")
     if len(normalized) > MAX_CLIENT_NAME_LENGTH:
         raise ValueError(f"Client name must be {MAX_CLIENT_NAME_LENGTH} characters or fewer.")
     return normalized
