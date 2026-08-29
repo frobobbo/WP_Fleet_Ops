@@ -74,6 +74,10 @@ def normalize_site_url(url: str) -> str:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
+        # urlparse reports no port for an explicit empty ``:`` suffix. Reject
+        # the malformed authority instead of silently canonicalizing it to the
+        # same target as a URL whose port was actually omitted.
+        or raw_netloc.endswith(":")
         or any(char.isspace() for char in raw_netloc)
     ):
         raise ValueError(error)
