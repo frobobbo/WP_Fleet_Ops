@@ -722,6 +722,10 @@ def test_normalize_site_url_rejects_canonical_url_over_length_limit():
         "https://example.com/search?q=hello world",
         "https://example.com/status\x00hidden",
         "https://example.com/status\x7fhidden",
+        "https://example.com/status%00hidden",
+        "https://example.com/%0d%0aHost:evil.test",
+        "https://example.com/status%",
+        "https://example.com/status%zz",
         "https://example.com:",
         "https://example.com:/status",
     ],
@@ -729,6 +733,12 @@ def test_normalize_site_url_rejects_canonical_url_over_length_limit():
 def test_normalize_site_url_rejects_unsafe_or_hostless_urls(url):
     with pytest.raises(ValueError, match="valid HTTP or HTTPS URL"):
         normalize_site_url(url)
+
+
+def test_normalize_site_url_preserves_valid_percent_encoded_path_and_query_values():
+    assert normalize_site_url("https://example.com/a%20b?q=x%2Fy") == (
+        "https://example.com/a%20b?q=x%2Fy"
+    )
 
 
 def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypatch):

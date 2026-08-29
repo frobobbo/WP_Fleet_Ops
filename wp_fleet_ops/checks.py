@@ -50,10 +50,15 @@ def normalize_site_url(url: str) -> str:
     # ambiguous spelling instead of persisting or probing a misleading target.
     # Also reject C0/DEL control bytes: urlparse preserves several of them, but
     # downstream HTTP clients cannot safely or consistently request such URLs.
+    # Apply the same rule to percent-encoded controls, and reject malformed
+    # percent escapes, so persisted request targets cannot be decoded differently
+    # by urllib, a reverse proxy, and the monitored origin.
     if (
         not candidate
         or "\\" in candidate
         or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in candidate)
+        or re.search(r"%(?![0-9a-f]{2})", candidate, re.IGNORECASE)
+        or re.search(r"%(?:0[0-9a-f]|1[0-9a-f]|7f)", candidate, re.IGNORECASE)
     ):
         raise ValueError(error)
     if "://" not in candidate:
