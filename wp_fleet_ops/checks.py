@@ -76,6 +76,15 @@ def normalize_site_url(url: str) -> str:
         or re.search(r"%(?:0[0-9a-f]|1[0-9a-f]|7f)", candidate, re.IGNORECASE)
     ):
         raise ValueError(error)
+    # Percent-escape hex digits are case-insensitive. Persist one spelling so
+    # equivalent request targets cannot create separate monitored site records.
+    # Do not decode the escapes: encoded delimiters must retain their semantics.
+    candidate = re.sub(
+        r"%([0-9a-f]{2})",
+        lambda match: f"%{match.group(1).upper()}",
+        candidate,
+        flags=re.IGNORECASE,
+    )
     if "://" not in candidate:
         explicit_scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate)
         host_with_port = re.match(r"^[^/:\s]+:\d+(?:/|$)", candidate)

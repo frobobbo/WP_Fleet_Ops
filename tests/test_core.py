@@ -790,6 +790,23 @@ def test_normalize_site_url_preserves_valid_percent_encoded_path_and_query_value
     )
 
 
+def test_normalize_site_url_canonicalizes_percent_escape_hex_case():
+    assert normalize_site_url("https://example.com/a%2fb?q=x%3ay") == (
+        "https://example.com/a%2Fb?q=x%3Ay"
+    )
+
+
+def test_store_deduplicates_percent_escape_hex_case(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Encoded Site", "https://example.com/a%2fb?q=x%3ay")
+    duplicate_id = store.upsert_site("Encoded Site", "https://example.com/a%2Fb?q=x%3Ay")
+
+    assert duplicate_id == first_id
+    assert store.list_sites()[0]["url"] == "https://example.com/a%2Fb?q=x%3Ay"
+    assert len(store.list_sites()) == 1
+
+
 def test_normalize_site_url_preserves_path_parameters():
     assert normalize_site_url("https://example.com/wp-json;version=2?context=view") == (
         "https://example.com/wp-json;version=2?context=view"
