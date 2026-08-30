@@ -288,6 +288,53 @@ def test_care_evaluation_rejects_oversized_wordpress_versions():
         )
 
 
+def test_care_evaluation_normalizes_wordpress_version_values():
+    normalized = evaluate_site(
+        "Normalized Version",
+        "https://normalized-version.example",
+        200,
+        250,
+        60,
+        "  6.6.1  ",
+        0,
+        24,
+        {},
+    )
+    unknown = evaluate_site(
+        "Unknown Version",
+        "https://unknown-version.example",
+        200,
+        250,
+        60,
+        "  ",
+        0,
+        24,
+        {},
+    )
+
+    assert normalized.wordpress_version == "6.6.1"
+    assert unknown.wordpress_version == "unknown"
+
+
+@pytest.mark.parametrize("wordpress_version", ["6.6\nforged", "6.6\u202eforged"])
+def test_care_evaluation_rejects_nonprinting_wordpress_versions(wordpress_version):
+    with pytest.raises(
+        ValueError,
+        match="WordPress version must contain only printable characters",
+    ):
+        evaluate_site(
+            "Printable Version",
+            "https://printable-version.example",
+            200,
+            250,
+            60,
+            wordpress_version,
+            0,
+            24,
+            {},
+        )
+
+
 def test_dashboard_bounds_persisted_text_inputs():
     dashboard = (Path(__file__).parents[1] / "templates" / "index.html").read_text()
 

@@ -40,6 +40,20 @@ def normalize_client_name(client: str) -> str:
     return normalized
 
 
+def normalize_wordpress_version(version: str) -> str:
+    """Return a safe version label, using ``unknown`` when none was supplied."""
+    normalized = version.strip()
+    if not normalized:
+        return "unknown"
+    if any(not char.isprintable() for char in normalized):
+        raise ValueError("WordPress version must contain only printable characters.")
+    if len(normalized) > MAX_WORDPRESS_VERSION_LENGTH:
+        raise ValueError(
+            f"WordPress version must be {MAX_WORDPRESS_VERSION_LENGTH} characters or fewer."
+        )
+    return normalized
+
+
 def normalize_site_url(url: str) -> str:
     candidate = url.strip()
     error = "Site URL must be a valid HTTP or HTTPS URL."
@@ -189,10 +203,7 @@ def evaluate_site(
     security_headers: dict[str, str] | None = None,
 ) -> SiteCheck:
     name = normalize_site_name(name)
-    if len(wordpress_version) > MAX_WORDPRESS_VERSION_LENGTH:
-        raise ValueError(
-            f"WordPress version must be {MAX_WORDPRESS_VERSION_LENGTH} characters or fewer."
-        )
+    wordpress_version = normalize_wordpress_version(wordpress_version)
     headers = {k.lower(): v for k, v in (security_headers or {}).items()}
     score = 100
     actions: list[str] = []
