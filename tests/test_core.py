@@ -743,6 +743,12 @@ def test_normalize_site_url_preserves_valid_percent_encoded_path_and_query_value
     )
 
 
+def test_normalize_site_url_preserves_path_parameters():
+    assert normalize_site_url("https://example.com/wp-json;version=2?context=view") == (
+        "https://example.com/wp-json;version=2?context=view"
+    )
+
+
 def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypatch):
     headers = Message()
     headers["Strict-Transport-Security"] = "max-age=31536000"

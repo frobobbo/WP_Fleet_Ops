@@ -138,7 +138,10 @@ def normalize_site_url(url: str) -> str:
     # A root path is implicit even when a query string is present. Both URL
     # spellings produce the same HTTP request target, so persist one form.
     path = "" if parsed.path == "/" else parsed.path
-    normalized = urlunparse((scheme, netloc, path, "", parsed.query, ""))
+    # urlparse splits semicolon path parameters from ``path``. Preserve them
+    # when rebuilding the canonical URL so normalization cannot silently change
+    # the endpoint that FleetOps persists and probes.
+    normalized = urlunparse((scheme, netloc, path, parsed.params, parsed.query, ""))
     # A bare host gains an implicit ``https://`` prefix, and IDNA conversion may
     # expand Unicode labels. Bound the canonical value that will actually be
     # persisted, not only the shorter operator-supplied spelling.
