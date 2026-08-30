@@ -722,6 +722,8 @@ def test_normalize_site_url_rejects_canonical_url_over_length_limit():
         "https://example.com/search?q=hello world",
         "https://example.com/status\x00hidden",
         "https://example.com/status\x7fhidden",
+        "https://example.com/status\u200bhidden",
+        "https://example.com/status\u202eevil.test",
         "https://example.com/status%00hidden",
         "https://example.com/%0d%0aHost:evil.test",
         "https://example.com/status%",

@@ -48,15 +48,16 @@ def normalize_site_url(url: str) -> str:
     # WHATWG-style HTTP clients may treat a raw backslash as a slash while
     # urllib.parse preserves it inside the authority or path. Reject that
     # ambiguous spelling instead of persisting or probing a misleading target.
-    # Also reject C0/DEL control bytes: urlparse preserves several of them, but
-    # downstream HTTP clients cannot safely or consistently request such URLs.
+    # Also reject non-printing characters. urlparse preserves Unicode format
+    # controls as well as several C0/DEL bytes, but dashboards and downstream
+    # HTTP clients cannot safely or consistently display/request such URLs.
     # Apply the same rule to percent-encoded controls, and reject malformed
     # percent escapes, so persisted request targets cannot be decoded differently
     # by urllib, a reverse proxy, and the monitored origin.
     if (
         not candidate
         or "\\" in candidate
-        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in candidate)
+        or any(char.isspace() or not char.isprintable() for char in candidate)
         or re.search(r"%(?![0-9a-f]{2})", candidate, re.IGNORECASE)
         or re.search(r"%(?:0[0-9a-f]|1[0-9a-f]|7f)", candidate, re.IGNORECASE)
     ):
