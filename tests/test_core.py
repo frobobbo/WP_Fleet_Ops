@@ -335,6 +335,72 @@ def test_care_evaluation_rejects_nonprinting_wordpress_versions(wordpress_versio
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("latency_ms", -1),
+        ("ssl_days_remaining", -1),
+        ("update_count", -1),
+        ("backup_age_hours", -1),
+    ],
+)
+def test_care_evaluation_rejects_negative_telemetry(field, value):
+    metrics = {
+        "http_status": 200,
+        "latency_ms": 250,
+        "ssl_days_remaining": 60,
+        "update_count": 0,
+        "backup_age_hours": 24,
+    }
+    metrics[field] = value
+
+    with pytest.raises(ValueError, match=f"{field} must not be negative"):
+        evaluate_site(
+            "Telemetry Integrity",
+            "https://telemetry-integrity.example",
+            metrics["http_status"],
+            metrics["latency_ms"],
+            metrics["ssl_days_remaining"],
+            "6.6",
+            metrics["update_count"],
+            metrics["backup_age_hours"],
+            {},
+        )
+
+
+@pytest.mark.parametrize("http_status", [-1, 99, 600])
+def test_care_evaluation_rejects_invalid_http_statuses(http_status):
+    with pytest.raises(ValueError, match="http_status must be 0 or between 100 and 599"):
+        evaluate_site(
+            "HTTP Integrity",
+            "https://http-integrity.example",
+            http_status,
+            250,
+            60,
+            "6.6",
+            0,
+            24,
+            {},
+        )
+
+
+def test_care_evaluation_retains_zero_http_failure_sentinel():
+    check = evaluate_site(
+        "Unavailable Site",
+        "https://unavailable-site.example",
+        0,
+        250,
+        0,
+        "unknown",
+        0,
+        24,
+        {},
+    )
+
+    assert check.http_status == 0
+    assert check.status == "red"
+
+
 def test_dashboard_bounds_persisted_text_inputs():
     dashboard = (Path(__file__).parents[1] / "templates" / "index.html").read_text()
 
@@ -351,6 +417,40 @@ def test_fleet_alerts_and_report_group_operational_risk():
     alerts = generate_alerts(site)
     assert any(a.severity == "critical" and "down" in a.message.lower() for a in alerts)
     assert "WP FleetOps Maintenance Report" in generate_maintenance_report([site])
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ssl_days", -1),
+        ("wp_updates", -1),
+        ("backup_age_hours", -1),
+        ("response_ms", -1),
+        ("security_header_count", -1),
+        ("security_header_count", 4),
+    ],
+)
+def test_fleet_site_rejects_invalid_telemetry(field, value):
+    metrics = {
+        "ssl_days": 60,
+        "wp_updates": 0,
+        "backup_age_hours": 24,
+        "response_ms": 250,
+        "security_header_count": 3,
+    }
+    metrics[field] = value
+
+    with pytest.raises(ValueError, match=field):
+        FleetSite(
+            "Fleet Integrity",
+            "https://fleet-integrity.example",
+            True,
+            metrics["ssl_days"],
+            metrics["wp_updates"],
+            metrics["backup_age_hours"],
+            metrics["response_ms"],
+            metrics["security_header_count"],
+        )
 
 
 def test_fleet_alerts_treat_seven_day_certificate_as_critical():

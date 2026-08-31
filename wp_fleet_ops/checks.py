@@ -211,6 +211,16 @@ def evaluate_site(
     backup_age_hours: int,
     security_headers: dict[str, str] | None = None,
 ) -> SiteCheck:
+    if http_status != 0 and not 100 <= http_status <= 599:
+        raise ValueError("http_status must be 0 or between 100 and 599.")
+    for field, value in (
+        ("latency_ms", latency_ms),
+        ("ssl_days_remaining", ssl_days_remaining),
+        ("update_count", update_count),
+        ("backup_age_hours", backup_age_hours),
+    ):
+        if value < 0:
+            raise ValueError(f"{field} must not be negative.")
     name = normalize_site_name(name)
     wordpress_version = normalize_wordpress_version(wordpress_version)
     headers = {k.lower(): v for k, v in (security_headers or {}).items()}

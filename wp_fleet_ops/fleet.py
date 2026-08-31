@@ -15,6 +15,18 @@ class FleetSite:
     response_ms: int
     security_header_count: int
 
+    def __post_init__(self) -> None:
+        for field, value in (
+            ("ssl_days", self.ssl_days),
+            ("wp_updates", self.wp_updates),
+            ("backup_age_hours", self.backup_age_hours),
+            ("response_ms", self.response_ms),
+        ):
+            if value < 0:
+                raise ValueError(f"{field} must not be negative.")
+        if not 0 <= self.security_header_count <= 3:
+            raise ValueError("security_header_count must be between 0 and 3.")
+
     def to_dict(self) -> dict:
         return asdict(self)
 
