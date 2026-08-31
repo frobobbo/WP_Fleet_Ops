@@ -87,7 +87,10 @@ def normalize_site_url(url: str) -> str:
     )
     if "://" not in candidate:
         explicit_scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", candidate)
-        host_with_port = re.match(r"^[^/:\s]+:\d+(?:/|$)", candidate)
+        # A scheme-less host may put a query or fragment immediately after its
+        # port; both delimit the authority just as a slash does. Recognize all
+        # three delimiters before rejecting an apparent unsupported scheme.
+        host_with_port = re.match(r"^[^/:\s]+:\d+(?:[/?#]|$)", candidate)
         if explicit_scheme and not host_with_port:
             raise ValueError(error)
         candidate = f"https://{candidate}"

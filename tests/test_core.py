@@ -680,6 +680,13 @@ def test_normalize_site_url_deduplicates_bare_domains():
     assert normalize_site_url("Example.COM/") == "https://example.com"
 
 
+def test_normalize_site_url_accepts_scheme_less_ports_with_query_or_fragment():
+    assert normalize_site_url("Example.COM:8443?view=full") == (
+        "https://example.com:8443?view=full"
+    )
+    assert normalize_site_url("Example.COM:8443#status") == "https://example.com:8443"
+
+
 def test_normalize_site_url_strips_client_only_fragments():
     assert normalize_site_url("HTTPS://Example.COM/#dashboard") == "https://example.com"
     assert normalize_site_url("https://example.com/status?view=full#summary") == "https://example.com/status?view=full"
