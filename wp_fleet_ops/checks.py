@@ -9,7 +9,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 
 MAX_SITE_NAME_LENGTH = 200
@@ -167,7 +167,14 @@ def normalize_site_url(url: str) -> str:
     # urlparse splits semicolon path parameters from ``path``. Preserve them
     # when rebuilding the canonical URL so normalization cannot silently change
     # the endpoint that FleetOps persists and probes.
-    normalized = urlunparse((scheme, netloc, path, parsed.params, parsed.query, ""))
+    # urllib's HTTP request layer requires an ASCII URI. Convert printable IRI
+    # path, parameter, and query characters to UTF-8 percent escapes while
+    # preserving existing validated escapes and each component's RFC delimiters.
+    # This also gives raw-Unicode and already-encoded spellings one site identity.
+    path = quote(path, safe="/:@-._~!$&'()*+,;=%")
+    params = quote(parsed.params, safe=":@-._~!$&'()*+,;=%")
+    query = quote(parsed.query, safe="/?:@-._~!$&'()*+,;=%")
+    normalized = urlunparse((scheme, netloc, path, params, query, ""))
     # A bare host gains an implicit ``https://`` prefix, and IDNA conversion may
     # expand Unicode labels. Bound the canonical value that will actually be
     # persisted, not only the shorter operator-supplied spelling.

@@ -903,6 +903,65 @@ def test_normalize_site_url_canonicalizes_percent_escape_hex_case():
     )
 
 
+def test_normalize_site_url_encodes_unicode_path_parameters_and_query():
+    assert normalize_site_url("https://example.com/café;résumé?topic=naïve") == (
+        "https://example.com/caf%C3%A9;r%C3%A9sum%C3%A9?topic=na%C3%AFve"
+    )
+
+
+def test_fetch_basic_site_check_requests_an_ascii_uri_for_unicode_paths(monkeypatch):
+    requested_urls = []
+
+    class SuccessfulResponse:
+        status = 200
+        headers = Message()
+
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return self.url
+
+    def successful(request, timeout):
+        requested_urls.append((request.full_url, timeout))
+        return SuccessfulResponse(request.full_url)
+
+    monkeypatch.setattr("wp_fleet_ops.checks.urllib.request.urlopen", successful)
+
+    check = fetch_basic_site_check(
+        "Unicode Page",
+        "http://example.com/café?topic=naïve",
+        timeout=7,
+    )
+
+    expected_url = "http://example.com/caf%C3%A9?topic=na%C3%AFve"
+    assert requested_urls == [(expected_url, 7)]
+    assert check.url == expected_url
+    assert check.http_status == 200
+
+
+def test_store_deduplicates_unicode_and_percent_encoded_paths(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Unicode Site", "https://example.com/café?topic=naïve")
+    duplicate_id = store.upsert_site(
+        "Unicode Site",
+        "https://example.com/caf%C3%A9?topic=na%C3%AFve",
+    )
+
+    assert duplicate_id == first_id
+    assert store.list_sites()[0]["url"] == (
+        "https://example.com/caf%C3%A9?topic=na%C3%AFve"
+    )
+    assert len(store.list_sites()) == 1
+
+
 def test_store_deduplicates_percent_escape_hex_case(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 
