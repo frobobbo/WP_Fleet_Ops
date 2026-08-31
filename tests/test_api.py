@@ -6403,6 +6403,35 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
     }
 
 
+@pytest.mark.parametrize(
+    ("client_filter", "detail"),
+    [
+        ("c" * 201, "Client name must be 200 characters or fewer."),
+        ("Client\u202eHidden", "Client name must contain only printable characters."),
+    ],
+)
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/monitoring-coverage",
+        "/api/snapshot-history",
+        "/api/care-check-history",
+    ],
+)
+def test_client_filtered_apis_reject_invalid_account_labels(
+    tmp_path,
+    path,
+    client_filter,
+    detail,
+):
+    client = make_test_client(tmp_path)
+
+    response = client.get(path, params={"client": client_filter})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": detail}
+
+
 def test_api_care_check_history_filters_by_normalized_site_url(tmp_path):
     client = make_test_client(tmp_path)
     for latency_ms in (200, 500, 800):

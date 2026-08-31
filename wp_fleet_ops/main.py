@@ -18,6 +18,7 @@ from .checks import (
     SiteCheck,
     evaluate_site,
     fetch_basic_site_check,
+    normalize_client_name,
     normalize_site_name,
     normalize_site_url,
     summarize_care_report,
@@ -213,10 +214,10 @@ def _latest_trusted_timestamp(
 
 
 def _normalize_client_filter(client: str | None) -> str | None:
-    """Normalize an optional account filter while preserving stored client names."""
+    """Normalize an optional account filter using persisted client-name rules."""
     if client is None:
         return None
-    normalized = client.strip()
+    normalized = normalize_client_name(client)
     if not normalized:
         raise ValueError("Client filter must not be empty.")
     return "Unassigned" if normalized.casefold() == "unassigned" else normalized
