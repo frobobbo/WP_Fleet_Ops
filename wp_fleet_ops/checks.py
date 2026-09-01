@@ -9,7 +9,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlsplit, urlunsplit
 
 
 MAX_SITE_NAME_LENGTH = 200
@@ -104,7 +104,11 @@ def normalize_site_url(url: str) -> str:
         if explicit_scheme and not host_with_port:
             raise ValueError(error)
         candidate = f"https://{candidate}"
-    parsed = urlparse(candidate)
+    # urlparse splits the final path segment's semicolon parameters into a
+    # separate field and cannot distinguish no parameter delimiter from an
+    # explicitly empty one (``/status`` versus ``/status;``). urlsplit keeps the
+    # complete request path so canonicalization cannot merge distinct targets.
+    parsed = urlsplit(candidate)
     scheme = parsed.scheme.lower()
     raw_netloc = parsed.netloc
     try:
@@ -116,7 +120,7 @@ def normalize_site_url(url: str) -> str:
         or not parsed.hostname
         or parsed.username is not None
         or parsed.password is not None
-        # urlparse reports no port for an explicit empty ``:`` suffix. Reject
+        # urlsplit reports no port for an explicit empty ``:`` suffix. Reject
         # the malformed authority instead of silently canonicalizing it to the
         # same target as a URL whose port was actually omitted.
         or raw_netloc.endswith(":")
@@ -180,17 +184,14 @@ def normalize_site_url(url: str) -> str:
     # A root path is implicit even when a query string is present. Both URL
     # spellings produce the same HTTP request target, so persist one form.
     path = "" if parsed.path == "/" else parsed.path
-    # urlparse splits semicolon path parameters from ``path``. Preserve them
-    # when rebuilding the canonical URL so normalization cannot silently change
-    # the endpoint that FleetOps persists and probes.
     # urllib's HTTP request layer requires an ASCII URI. Convert printable IRI
-    # path, parameter, and query characters to UTF-8 percent escapes while
-    # preserving existing validated escapes and each component's RFC delimiters.
+    # path and query characters to UTF-8 percent escapes while preserving
+    # existing validated escapes and each component's RFC delimiters. urlsplit
+    # keeps semicolon parameters in the path, including an empty delimiter.
     # This also gives raw-Unicode and already-encoded spellings one site identity.
     path = quote(path, safe="/:@-._~!$&'()*+,;=%")
-    params = quote(parsed.params, safe=":@-._~!$&'()*+,;=%")
     query = quote(parsed.query, safe="/?:@-._~!$&'()*+,;=%")
-    normalized = urlunparse((scheme, netloc, path, params, query, ""))
+    normalized = urlunsplit((scheme, netloc, path, query, ""))
     # A bare host gains an implicit ``https://`` prefix, and IDNA conversion may
     # expand Unicode labels. Bound the canonical value that will actually be
     # persisted, not only the shorter operator-supplied spelling.

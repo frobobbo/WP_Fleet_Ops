@@ -1013,6 +1013,28 @@ def test_normalize_site_url_preserves_path_parameters():
     )
 
 
+def test_normalize_site_url_preserves_empty_path_parameter_delimiter():
+    assert normalize_site_url("https://example.com/wp-json;?context=view") == (
+        "https://example.com/wp-json;?context=view"
+    )
+
+
+def test_store_keeps_empty_path_parameter_target_distinct(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    parameter_target_id = store.upsert_site(
+        "Parameter Target",
+        "https://example.com/wp-json;",
+    )
+    plain_target_id = store.upsert_site("Plain Target", "https://example.com/wp-json")
+
+    assert parameter_target_id != plain_target_id
+    assert {site["url"] for site in store.list_sites()} == {
+        "https://example.com/wp-json;",
+        "https://example.com/wp-json",
+    }
+
+
 def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypatch):
     headers = Message()
     headers["Strict-Transport-Security"] = "max-age=31536000"
