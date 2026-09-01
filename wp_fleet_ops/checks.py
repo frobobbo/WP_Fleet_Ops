@@ -16,6 +16,9 @@ MAX_SITE_NAME_LENGTH = 200
 MAX_SITE_URL_LENGTH = 2048
 MAX_CLIENT_NAME_LENGTH = 200
 MAX_WORDPRESS_VERSION_LENGTH = 100
+PERCENT_DECODE_SAFE = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~"
+)
 
 
 def normalize_site_name(name: str) -> str:
@@ -78,10 +81,17 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     # Percent-escape hex digits are case-insensitive. Persist one spelling so
     # equivalent request targets cannot create separate monitored site records.
-    # Do not decode the escapes: encoded delimiters must retain their semantics.
+    # Decode ASCII alphanumerics and the non-dot unreserved characters because
+    # their encoded and literal forms identify the same URI. Keep delimiters and
+    # encoded dots escaped: dots are syntactically unreserved but complete ``.``
+    # and ``..`` path segments have special resolution behavior.
     candidate = re.sub(
         r"%([0-9a-f]{2})",
-        lambda match: f"%{match.group(1).upper()}",
+        lambda match: (
+            decoded
+            if (decoded := chr(int(match.group(1), 16))) in PERCENT_DECODE_SAFE
+            else f"%{match.group(1).upper()}"
+        ),
         candidate,
         flags=re.IGNORECASE,
     )

@@ -903,6 +903,23 @@ def test_normalize_site_url_canonicalizes_percent_escape_hex_case():
     )
 
 
+def test_normalize_site_url_decodes_percent_encoded_unreserved_characters():
+    assert normalize_site_url(
+        "https://example.com/%7euser/%41pi?view=%66ull&tag=%2D"
+    ) == "https://example.com/~user/Api?view=full&tag=-"
+
+
+def test_store_deduplicates_percent_encoded_unreserved_characters(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Encoded Site", "https://example.com/%7Euser?view=%66ull")
+    duplicate_id = store.upsert_site("Encoded Site", "https://example.com/~user?view=full")
+
+    assert duplicate_id == first_id
+    assert store.list_sites()[0]["url"] == "https://example.com/~user?view=full"
+    assert len(store.list_sites()) == 1
+
+
 def test_normalize_site_url_encodes_unicode_path_parameters_and_query():
     assert normalize_site_url("https://example.com/café;résumé?topic=naïve") == (
         "https://example.com/caf%C3%A9;r%C3%A9sum%C3%A9?topic=na%C3%AFve"
