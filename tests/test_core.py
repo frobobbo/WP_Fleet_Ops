@@ -782,6 +782,23 @@ def test_normalize_site_url_deduplicates_fully_qualified_hostnames():
     assert normalize_site_url("https://Example.COM.:8443/status") == "https://example.com:8443/status"
 
 
+def test_normalize_site_url_decodes_encoded_hostname_dots_only():
+    assert normalize_site_url("HTTPS://Example%2eCOM/path%2epart") == (
+        "https://example.com/path%2Epart"
+    )
+
+
+def test_store_deduplicates_percent_encoded_hostname_dots(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Encoded Host", "https://example%2Ecom/status")
+    duplicate_id = store.upsert_site("Encoded Host", "https://example.com/status")
+
+    assert duplicate_id == first_id
+    assert store.list_sites()[0]["url"] == "https://example.com/status"
+    assert len(store.list_sites()) == 1
+
+
 def test_store_deduplicates_trailing_dot_hostnames(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 

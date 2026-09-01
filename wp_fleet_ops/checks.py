@@ -127,7 +127,13 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     # A terminal dot marks an absolute DNS name but resolves to the same host.
     # Canonicalize it so FQDN and ordinary spellings do not create two sites.
-    hostname = parsed.hostname.lower().removesuffix(".")
+    # URI percent-encoding also permits dots in registered hostnames. Decode dots
+    # only in non-IPv6 hosts: encoded dots in paths stay escaped because complete
+    # ``.`` and ``..`` path segments have special resolution behavior.
+    hostname = parsed.hostname.lower()
+    if ":" not in hostname:
+        hostname = re.sub(r"%2e", ".", hostname, flags=re.IGNORECASE)
+    hostname = hostname.removesuffix(".")
     if not hostname:
         raise ValueError(error)
     if ":" in hostname:
