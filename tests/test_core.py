@@ -928,6 +928,12 @@ def test_normalize_site_url_decodes_percent_encoded_unreserved_characters():
     ) == "https://example.com/~user/Api?view=full&tag=-"
 
 
+def test_normalize_site_url_decodes_encoded_query_dots_but_preserves_path_dots():
+    assert normalize_site_url(
+        "https://example.com/path%2epart?release=%2e&range=%2E%2E"
+    ) == "https://example.com/path%2Epart?release=.&range=.."
+
+
 def test_store_deduplicates_percent_encoded_unreserved_characters(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 
@@ -936,6 +942,17 @@ def test_store_deduplicates_percent_encoded_unreserved_characters(tmp_path):
 
     assert duplicate_id == first_id
     assert store.list_sites()[0]["url"] == "https://example.com/~user?view=full"
+    assert len(store.list_sites()) == 1
+
+
+def test_store_deduplicates_percent_encoded_query_dots(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("Encoded Query", "https://example.com/api?release=%2E")
+    duplicate_id = store.upsert_site("Encoded Query", "https://example.com/api?release=.")
+
+    assert duplicate_id == first_id
+    assert store.list_sites()[0]["url"] == "https://example.com/api?release=."
     assert len(store.list_sites()) == 1
 
 

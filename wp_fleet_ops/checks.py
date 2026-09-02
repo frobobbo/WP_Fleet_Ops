@@ -83,8 +83,8 @@ def normalize_site_url(url: str) -> str:
     # equivalent request targets cannot create separate monitored site records.
     # Decode ASCII alphanumerics and the non-dot unreserved characters because
     # their encoded and literal forms identify the same URI. Keep delimiters and
-    # encoded dots escaped: dots are syntactically unreserved but complete ``.``
-    # and ``..`` path segments have special resolution behavior.
+    # encoded dots escaped until the URL is split: complete ``.`` and ``..`` path
+    # segments have special resolution behavior, while query dots do not.
     candidate = re.sub(
         r"%([0-9a-f]{2})",
         lambda match: (
@@ -194,7 +194,11 @@ def normalize_site_url(url: str) -> str:
     # keeps semicolon parameters in the path, including an empty delimiter.
     # This also gives raw-Unicode and already-encoded spellings one site identity.
     path = quote(path, safe="/:@-._~!$&'()*+,;=%")
-    query = quote(parsed.query, safe="/?:@-._~!$&'()*+,;=%")
+    # A dot is an ordinary unreserved query character and has no dot-segment
+    # behavior outside the path. Decode its escaped spelling here so equivalent
+    # query targets cannot create separate monitored site identities.
+    query = re.sub(r"%2e", ".", parsed.query, flags=re.IGNORECASE)
+    query = quote(query, safe="/?:@-._~!$&'()*+,;=%")
     normalized = urlunsplit((scheme, netloc, path, query, ""))
     # A bare host gains an implicit ``https://`` prefix, and IDNA conversion may
     # expand Unicode labels. Bound the canonical value that will actually be
