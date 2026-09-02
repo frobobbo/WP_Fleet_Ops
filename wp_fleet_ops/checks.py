@@ -108,16 +108,20 @@ def normalize_site_url(url: str) -> str:
     # separate field and cannot distinguish no parameter delimiter from an
     # explicitly empty one (``/status`` versus ``/status;``). urlsplit keeps the
     # complete request path so canonicalization cannot merge distinct targets.
-    parsed = urlsplit(candidate)
+    try:
+        parsed = urlsplit(candidate)
+        parsed_port = parsed.port
+        parsed_hostname = parsed.hostname
+    except ValueError as exc:
+        # ``urlsplit`` rejects malformed bracketed IPv6 authorities before it
+        # returns a parsed result. Translate every parser failure into the same
+        # stable validation contract used by malformed ports and hostnames.
+        raise ValueError(error) from exc
     scheme = parsed.scheme.lower()
     raw_netloc = parsed.netloc
-    try:
-        parsed_port = parsed.port
-    except ValueError as exc:
-        raise ValueError(error) from exc
     if (
         scheme not in {"http", "https"}
-        or not parsed.hostname
+        or not parsed_hostname
         or parsed.username is not None
         or parsed.password is not None
         # urlsplit reports no port for an explicit empty ``:`` suffix. Reject
@@ -134,7 +138,7 @@ def normalize_site_url(url: str) -> str:
     # URI percent-encoding also permits dots in registered hostnames. Decode dots
     # only in non-IPv6 hosts: encoded dots in paths stay escaped because complete
     # ``.`` and ``..`` path segments have special resolution behavior.
-    hostname = parsed.hostname.lower()
+    hostname = parsed_hostname.lower()
     if ":" not in hostname:
         hostname = re.sub(r"%2e", ".", hostname, flags=re.IGNORECASE)
     hostname = hostname.removesuffix(".")

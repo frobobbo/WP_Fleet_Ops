@@ -901,6 +901,8 @@ def test_normalize_site_url_rejects_canonical_url_over_length_limit():
         "https://example.com/status%zz",
         "https://example.com:",
         "https://example.com:/status",
+        "https://[2001:db8::1",
+        "https://2001:db8::1]",
     ],
 )
 def test_normalize_site_url_rejects_unsafe_or_hostless_urls(url):
