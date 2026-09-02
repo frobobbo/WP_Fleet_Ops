@@ -198,6 +198,9 @@ def test_responses_include_browser_security_headers(tmp_path):
 
         assert response.headers["x-content-type-options"] == "nosniff"
         assert response.headers["x-frame-options"] == "DENY"
+        assert response.headers["cross-origin-opener-policy"] == "same-origin"
+        assert response.headers["cross-origin-resource-policy"] == "same-origin"
+        assert response.headers["x-permitted-cross-domain-policies"] == "none"
         assert response.headers["referrer-policy"] == "no-referrer"
         assert response.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
         assert response.headers["cache-control"] == "no-store"
