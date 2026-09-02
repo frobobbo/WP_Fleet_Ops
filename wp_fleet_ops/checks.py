@@ -133,15 +133,12 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
         raise ValueError(error)
-    # A terminal dot marks an absolute DNS name but resolves to the same host.
-    # Canonicalize it so FQDN and ordinary spellings do not create two sites.
-    # URI percent-encoding also permits dots in registered hostnames. Decode dots
-    # only in non-IPv6 hosts: encoded dots in paths stay escaped because complete
-    # ``.`` and ``..`` path segments have special resolution behavior.
+    # URI percent-encoding permits dots in registered hostnames. Decode dots only
+    # in non-IPv6 hosts: encoded dots in paths stay escaped because complete ``.``
+    # and ``..`` path segments have special resolution behavior.
     hostname = parsed_hostname.lower()
     if ":" not in hostname:
         hostname = re.sub(r"%2e", ".", hostname, flags=re.IGNORECASE)
-    hostname = hostname.removesuffix(".")
     if not hostname:
         raise ValueError(error)
     if ":" in hostname:
@@ -158,6 +155,12 @@ def normalize_site_url(url: str) -> str:
             hostname = hostname.encode("idna").decode("ascii")
         except UnicodeError as exc:
             raise ValueError(error) from exc
+        # A terminal dot marks an absolute DNS name but resolves to the same host.
+        # Canonicalize it after IDNA conversion because the codec maps Unicode DNS
+        # root separators such as ``。`` to an ASCII dot.
+        hostname = hostname.removesuffix(".")
+        if not hostname:
+            raise ValueError(error)
         try:
             hostname = IPv4Address(hostname).compressed
         except AddressValueError:

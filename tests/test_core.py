@@ -782,6 +782,12 @@ def test_normalize_site_url_deduplicates_fully_qualified_hostnames():
     assert normalize_site_url("https://Example.COM.:8443/status") == "https://example.com:8443/status"
 
 
+def test_normalize_site_url_deduplicates_unicode_fully_qualified_hostnames():
+    assert normalize_site_url("HTTPS://BÜCHER.example。/") == (
+        "https://xn--bcher-kva.example"
+    )
+
+
 def test_normalize_site_url_decodes_encoded_hostname_dots_only():
     assert normalize_site_url("HTTPS://Example%2eCOM/path%2epart") == (
         "https://example.com/path%2Epart"
