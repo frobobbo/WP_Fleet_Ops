@@ -14,6 +14,7 @@ def make_source_tree(root: Path) -> None:
     (root / "tests").mkdir()
     (root / ".git").mkdir()
     (root / "pyproject.toml").write_text("[project]\nname = 'example'\n")
+    (root / "requirements.lock").write_text("example==1.0 --hash=sha256:test\n")
     (root / "uv.lock").write_text("version = 1\n")
     (root / "wp_fleet_ops" / "main.py").write_text("app = object()\n")
     (root / "wp_fleet_ops" / "__pycache__" / "main.pyc").write_bytes(b"cache")
@@ -41,6 +42,7 @@ def test_source_bundle_contains_only_runtime_files(tmp_path):
     with tarfile.open(output, "r:gz") as archive:
         assert set(archive.getnames()) == {
             "pyproject.toml",
+            "requirements.lock",
             "templates/index.html",
             "uv.lock",
             "wp_fleet_ops/main.py",
@@ -70,3 +72,30 @@ def test_source_bundle_rejects_symlinks_in_runtime_tree(tmp_path):
 
     assert result.returncode != 0
     assert "symlink" in result.stderr
+
+
+def test_production_requirements_match_frozen_uv_lock(tmp_path):
+    project_root = Path(__file__).parents[1]
+    exported = tmp_path / "requirements.lock"
+
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--frozen",
+            "--no-dev",
+            "--no-emit-project",
+            "--format",
+            "requirements.txt",
+            "--no-header",
+            "--no-annotate",
+            "--output-file",
+            str(exported),
+        ],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert (project_root / "requirements.lock").read_bytes() == exported.read_bytes()

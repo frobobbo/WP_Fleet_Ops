@@ -11,7 +11,7 @@ import stat
 import tarfile
 import tempfile
 
-RUNTIME_FILES = ("pyproject.toml", "uv.lock")
+RUNTIME_FILES = ("pyproject.toml", "requirements.lock", "uv.lock")
 RUNTIME_TREES = ("wp_fleet_ops", "templates")
 IGNORED_PARTS = {"__pycache__"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}

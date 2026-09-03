@@ -21,6 +21,21 @@ def test_container_healthcheck_requires_database_readiness():
     assert "/health" not in healthcheck
 
 
+def test_deploy_paths_install_hash_locked_runtime_dependencies():
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    values = (root / "charts" / "wp-fleet-ops" / "values.yaml").read_text()
+
+    assert "COPY requirements.lock ./" in dockerfile
+    assert "pip install --no-cache-dir --require-hashes -r requirements.lock" in dockerfile
+    assert "pip install --no-cache-dir --no-deps ." in dockerfile
+    assert (
+        "pip install --no-cache-dir --require-hashes --target /work/site "
+        "-r /work/app/requirements.lock"
+    ) in values
+    assert "pip install --no-cache-dir --no-deps --target /work/site /work/app" in values
+
+
 def test_helm_connection_test_checks_required_app_surfaces():
     helm_test = (
         Path(__file__).parents[1]

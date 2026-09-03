@@ -8,9 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 RUN addgroup --system app && adduser --system --ingroup app app && mkdir -p /data && chown -R app:app /data
 COPY pyproject.toml README.md ./
+COPY requirements.lock ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY wp_fleet_ops ./wp_fleet_ops
 COPY templates ./templates
-RUN python -m pip install --no-cache-dir --upgrade pip && python -m pip install --no-cache-dir .
+RUN python -m pip install --no-cache-dir --no-deps .
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).read()"

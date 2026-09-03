@@ -135,11 +135,20 @@ helm upgrade --install wp-fleet-ops ./charts/wp-fleet-ops \
   --set sourceBundle.configMapName=wp-fleet-ops-source
 ```
 
-The builder includes only `pyproject.toml`, `uv.lock`, `wp_fleet_ops/`, and
-`templates/`; rejects symlinks; omits caches; and writes the archive atomically
-with mode `0600`. It fails before deployment if the compressed archive exceeds
-the conservative ConfigMap size limit. If the ConfigMap uses a different archive
-key, set `sourceBundle.fileName` to that key; the chart projects it to the stable
+The builder includes only `pyproject.toml`, `requirements.lock`, `uv.lock`,
+`wp_fleet_ops/`, and `templates/`; rejects symlinks; omits caches; and writes the
+archive atomically with mode `0600`. Both the fallback and container image install
+the exact hash-verified runtime dependency set exported from `uv.lock`. After an
+intentional lock update, regenerate that export with:
+
+```bash
+uv export --frozen --no-dev --no-emit-project --format requirements.txt \
+  --no-header --no-annotate --output-file requirements.lock
+```
+
+The builder fails before deployment if the compressed archive exceeds the
+conservative ConfigMap size limit. If the ConfigMap uses a different archive key,
+set `sourceBundle.fileName` to that key; the chart projects it to the stable
 `/bundle/app.tar.gz` runtime path expected by the init container. The unpacked
 source and installed dependencies use an ephemeral volume capped at 512 MiB by
 default; tune `sourceBundle.workSizeLimit` if a future dependency set needs more
