@@ -9,7 +9,7 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import quote, urlparse, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlparse, urlsplit, urlunsplit
 
 
 MAX_SITE_NAME_LENGTH = 200
@@ -78,6 +78,18 @@ def normalize_site_url(url: str) -> str:
         or re.search(r"%(?![0-9a-f]{2})", candidate, re.IGNORECASE)
         or re.search(r"%(?:0[0-9a-f]|1[0-9a-f]|7f)", candidate, re.IGNORECASE)
     ):
+        raise ValueError(error)
+    try:
+        decoded_candidate = unquote(candidate, errors="strict")
+    except UnicodeDecodeError as exc:
+        # FleetOps stores IRIs as UTF-8 URIs. Invalid encoded byte sequences can
+        # be interpreted differently by clients and origins, so do not retain an
+        # ambiguous target that cannot round-trip through that contract.
+        raise ValueError(error) from exc
+    if any(not char.isprintable() for char in decoded_candidate):
+        # Apply the raw-character safety rule after percent decoding as well.
+        # Otherwise UTF-8 spellings of format controls (for example a bidi
+        # override) bypass validation while identifying the same unsafe target.
         raise ValueError(error)
     # Percent-escape hex digits are case-insensitive. Persist one spelling so
     # equivalent request targets cannot create separate monitored site records.
