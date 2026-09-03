@@ -150,15 +150,23 @@ def normalize_site_url(url: str) -> str:
         raise ValueError(error)
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
         raise ValueError(error)
-    # URI percent-encoding permits dots in registered hostnames. Decode dots only
-    # in non-IPv6 hosts: encoded dots in paths stay escaped because complete ``.``
-    # and ``..`` path segments have special resolution behavior.
-    hostname = parsed_hostname.lower()
-    if ":" not in hostname:
-        hostname = re.sub(r"%2e", ".", hostname, flags=re.IGNORECASE)
+    # URI registered names may percent-encode UTF-8 as well as dots. Decode only
+    # the hostname before IDNA conversion so raw Unicode, encoded UTF-8, and
+    # punycode spellings share one identity; path escapes retain their distinct
+    # dot-segment semantics. Structural delimiters decoded inside a registered
+    # name are still rejected by the DNS-label grammar below.
+    is_ipv6 = ":" in parsed_hostname
+    try:
+        hostname = (
+            parsed_hostname
+            if is_ipv6
+            else unquote(parsed_hostname, errors="strict")
+        ).lower()
+    except UnicodeDecodeError as exc:
+        raise ValueError(error) from exc
     if not hostname:
         raise ValueError(error)
-    if ":" in hostname:
+    if is_ipv6:
         try:
             # IPv6 has many equivalent textual spellings. Persist the RFC 5952-
             # style compressed form so one endpoint cannot become several sites.

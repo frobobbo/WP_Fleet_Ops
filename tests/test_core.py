@@ -826,6 +826,20 @@ def test_store_deduplicates_unicode_and_punycode_hostnames(tmp_path):
     assert len(store.list_sites()) == 1
 
 
+def test_store_deduplicates_percent_encoded_unicode_hostnames(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    first_id = store.upsert_site("International Site", "https://café.example/status")
+    duplicate_id = store.upsert_site(
+        "International Site",
+        "https://caf%C3%A9.example/status",
+    )
+
+    assert duplicate_id == first_id
+    assert store.list_sites()[0]["url"] == "https://xn--caf-dma.example/status"
+    assert len(store.list_sites()) == 1
+
+
 def test_store_normalizes_site_labels_and_rejects_blank_names(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 
