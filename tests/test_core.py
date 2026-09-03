@@ -1044,6 +1044,28 @@ def test_normalize_site_url_preserves_empty_path_parameter_delimiter():
     )
 
 
+def test_normalize_site_url_preserves_empty_query_delimiter():
+    assert normalize_site_url("https://example.com/status?") == (
+        "https://example.com/status?"
+    )
+    assert normalize_site_url("https://example.com/?#dashboard") == (
+        "https://example.com?"
+    )
+
+
+def test_store_keeps_empty_query_target_distinct(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+
+    query_target_id = store.upsert_site("Query Target", "https://example.com/status?")
+    plain_target_id = store.upsert_site("Plain Target", "https://example.com/status")
+
+    assert query_target_id != plain_target_id
+    assert {site["url"] for site in store.list_sites()} == {
+        "https://example.com/status?",
+        "https://example.com/status",
+    }
+
+
 def test_store_keeps_empty_path_parameter_target_distinct(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 

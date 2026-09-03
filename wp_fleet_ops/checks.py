@@ -104,6 +104,11 @@ def normalize_site_url(url: str) -> str:
         if explicit_scheme and not host_with_port:
             raise ValueError(error)
         candidate = f"https://{candidate}"
+    # An explicitly empty query is still part of the HTTP request target and
+    # can be routed differently from a URL with no query delimiter. urlsplit
+    # represents both forms with an empty ``query``, so retain the delimiter's
+    # presence separately (while ignoring question marks inside the fragment).
+    has_query_delimiter = "?" in candidate.partition("#")[0]
     # urlparse splits the final path segment's semicolon parameters into a
     # separate field and cannot distinguish no parameter delimiter from an
     # explicitly empty one (``/status`` versus ``/status;``). urlsplit keeps the
@@ -203,6 +208,8 @@ def normalize_site_url(url: str) -> str:
     query = re.sub(r"%2e", ".", parsed.query, flags=re.IGNORECASE)
     query = quote(query, safe="/?:@-._~!$&'()*+,;=%")
     normalized = urlunsplit((scheme, netloc, path, query, ""))
+    if has_query_delimiter and not query:
+        normalized += "?"
     # A bare host gains an implicit ``https://`` prefix, and IDNA conversion may
     # expand Unicode labels. Bound the canonical value that will actually be
     # persisted, not only the shorter operator-supplied spelling.
