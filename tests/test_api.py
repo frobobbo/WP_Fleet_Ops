@@ -796,6 +796,9 @@ def test_api_sites_marks_old_snapshots_stale(tmp_path):
     assert site["observed_status"] == "red"
     assert site["critical_alerts"] == 0
     assert site["observed_critical_alerts"] >= 1
+    assert site["alerts"] == []
+    assert site["observed_alerts"]
+    assert all(alert["severity"] == "critical" for alert in site["observed_alerts"])
     assert site["snapshot_freshness"] == "stale"
     assert site["snapshot_age_hours"] > 168
 

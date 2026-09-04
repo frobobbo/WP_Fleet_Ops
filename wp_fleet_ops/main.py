@@ -426,7 +426,12 @@ def api_sites():
                 "snapshot_age_hours": age_hours,
                 "critical_alerts": observed_critical_alerts if freshness == "current" else 0,
                 "observed_critical_alerts": observed_critical_alerts,
-                "alerts": row["alerts"],
+                # Keep the ordinary alert surface safe for dispatch consumers:
+                # stale or untrusted timestamps cannot support current alerts.
+                # Preserve the last payload under an explicitly historical key
+                # so operators can still investigate what was observed.
+                "alerts": row["alerts"] if freshness == "current" else [],
+                "observed_alerts": row["alerts"],
             }
         )
     return {
