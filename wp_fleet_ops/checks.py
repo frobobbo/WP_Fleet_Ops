@@ -16,6 +16,11 @@ MAX_SITE_NAME_LENGTH = 200
 MAX_SITE_URL_LENGTH = 2048
 MAX_CLIENT_NAME_LENGTH = 200
 MAX_WORDPRESS_VERSION_LENGTH = 100
+MONITORED_SECURITY_HEADERS = (
+    "strict-transport-security",
+    "x-frame-options",
+    "content-security-policy",
+)
 PERCENT_DECODE_SAFE = frozenset(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~"
 )
@@ -360,6 +365,15 @@ def ssl_days_remaining(url: str, timeout: int = 10) -> int:
         return 0
 
 
+def _monitored_security_headers(headers) -> dict[str, str]:
+    """Retain only response headers used by FleetOps security scoring."""
+    return {
+        name.lower(): value
+        for name, value in headers.items()
+        if name.lower() in MONITORED_SECURITY_HEADERS
+    }
+
+
 def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
     name = normalize_site_name(name)
     url = normalize_site_url(url)
@@ -371,13 +385,15 @@ def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
         req = urllib.request.Request(url, headers={"User-Agent": "WP FleetOps/0.1"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.status
-            headers = dict(resp.headers.items())
+            # Cookies and unrelated origin metadata are neither needed for
+            # scoring nor safe to retain in operational history.
+            headers = _monitored_security_headers(resp.headers)
             effective_url = normalize_site_url(resp.geturl())
     except urllib.error.HTTPError as exc:
         # HTTPError still represents a completed HTTP response. Preserve its
         # status and headers so operators see the actual server-side failure.
         status = exc.code
-        headers = dict(exc.headers.items()) if exc.headers else {}
+        headers = _monitored_security_headers(exc.headers) if exc.headers else {}
         effective_url = normalize_site_url(exc.geturl())
     except Exception:
         status = 0

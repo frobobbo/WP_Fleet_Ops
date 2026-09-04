@@ -1130,6 +1130,7 @@ def test_store_keeps_empty_path_parameter_target_distinct(tmp_path):
 def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypatch):
     headers = Message()
     headers["Strict-Transport-Security"] = "max-age=31536000"
+    headers["Set-Cookie"] = "session=sensitive"
 
     def unavailable(*_args, **_kwargs):
         raise HTTPError("http://unavailable.example", 503, "Service Unavailable", headers, None)
@@ -1139,8 +1140,50 @@ def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypa
     check = fetch_basic_site_check("Unavailable", "http://unavailable.example")
 
     assert check.http_status == 503
-    assert check.security_headers["strict-transport-security"] == "max-age=31536000"
+    assert check.security_headers == {
+        "strict-transport-security": "max-age=31536000",
+    }
     assert "HTTP status is 503" in check.actions[0]
+
+
+def test_fetch_basic_site_check_retains_only_monitored_security_headers(monkeypatch):
+    headers = Message()
+    headers["Strict-Transport-Security"] = "max-age=31536000"
+    headers["X-Frame-Options"] = "SAMEORIGIN"
+    headers["Content-Security-Policy"] = "frame-ancestors 'self'"
+    headers["Set-Cookie"] = "session=sensitive"
+    headers["Server"] = "origin-runtime"
+
+    class SuccessfulResponse:
+        status = 200
+
+        def __init__(self, response_headers):
+            self.headers = response_headers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "http://header-minimization.example"
+
+    monkeypatch.setattr(
+        "wp_fleet_ops.checks.urllib.request.urlopen",
+        lambda *_args, **_kwargs: SuccessfulResponse(headers),
+    )
+
+    check = fetch_basic_site_check(
+        "Header Minimization",
+        "http://header-minimization.example",
+    )
+
+    assert check.security_headers == {
+        "strict-transport-security": "max-age=31536000",
+        "x-frame-options": "SAMEORIGIN",
+        "content-security-policy": "frame-ancestors 'self'",
+    }
 
 
 def test_fetch_basic_site_check_uses_final_https_redirect_for_certificate(monkeypatch):

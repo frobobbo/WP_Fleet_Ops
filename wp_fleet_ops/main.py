@@ -15,6 +15,7 @@ from .checks import (
     MAX_SITE_NAME_LENGTH,
     MAX_SITE_URL_LENGTH,
     MAX_WORDPRESS_VERSION_LENGTH,
+    MONITORED_SECURITY_HEADERS,
     SiteCheck,
     evaluate_site,
     fetch_basic_site_check,
@@ -4969,7 +4970,7 @@ def fetch_care_check(
     check = fetch_basic_site_check(name, url)
     security_header_count = sum(
         1
-        for header in ("strict-transport-security", "x-frame-options", "content-security-policy")
+        for header in MONITORED_SECURITY_HEADERS
         if header in check.security_headers
     )
     fleet_site = FleetSite(
@@ -4996,13 +4997,11 @@ def fetch_care_check(
 
 def _security_headers_from_count(security_header_count: int) -> dict[str, str]:
     """Represent count-only snapshots in care reports without losing coverage."""
-    monitored_headers = (
-        "strict-transport-security",
-        "x-frame-options",
-        "content-security-policy",
-    )
-    bounded_count = max(0, min(security_header_count, len(monitored_headers)))
-    return {header: "reported present" for header in monitored_headers[:bounded_count]}
+    bounded_count = max(0, min(security_header_count, len(MONITORED_SECURITY_HEADERS)))
+    return {
+        header: "reported present"
+        for header in MONITORED_SECURITY_HEADERS[:bounded_count]
+    }
 
 
 @app.post("/snapshot")
