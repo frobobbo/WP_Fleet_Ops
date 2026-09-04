@@ -48,6 +48,69 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_manual_check_records_unreachable_http_sentinel(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/care/manual-check",
+        data={
+            "name": "Unreachable Site",
+            "url": "https://unreachable.example",
+            "client": "Outage Client",
+            "http_status": "0",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    care_check = client.get("/api/care-check-history").json()["care_checks"][0]
+    snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    assert care_check["http_status"] == 0
+    assert care_check["status"] == "red"
+    assert care_check["actions"][0] == "Investigate uptime: HTTP status is 0."
+    assert snapshot["uptime_ok"] is False
+    assert any(
+        alert["severity"] == "critical" and "unreachable" in alert["message"]
+        for alert in snapshot["alerts"]
+    )
+    assert (
+        '<input name="http_status" type="number" min="0" max="599" value="200">'
+        in client.get("/").text
+    )
+
+
+@pytest.mark.parametrize("http_status", [1, 99])
+def test_manual_check_rejects_non_http_statuses_without_partial_state(
+    tmp_path,
+    http_status,
+):
+    client = make_test_client(tmp_path)
+
+    response = client.post(
+        "/care/manual-check",
+        data={
+            "name": "Invalid HTTP Status",
+            "url": "https://invalid-http-status.example",
+            "http_status": str(http_status),
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "http_status must be 0 or between 100 and 599."
+    }
+    assert client.get("/ready").json() == {
+        "status": "ready",
+        "app": "wp-fleet-ops",
+        "revision": "test-revision",
+        "database": "ok",
+        "sites": 0,
+        "care_checks": 0,
+        "fleet_snapshots": 0,
+    }
+
+
 @pytest.mark.parametrize(
     ("path", "payload"),
     [

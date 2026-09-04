@@ -4927,7 +4927,9 @@ def manual_care_check(
     name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
     url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
     client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
-    http_status: int = Form(200, ge=100, le=599),
+    # Zero is the explicit no-response sentinel accepted by ``evaluate_site``;
+    # values 1-99 still fail the evaluator before any observation is persisted.
+    http_status: int = Form(200, ge=0, le=599),
     latency_ms: int = Form(250, ge=0, le=SQLITE_INTEGER_MAX),
     ssl_days_remaining: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
     wordpress_version: str = Form("unknown", max_length=MAX_WORDPRESS_VERSION_LENGTH),

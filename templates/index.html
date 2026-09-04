@@ -140,7 +140,7 @@
             <div class="field"><label>Site name</label><input name="name" maxlength="200" placeholder="Strategy Plus" required></div>
             <div class="field"><label>URL</label><input name="url" maxlength="2048" placeholder="https://example.com" required></div>
             <div class="field"><label>Client</label><input name="client" maxlength="200" placeholder="Client or brand"></div>
-            <div class="field"><label>HTTP status</label><input name="http_status" type="number" value="200"></div>
+            <div class="field"><label>HTTP status (0 = unreachable)</label><input name="http_status" type="number" min="0" max="599" value="200"></div>
             <div class="field"><label>Latency ms</label><input name="latency_ms" type="number" value="250"></div>
             <div class="field"><label>SSL days</label><input name="ssl_days_remaining" type="number" value="60"></div>
             <div class="field"><label>WP version</label><input name="wordpress_version" maxlength="100" value="6.6"></div>
