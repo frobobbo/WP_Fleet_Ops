@@ -36,6 +36,18 @@ def test_deploy_paths_install_hash_locked_runtime_dependencies():
     assert "pip install --no-cache-dir --no-deps --target /work/site /work/app" in values
 
 
+def test_runtime_paths_suppress_uvicorn_server_banner():
+    """Public responses should not advertise the application server runtime."""
+    root = Path(__file__).parents[1]
+    dockerfile = (root / "Dockerfile").read_text()
+    values = (root / "charts" / "wp-fleet-ops" / "values.yaml").read_text()
+    main_module = (root / "wp_fleet_ops" / "main.py").read_text()
+
+    assert '"--no-server-header"' in dockerfile
+    assert "--no-server-header" in values
+    assert "server_header=False" in main_module
+
+
 def test_helm_connection_test_checks_required_app_surfaces():
     helm_test = (
         Path(__file__).parents[1]

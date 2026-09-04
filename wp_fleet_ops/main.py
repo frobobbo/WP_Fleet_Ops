@@ -5199,4 +5199,9 @@ def report():
 def run():
     import uvicorn
 
-    uvicorn.run("wp_fleet_ops.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(
+        "wp_fleet_ops.main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        server_header=False,
+    )

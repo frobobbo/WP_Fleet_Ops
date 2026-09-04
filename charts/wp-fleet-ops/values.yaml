@@ -108,7 +108,7 @@ sourceBundle:
   workSizeLimit: 512Mi
   pythonImage: python:3.13-slim
   prepareCommand: "mkdir -p /work/app /work/site && tar -xzf /bundle/app.tar.gz -C /work/app && chmod -R a+rX /work/app && python -m pip install --no-cache-dir --require-hashes --target /work/site -r /work/app/requirements.lock && python -m pip install --no-cache-dir --no-deps --target /work/site /work/app && chmod -R a+rX /work/site"
-  runCommand: "PYTHONPATH=/work/site:/work/app python -m uvicorn wp_fleet_ops.main:app --host 0.0.0.0 --port 8000"
+  runCommand: "PYTHONPATH=/work/site:/work/app python -m uvicorn wp_fleet_ops.main:app --host 0.0.0.0 --port 8000 --no-server-header"
 
 # Give image startup and source-bundle dependency installation up to three
 # minutes before liveness checks may restart the container. Readiness proves
