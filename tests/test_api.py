@@ -939,12 +939,55 @@ def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):
     assert missing["status"] == "unknown"
     assert missing["score"] is None
     assert missing["latest_snapshot_at"] is None
-    assert missing["recommended_action"] == "Capture an initial fleet snapshot for this site."
+    assert missing["recommended_action"] == (
+        "Capture an initial combined care check and fleet snapshot."
+    )
     tracked = payload["sites"][1]
     assert tracked["monitoring_status"] == "monitored"
     assert tracked["status"] == "green"
     assert tracked["score"] >= 85
     assert tracked["latest_snapshot_at"]
+    assert tracked["latest_care_check_at"]
+    assert tracked["care_check_freshness"] == "current"
+    assert tracked["evidence_status"] == "current"
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+
+
+def test_api_site_directory_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Directory Risk",
+            url="https://unpaired-directory.example",
+            uptime_ok="false",
+            ssl_days="2",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("delete from care_checks")
+
+    payload = client.get("/api/site-directory").json()
+
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["missing_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["paired_coverage_percent"] == 0
+    site = payload["sites"][0]
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "missing"
+    assert site["latest_care_check_at"] is None
+    assert site["care_check_age_hours"] is None
+    assert site["evidence_status"] == "incomplete"
+    assert site["status"] == "unknown"
+    assert site["observed_status"] == "red"
+    assert site["recommended_action"] == (
+        "Capture an initial care check before relying on site health."
+    )
 
 
 def test_api_site_directory_surfaces_stale_snapshot_freshness(tmp_path):
@@ -970,7 +1013,9 @@ def test_api_site_directory_surfaces_stale_snapshot_freshness(tmp_path):
     assert site["observed_status"] == "green"
     assert site["snapshot_freshness"] == "stale"
     assert site["snapshot_age_hours"] > 168
-    assert site["recommended_action"] == "Capture a fresh fleet snapshot and verify site health."
+    assert site["recommended_action"] == (
+        "Capture a fresh fleet snapshot before relying on site health."
+    )
 
 
 def test_api_clients_rolls_up_account_health(tmp_path):

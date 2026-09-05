@@ -465,12 +465,24 @@ def api_sites():
 
 @app.get("/api/site-directory")
 def api_site_directory():
-    """Return every tracked site, including sites not yet covered by a snapshot."""
+    """Return every tracked site with paired monitoring-evidence status."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {row["url"]: row for row in store.latest_care_checks()}
     sites = []
     for site in store.list_sites():
         latest = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
+        latest_care_check_at = care_check.get("checked_at") if care_check else None
         if latest:
             score = latest["score"]
             observed_status = _dashboard_status(score)
@@ -479,18 +491,21 @@ def api_site_directory():
                 now,
                 SNAPSHOT_FRESHNESS_HOURS,
             )
-            if freshness == "stale":
-                recommended_action = "Capture a fresh fleet snapshot and verify site health."
-            elif freshness == "clock_skew":
-                recommended_action = "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
-            elif freshness == "invalid":
-                recommended_action = "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
-            else:
-                recommended_action = (
-                    "Continue normal monitoring cadence."
-                    if score >= 85
-                    else "Review the latest snapshot and open remediation tasks."
+            evidence_is_current = (
+                freshness == "current" and care_check_freshness == "current"
+            )
+            recommended_action = (
+                "Continue normal monitoring cadence."
+                if evidence_is_current and score >= 85
+                else (
+                    "Review the latest snapshot and open remediation tasks."
+                    if evidence_is_current
+                    else _monitoring_coverage_action(
+                        freshness,
+                        care_check_freshness,
+                    )
                 )
+            )
             sites.append(
                 {
                     "name": site["name"],
@@ -498,11 +513,15 @@ def api_site_directory():
                     "client": site["client"] or "Unassigned",
                     "monitoring_status": "monitored",
                     "score": score,
-                    "status": observed_status if freshness == "current" else "unknown",
+                    "status": observed_status if evidence_is_current else "unknown",
                     "observed_status": observed_status,
                     "latest_snapshot_at": latest["captured_at"],
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": age_hours,
+                    "latest_care_check_at": latest_care_check_at,
+                    "care_check_freshness": care_check_freshness,
+                    "care_check_age_hours": care_check_age_hours,
+                    "evidence_status": "current" if evidence_is_current else "incomplete",
                     "recommended_action": recommended_action,
                 }
             )
@@ -519,10 +538,20 @@ def api_site_directory():
                     "latest_snapshot_at": None,
                     "snapshot_freshness": "missing",
                     "snapshot_age_hours": None,
-                    "recommended_action": "Capture an initial fleet snapshot for this site.",
+                    "latest_care_check_at": latest_care_check_at,
+                    "care_check_freshness": care_check_freshness,
+                    "care_check_age_hours": care_check_age_hours,
+                    "evidence_status": "incomplete",
+                    "recommended_action": _monitoring_coverage_action(
+                        "missing",
+                        care_check_freshness,
+                    ),
                 }
             )
     sites.sort(key=lambda row: (row["monitoring_status"] != "missing_snapshot", row["client"], row["name"]))
+    current_evidence_count = sum(
+        1 for site in sites if site["evidence_status"] == "current"
+    )
     return {
         "generated_at": now.isoformat(),
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
@@ -532,6 +561,22 @@ def api_site_directory():
         "current_snapshot_count": sum(1 for site in sites if site["snapshot_freshness"] == "current"),
         "stale_snapshot_count": sum(
             1 for site in sites if site["snapshot_freshness"] in {"stale", "clock_skew", "invalid"}
+        ),
+        "current_care_check_count": sum(
+            1 for site in sites if site["care_check_freshness"] == "current"
+        ),
+        "missing_care_check_count": sum(
+            1 for site in sites if site["care_check_freshness"] == "missing"
+        ),
+        "stale_care_check_count": sum(
+            1
+            for site in sites
+            if site["care_check_freshness"] in {"stale", "clock_skew", "invalid"}
+        ),
+        "current_evidence_count": current_evidence_count,
+        "monitoring_gap_count": len(sites) - current_evidence_count,
+        "paired_coverage_percent": (
+            round((current_evidence_count / len(sites)) * 100) if sites else 100
         ),
         "sites": sites,
     }
