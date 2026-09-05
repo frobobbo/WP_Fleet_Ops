@@ -11,7 +11,8 @@ revisionHistoryLimit: 3
 minReadySeconds: 5
 
 deploymentStrategy:
-  # Recreate avoids RWO PVC multi-attach stalls during single-replica upgrades.
+  # Recreate avoids RWO PVC multi-attach stalls and overlapping SQLite writers
+  # during single-replica upgrades. values.schema.json rejects other strategies.
   type: Recreate
 
 image:

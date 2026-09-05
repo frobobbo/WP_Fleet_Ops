@@ -48,6 +48,17 @@ def test_helm_chart_enforces_single_sqlite_writer():
     assert replica_schema["maximum"] == 1
 
 
+def test_helm_chart_enforces_non_overlapping_sqlite_rollouts():
+    """Value overrides must not reintroduce overlapping SQLite writers."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    schema = json.loads((chart / "values.schema.json").read_text())
+
+    strategy_schema = schema["properties"]["deploymentStrategy"]
+    assert strategy_schema["type"] == "object"
+    assert strategy_schema["required"] == ["type"]
+    assert strategy_schema["properties"]["type"]["enum"] == ["Recreate"]
+
+
 def test_runtime_paths_suppress_uvicorn_server_banner():
     """Public responses should not advertise the application server runtime."""
     root = Path(__file__).parents[1]

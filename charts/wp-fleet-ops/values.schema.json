@@ -7,6 +7,17 @@
       "minimum": 1,
       "maximum": 1,
       "description": "WP FleetOps requires exactly one replica because it uses a single SQLite database."
+    },
+    "deploymentStrategy": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["Recreate"],
+          "description": "WP FleetOps requires non-overlapping Pod replacement because it uses SQLite on a shared RWO volume."
+        }
+      }
     }
   }
 }

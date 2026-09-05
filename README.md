@@ -123,7 +123,9 @@ The chart enforces exactly one application replica. FleetOps uses a single
 SQLite database on an RWO volume, so multiple replicas would either fail volume
 attachment or create unsupported competing database writers. Scale the host
 resources rather than the replica count until the application supports an
-external multi-writer database.
+external multi-writer database. The chart also enforces the `Recreate`
+deployment strategy so a values override cannot briefly overlap old and new
+Pods against the same SQLite database during an upgrade.
 
 ### Source-bundle fallback
 
