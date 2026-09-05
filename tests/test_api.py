@@ -835,6 +835,10 @@ def test_api_sites_returns_latest_per_site_operational_status(tmp_path):
     assert sites[0]["latest_snapshot_at"]
     assert sites[0]["snapshot_freshness"] == "current"
     assert sites[0]["snapshot_age_hours"] >= 0
+    assert sites[0]["latest_care_check_at"]
+    assert sites[0]["care_check_freshness"] == "current"
+    assert sites[0]["care_check_age_hours"] >= 0
+    assert sites[0]["evidence_status"] == "current"
 
 
 def test_api_sites_marks_old_snapshots_stale(tmp_path):
@@ -864,6 +868,51 @@ def test_api_sites_marks_old_snapshots_stale(tmp_path):
     assert all(alert["severity"] == "critical" for alert in site["observed_alerts"])
     assert site["snapshot_freshness"] == "stale"
     assert site["snapshot_age_hours"] > 168
+
+
+@pytest.mark.parametrize(
+    ("care_timestamp", "expected_freshness", "expected_latest_at"),
+    [
+        (None, "missing", None),
+        ("2000-01-01 00:00:00", "stale", "2000-01-01 00:00:00"),
+    ],
+)
+def test_api_sites_fails_closed_without_current_paired_care_evidence(
+    tmp_path,
+    care_timestamp,
+    expected_freshness,
+    expected_latest_at,
+):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Risk",
+            url="https://unpaired-risk.example",
+            uptime_ok="false",
+            ssl_days="2",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        if care_timestamp is None:
+            con.execute("delete from care_checks")
+        else:
+            con.execute("update care_checks set checked_at = ?", (care_timestamp,))
+
+    site = client.get("/api/sites").json()["sites"][0]
+
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == expected_freshness
+    assert site["latest_care_check_at"] == expected_latest_at
+    assert site["care_check_age_hours"] is None or site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["status"] == "unknown"
+    assert site["observed_status"] == "red"
+    assert site["critical_alerts"] == 0
+    assert site["observed_critical_alerts"] >= 1
+    assert site["alerts"] == []
+    assert site["observed_alerts"]
 
 
 def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):

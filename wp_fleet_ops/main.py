@@ -401,14 +401,31 @@ def api_summary():
 
 @app.get("/api/sites")
 def api_sites():
-    """Return latest per-site operational status, sorted by riskiest site first."""
+    """Return latest per-site status only when paired monitoring evidence is current."""
     now = datetime.now(timezone.utc)
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     sites = []
     for row in store.latest_dashboard():
         freshness, age_hours = _snapshot_freshness(
             row.get("captured_at"),
             now,
             SNAPSHOT_FRESHNESS_HOURS,
+        )
+        care_check = care_checks_by_url.get(row["url"])
+        if care_check:
+            care_check_freshness, care_check_age_hours = _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            latest_care_check_at = care_check.get("checked_at")
+        else:
+            care_check_freshness, care_check_age_hours = "missing", None
+            latest_care_check_at = None
+        evidence_is_current = (
+            freshness == "current" and care_check_freshness == "current"
         )
         observed_status = _dashboard_status(row["score"])
         observed_critical_alerts = sum(
@@ -420,18 +437,22 @@ def api_sites():
                 "url": row["url"],
                 "client": row["client"],
                 "score": row["score"],
-                "status": observed_status if freshness == "current" else "unknown",
+                "status": observed_status if evidence_is_current else "unknown",
                 "observed_status": observed_status,
                 "latest_snapshot_at": row["captured_at"],
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
-                "critical_alerts": observed_critical_alerts if freshness == "current" else 0,
+                "latest_care_check_at": latest_care_check_at,
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "evidence_status": "current" if evidence_is_current else "incomplete",
+                "critical_alerts": observed_critical_alerts if evidence_is_current else 0,
                 "observed_critical_alerts": observed_critical_alerts,
                 # Keep the ordinary alert surface safe for dispatch consumers:
-                # stale or untrusted timestamps cannot support current alerts.
+                # incomplete paired evidence cannot support current alerts.
                 # Preserve the last payload under an explicitly historical key
                 # so operators can still investigate what was observed.
-                "alerts": row["alerts"] if freshness == "current" else [],
+                "alerts": row["alerts"] if evidence_is_current else [],
                 "observed_alerts": row["alerts"],
             }
         )
