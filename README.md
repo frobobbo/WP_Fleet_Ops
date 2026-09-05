@@ -119,6 +119,12 @@ release removal from silently deleting FleetOps history. To opt into destructive
 PVC cleanup for an intentionally disposable installation, set
 `persistence.keep=false` before uninstalling the release.
 
+The chart enforces exactly one application replica. FleetOps uses a single
+SQLite database on an RWO volume, so multiple replicas would either fail volume
+attachment or create unsupported competing database writers. Scale the host
+resources rather than the replica count until the application supports an
+external multi-writer database.
+
 ### Source-bundle fallback
 
 When the application image is unavailable, build the fallback archive with the

@@ -1,6 +1,7 @@
 from dataclasses import replace
 from email.message import Message
 from pathlib import Path
+import json
 import sqlite3
 from urllib.error import HTTPError
 
@@ -34,6 +35,17 @@ def test_deploy_paths_install_hash_locked_runtime_dependencies():
         "-r /work/app/requirements.lock"
     ) in values
     assert "pip install --no-cache-dir --no-deps --target /work/site /work/app" in values
+
+
+def test_helm_chart_enforces_single_sqlite_writer():
+    """FleetOps must not scale competing writers against its SQLite RWO volume."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    schema = json.loads((chart / "values.schema.json").read_text())
+
+    replica_schema = schema["properties"]["replicaCount"]
+    assert replica_schema["type"] == "integer"
+    assert replica_schema["minimum"] == 1
+    assert replica_schema["maximum"] == 1
 
 
 def test_runtime_paths_suppress_uvicorn_server_banner():

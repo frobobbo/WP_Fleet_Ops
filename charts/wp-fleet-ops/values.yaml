@@ -1,3 +1,5 @@
+# FleetOps uses one SQLite database on an RWO volume. values.schema.json rejects
+# additional replicas so operators cannot accidentally create competing writers.
 replicaCount: 1
 
 # Keep enough ReplicaSets for short rollback history without accumulating the
