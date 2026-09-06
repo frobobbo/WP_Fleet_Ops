@@ -1986,6 +1986,51 @@ def test_api_availability_fails_closed_for_missing_and_stale_evidence(tmp_path):
     assert healthy["reachable"] is True
 
 
+def test_api_availability_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Availability",
+            url="https://unpaired-availability.example",
+            client="Client Availability Gap",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/availability")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["available_count"] == 0
+    assert payload["down_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["availability_evidence_percent"] == 0
+
+    site = payload["sites"][0]
+    assert site["availability_status"] == "unknown"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["reachable"] is None
+    assert site["last_observed_reachable"] is False
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on availability status."
+    )
+
+
 def test_api_backups_highlights_stale_backup_queue(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

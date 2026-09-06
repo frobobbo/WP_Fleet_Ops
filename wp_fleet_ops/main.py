@@ -1355,29 +1355,53 @@ def api_incidents():
     }
 
 
-def _availability_recommended_action(status: str, freshness: str) -> str:
-    """Return the safest next step for current or incomplete availability evidence."""
+def _availability_recommended_action(
+    status: str,
+    snapshot_freshness: str,
+    care_check_freshness: str,
+) -> str:
+    """Return the safest next step for paired availability evidence."""
     if status == "down":
         return "Confirm site availability, hosting status, DNS, and recent deploys."
-    if freshness == "missing":
+    if snapshot_freshness == "current" and care_check_freshness == "current":
+        return "Continue normal availability monitoring."
+    if care_check_freshness != "current":
+        return _monitoring_coverage_action(
+            snapshot_freshness,
+            care_check_freshness,
+        ).replace("site health", "availability status")
+    if snapshot_freshness == "missing":
         return "Capture an initial fleet snapshot and verify site availability."
-    if freshness == "clock_skew":
+    if snapshot_freshness == "clock_skew":
         return "Correct the snapshot timestamp or source clock, then verify site availability."
-    if freshness == "invalid":
+    if snapshot_freshness == "invalid":
         return "Repair the invalid snapshot timestamp, then verify site availability."
-    if freshness == "stale":
+    if snapshot_freshness == "stale":
         return "Capture a fresh fleet snapshot before relying on availability status."
     return "Continue normal availability monitoring."
 
 
 @app.get("/api/availability")
 def api_availability():
-    """Return availability status while failing closed on missing or stale evidence."""
+    """Return availability status only when paired monitoring evidence is current."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     sites = []
     for site in store.list_sites():
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             freshness = "missing"
             age_hours = None
@@ -1393,7 +1417,7 @@ def api_availability():
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_reachable = bool(row["uptime_ok"])
-            if freshness != "current":
+            if freshness != "current" or care_check_freshness != "current":
                 availability_status = "unknown"
                 reachable = None
             else:
@@ -1408,10 +1432,24 @@ def api_availability():
                 "availability_status": availability_status,
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "evidence_status": (
+                    "current"
+                    if freshness == "current" and care_check_freshness == "current"
+                    else "incomplete"
+                ),
                 "reachable": reachable,
                 "last_observed_reachable": last_observed_reachable,
                 "latest_snapshot_at": latest_snapshot_at,
-                "recommended_action": _availability_recommended_action(availability_status, freshness),
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "recommended_action": _availability_recommended_action(
+                    availability_status,
+                    freshness,
+                    care_check_freshness,
+                ),
             }
         )
 
@@ -1420,12 +1458,23 @@ def api_availability():
     sites.sort(
         key=lambda site: (
             status_rank.get(site["availability_status"], 99),
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             site["client"].lower(),
             site["name"].lower(),
         )
     )
-    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    current_snapshot_count = sum(
+        1 for site in sites if site["snapshot_freshness"] == "current"
+    )
+    current_care_check_count = sum(
+        1 for site in sites if site["care_check_freshness"] == "current"
+    )
+    current_evidence_count = sum(
+        1 for site in sites if site["evidence_status"] == "current"
+    )
     available_count = sum(1 for site in sites if site["availability_status"] == "available")
     down_count = sum(1 for site in sites if site["availability_status"] == "down")
     unknown_count = len(sites) - current_evidence_count
@@ -1435,7 +1484,12 @@ def api_availability():
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": len(sites) - current_snapshot_count,
+        "care_check_gap_count": len(sites) - current_care_check_count,
+        "monitoring_gap_count": len(sites) - current_evidence_count,
         "available_count": available_count,
         "down_count": down_count,
         "unknown_count": unknown_count,
