@@ -4711,8 +4711,13 @@ def test_api_site_trends_includes_tracked_sites_missing_snapshot_history(tmp_pat
         "snapshot_age_hours": None,
         "latest_snapshot_at": None,
         "previous_snapshot_at": None,
+        "care_check_freshness": "missing",
+        "care_check_age_hours": None,
+        "latest_care_check_at": None,
+        "evidence_status": "incomplete",
         "recommended_action": (
-            "Capture an initial fleet snapshot before relying on site trend status."
+            "Capture an initial combined care check and fleet snapshot "
+            "before relying on site trend status."
         ),
     }
 
@@ -4763,6 +4768,61 @@ def test_api_site_trends_fail_closed_when_latest_snapshot_is_stale(tmp_path):
     assert trend["snapshot_age_hours"] > 168
     assert trend["recommended_action"] == (
         "Capture a fresh fleet snapshot before relying on site trend status."
+    )
+
+
+def test_api_site_trends_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Trend Site",
+            url="https://stale-care-trend.example",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Trend Site",
+            url="https://stale-care-trend.example",
+            uptime_ok="false",
+            ssl_days="3",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ? where id = "
+            "(select max(id) from care_checks)",
+            ("2000-01-01 00:00:00",),
+        )
+
+    payload = client.get("/api/site-trends").json()
+
+    assert payload["site_count"] == 1
+    assert payload["status"] == "yellow"
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["unknown_count"] == 1
+    assert payload["trend_evidence_percent"] == 0
+    assert payload["regressing_count"] == 0
+    trend = payload["trends"][0]
+    assert trend["trend_status"] == "unknown"
+    assert trend["latest_score"] is None
+    assert trend["previous_score"] is None
+    assert trend["score_delta"] is None
+    assert trend["observed_latest_score"] < trend["observed_previous_score"]
+    assert trend["observed_score_delta"] < 0
+    assert trend["observed_trend_status"] == "regressing"
+    assert trend["snapshot_freshness"] == "current"
+    assert trend["care_check_freshness"] == "stale"
+    assert trend["care_check_age_hours"] > 168
+    assert trend["evidence_status"] == "incomplete"
+    assert trend["recommended_action"] == (
+        "Capture a fresh care check before relying on site trend status."
     )
 
 

@@ -3880,21 +3880,27 @@ def _site_trend_status(score_delta: int | None) -> str:
     return "stable"
 
 
-def _site_trend_evidence_action(freshness: str) -> str:
-    """Return a safe next step when the latest trend evidence is not current."""
-    if freshness == "missing":
-        return "Capture an initial fleet snapshot before relying on site trend status."
-    if freshness == "clock_skew":
-        return "Correct the latest snapshot timestamp or source clock before relying on site trend status."
-    if freshness == "invalid":
-        return "Repair the latest snapshot timestamp before relying on site trend status."
-    return "Capture a fresh fleet snapshot before relying on site trend status."
+def _site_trend_evidence_action(
+    snapshot_freshness: str,
+    care_check_freshness: str,
+) -> str:
+    """Return the paired-evidence step needed before trusting site trends."""
+    action = _monitoring_coverage_action(
+        snapshot_freshness,
+        care_check_freshness,
+    )
+    if action == "Continue normal monitoring cadence.":
+        return "Continue monitoring the site trend."
+    if "before relying on site health" in action:
+        return action.replace("site health", "site trend status")
+    return f"{action.removesuffix('.')} before relying on site trend status."
 
 
 def _site_trend_rows(limit: int) -> list[dict]:
-    """Compare each site's latest snapshot with its prior snapshot for trend triage."""
+    """Compare snapshots only when the latest paired site evidence is current."""
     now = datetime.now(timezone.utc)
     tracked_sites = store.list_sites()
+    care_checks_by_url = {row["url"]: row for row in store.latest_care_checks()}
     history_by_url: dict[str, list[dict]] = {}
     for snapshot in store.recent_trend_snapshots(limit):
         history_by_url.setdefault(snapshot["url"], []).append(snapshot)
@@ -3916,16 +3922,30 @@ def _site_trend_rows(limit: int) -> list[dict]:
             now,
             SNAPSHOT_FRESHNESS_HOURS,
         )
-        is_current = freshness == "current"
+        care_check = care_checks_by_url.get(latest["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
+        evidence_is_current = (
+            freshness == "current" and care_check_freshness == "current"
+        )
         rows.append(
             {
                 "name": latest["name"],
                 "url": latest["url"],
                 "client": latest.get("client") or "Unassigned",
-                "latest_score": latest["score"] if is_current else None,
-                "previous_score": previous["score"] if previous and is_current else None,
-                "score_delta": observed_score_delta if is_current else None,
-                "trend_status": observed_status if is_current else "unknown",
+                "latest_score": latest["score"] if evidence_is_current else None,
+                "previous_score": (
+                    previous["score"] if previous and evidence_is_current else None
+                ),
+                "score_delta": observed_score_delta if evidence_is_current else None,
+                "trend_status": observed_status if evidence_is_current else "unknown",
                 "observed_latest_score": latest["score"],
                 "observed_previous_score": previous["score"] if previous else None,
                 "observed_score_delta": observed_score_delta,
@@ -3934,13 +3954,24 @@ def _site_trend_rows(limit: int) -> list[dict]:
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest["captured_at"],
                 "previous_snapshot_at": previous["captured_at"] if previous else None,
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "evidence_status": (
+                    "current" if evidence_is_current else "incomplete"
+                ),
                 "recommended_action": (
                     "Review recent changes and open a remediation task for the regression."
-                    if is_current and observed_status == "regressing"
+                    if evidence_is_current and observed_status == "regressing"
                     else (
                         "Continue monitoring the site trend."
-                        if is_current
-                        else _site_trend_evidence_action(freshness)
+                        if evidence_is_current
+                        else _site_trend_evidence_action(
+                            freshness,
+                            care_check_freshness,
+                        )
                     )
                 ),
             }
@@ -3949,6 +3980,16 @@ def _site_trend_rows(limit: int) -> list[dict]:
     for site in tracked_sites:
         if site["url"] in history_by_url:
             continue
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         rows.append(
             {
                 "name": site["name"],
@@ -3966,7 +4007,16 @@ def _site_trend_rows(limit: int) -> list[dict]:
                 "snapshot_age_hours": None,
                 "latest_snapshot_at": None,
                 "previous_snapshot_at": None,
-                "recommended_action": _site_trend_evidence_action("missing"),
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "evidence_status": "incomplete",
+                "recommended_action": _site_trend_evidence_action(
+                    "missing",
+                    care_check_freshness,
+                ),
             }
         )
 
@@ -3985,16 +4035,23 @@ def _site_trend_rows(limit: int) -> list[dict]:
 
 @app.get("/api/site-trends")
 def api_site_trends(limit: int = 100):
-    """Return latest-vs-previous site score trends for dispatch planning."""
+    """Return site trends only when paired monitoring evidence is current."""
     bounded_limit = max(2, min(limit, 500))
     trends = _site_trend_rows(bounded_limit)
-    current_evidence_count = sum(
+    current_snapshot_count = sum(
         1 for trend in trends if trend["snapshot_freshness"] == "current"
+    )
+    current_care_check_count = sum(
+        1 for trend in trends if trend["care_check_freshness"] == "current"
+    )
+    current_evidence_count = sum(
+        1 for trend in trends if trend["evidence_status"] == "current"
     )
     missing_snapshot_count = sum(
         1 for trend in trends if trend["snapshot_freshness"] == "missing"
     )
     unknown_count = len(trends) - current_evidence_count
+    monitoring_gap_count = unknown_count
     regressing_count = sum(1 for trend in trends if trend["trend_status"] == "regressing")
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -4003,8 +4060,12 @@ def api_site_trends(limit: int = 100):
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(trends),
         "monitored_site_count": len(trends) - missing_snapshot_count,
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
         "missing_snapshot_count": missing_snapshot_count,
+        "care_check_gap_count": len(trends) - current_care_check_count,
+        "monitoring_gap_count": monitoring_gap_count,
         "unknown_count": unknown_count,
         "trend_evidence_percent": round((current_evidence_count / len(trends)) * 100) if trends else 100,
         "regressing_count": regressing_count,
