@@ -3520,24 +3520,42 @@ def _site_scorecard_next_action(row: dict) -> str:
     return _recommended_action(top_alert)
 
 
-def _site_scorecard_evidence_action(freshness: str) -> str:
-    """Return a next step without presenting incomplete evidence as current."""
-    if freshness == "clock_skew":
-        return "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
-    if freshness == "invalid":
-        return "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
-    return "Capture a fresh fleet snapshot before relying on this scorecard."
+def _site_scorecard_evidence_action(
+    snapshot_freshness: str,
+    care_check_freshness: str,
+) -> str:
+    """Return the minimum next step needed before publishing a scorecard."""
+    if care_check_freshness == "current":
+        if snapshot_freshness == "clock_skew":
+            return "Correct the snapshot timestamp or source clock, then capture a fresh snapshot."
+        if snapshot_freshness == "invalid":
+            return "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
+        return "Capture a fresh fleet snapshot before relying on this scorecard."
+    return _monitoring_coverage_action(snapshot_freshness, care_check_freshness)
 
 
 def _site_scorecard_rows() -> list[dict]:
-    """Build cards for every site without treating incomplete evidence as health."""
+    """Build cards for every site without treating unpaired evidence as health."""
     now = datetime.now(timezone.utc)
     status_rank = {"unknown": 0, "critical": 1, "warning": 2, "healthy": 3}
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     rows = []
     for site in store.list_sites():
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             badges = {
                 "availability": "unknown",
@@ -3560,10 +3578,19 @@ def _site_scorecard_rows() -> list[dict]:
                     "observed_badges": None,
                     "alert_count": 0,
                     "observed_alert_count": 0,
-                    "next_action": "Capture an initial fleet snapshot before relying on this scorecard.",
+                    "next_action": _monitoring_coverage_action(
+                        "missing",
+                        care_check_freshness,
+                    ),
                     "latest_snapshot_at": None,
                     "snapshot_freshness": "missing",
                     "snapshot_age_hours": None,
+                    "latest_care_check_at": (
+                        care_check.get("checked_at") if care_check else None
+                    ),
+                    "care_check_freshness": care_check_freshness,
+                    "care_check_age_hours": care_check_age_hours,
+                    "evidence_status": "incomplete",
                 }
             )
             continue
@@ -3582,35 +3609,55 @@ def _site_scorecard_rows() -> list[dict]:
             now,
             SNAPSHOT_FRESHNESS_HOURS,
         )
-        is_current = freshness == "current"
-        badges = observed_badges if is_current else dict.fromkeys(observed_badges, "unknown")
+        evidence_is_current = (
+            freshness == "current" and care_check_freshness == "current"
+        )
+        badges = (
+            observed_badges
+            if evidence_is_current
+            else dict.fromkeys(observed_badges, "unknown")
+        )
         rows.append(
             {
                 "name": row["name"],
                 "url": row["url"],
                 "client": row.get("client") or "Unassigned",
-                "score": row["score"] if is_current else None,
+                "score": row["score"] if evidence_is_current else None,
                 "observed_score": row["score"],
-                "status": observed_status if is_current else "unknown",
+                "status": observed_status if evidence_is_current else "unknown",
                 "observed_status": observed_status,
                 "badges": badges,
                 "observed_badges": observed_badges,
-                "alert_count": observed_alert_count if is_current else 0,
+                "alert_count": observed_alert_count if evidence_is_current else 0,
                 "observed_alert_count": observed_alert_count,
                 "next_action": (
                     _site_scorecard_next_action(row)
-                    if is_current
-                    else _site_scorecard_evidence_action(freshness)
+                    if evidence_is_current
+                    else _site_scorecard_evidence_action(
+                        freshness,
+                        care_check_freshness,
+                    )
                 ),
                 "latest_snapshot_at": row["captured_at"],
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "evidence_status": (
+                    "current" if evidence_is_current else "incomplete"
+                ),
             }
         )
     rows.sort(
         key=lambda site: (
             status_rank.get(site["status"], 99),
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             site["observed_score"] if site["observed_score"] is not None else -1,
             -site["alert_count"],
             site["client"].lower(),
@@ -3630,6 +3677,15 @@ def api_site_scorecards():
     missing_snapshot_count = sum(
         1 for site in sites if site["snapshot_freshness"] == "missing"
     )
+    current_care_check_count = sum(
+        1 for site in sites if site["care_check_freshness"] == "current"
+    )
+    missing_care_check_count = sum(
+        1 for site in sites if site["care_check_freshness"] == "missing"
+    )
+    current_evidence_count = sum(
+        1 for site in sites if site["evidence_status"] == "current"
+    )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "site_count": len(sites),
@@ -3637,8 +3693,15 @@ def api_site_scorecards():
         "current_snapshot_count": current_snapshot_count,
         "missing_snapshot_count": missing_snapshot_count,
         "stale_snapshot_count": len(sites) - current_snapshot_count - missing_snapshot_count,
+        "current_care_check_count": current_care_check_count,
+        "missing_care_check_count": missing_care_check_count,
+        "stale_care_check_count": (
+            len(sites) - current_care_check_count - missing_care_check_count
+        ),
+        "current_evidence_count": current_evidence_count,
+        "monitoring_gap_count": len(sites) - current_evidence_count,
         "scorecard_evidence_percent": (
-            round((current_snapshot_count / len(sites)) * 100) if sites else 100
+            round((current_evidence_count / len(sites)) * 100) if sites else 100
         ),
         "critical_count": sum(1 for site in sites if site["status"] == "critical"),
         "warning_count": sum(1 for site in sites if site["status"] == "warning"),

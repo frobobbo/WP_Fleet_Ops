@@ -4270,6 +4270,46 @@ def test_api_site_scorecards_fail_closed_on_stale_snapshot_evidence(tmp_path):
     assert scorecard["next_action"] == "Capture a fresh fleet snapshot before relying on this scorecard."
 
 
+def test_api_site_scorecards_fail_closed_on_stale_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Scorecard",
+            url="https://stale-care-scorecard.example",
+            client="Client Scorecard Gap",
+            uptime_ok="false",
+            ssl_days="4",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/site-scorecards").json()
+
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["scorecard_evidence_percent"] == 0
+    assert payload["critical_count"] == 0
+    assert payload["unknown_count"] == 1
+    scorecard = payload["sites"][0]
+    assert scorecard["snapshot_freshness"] == "current"
+    assert scorecard["care_check_freshness"] == "stale"
+    assert scorecard["care_check_age_hours"] > 168
+    assert scorecard["evidence_status"] == "incomplete"
+    assert scorecard["status"] == "unknown"
+    assert scorecard["observed_status"] == "critical"
+    assert scorecard["score"] is None
+    assert set(scorecard["badges"].values()) == {"unknown"}
+    assert scorecard["alert_count"] == 0
+    assert scorecard["next_action"] == (
+        "Capture a fresh care check before relying on site health."
+    )
+
+
 def test_api_site_scorecards_include_sites_missing_initial_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -4298,6 +4338,11 @@ def test_api_site_scorecards_include_sites_missing_initial_snapshot_evidence(tmp
     assert payload["current_snapshot_count"] == 1
     assert payload["missing_snapshot_count"] == 1
     assert payload["stale_snapshot_count"] == 0
+    assert payload["current_care_check_count"] == 1
+    assert payload["missing_care_check_count"] == 1
+    assert payload["stale_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
     assert payload["scorecard_evidence_percent"] == 50
     assert payload["healthy_count"] == 1
     assert payload["unknown_count"] == 1
@@ -4321,10 +4366,14 @@ def test_api_site_scorecards_include_sites_missing_initial_snapshot_evidence(tmp
         "observed_badges": None,
         "alert_count": 0,
         "observed_alert_count": 0,
-        "next_action": "Capture an initial fleet snapshot before relying on this scorecard.",
+        "next_action": "Capture an initial combined care check and fleet snapshot.",
         "latest_snapshot_at": None,
         "snapshot_freshness": "missing",
         "snapshot_age_hours": None,
+        "latest_care_check_at": None,
+        "care_check_freshness": "missing",
+        "care_check_age_hours": None,
+        "evidence_status": "incomplete",
     }
 
 
