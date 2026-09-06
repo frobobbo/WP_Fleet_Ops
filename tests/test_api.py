@@ -5204,6 +5204,53 @@ def test_api_client_priorities_surfaces_incomplete_monitoring_coverage(tmp_path)
     assert payload["clients"] == []
 
 
+def test_priority_apis_require_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Priority Risk",
+            url="https://unpaired-priority-risk.example",
+            client="Client Priority Care Gap",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    site_priorities = client.get("/api/site-priorities").json()
+
+    assert site_priorities["current_snapshot_count"] == 1
+    assert site_priorities["current_care_check_count"] == 0
+    assert site_priorities["current_evidence_count"] == 0
+    assert site_priorities["care_check_gap_count"] == 1
+    assert site_priorities["monitoring_gap_count"] == 1
+    assert site_priorities["priority_evidence_percent"] == 0
+    assert site_priorities["priority_site_count"] == 0
+    assert site_priorities["returned_site_count"] == 0
+    assert site_priorities["sites"] == []
+
+    client_priorities = client.get("/api/client-priorities").json()
+
+    assert client_priorities["current_snapshot_count"] == 1
+    assert client_priorities["current_care_check_count"] == 0
+    assert client_priorities["current_evidence_count"] == 0
+    assert client_priorities["care_check_gap_count"] == 1
+    assert client_priorities["monitoring_gap_client_count"] == 1
+    assert client_priorities["monitoring_gap_count"] == 1
+    assert client_priorities["priority_evidence_percent"] == 0
+    assert client_priorities["client_count"] == 0
+    assert client_priorities["returned_client_count"] == 0
+    assert client_priorities["total_priority_score"] == 0
+    assert client_priorities["clients"] == []
+
+
 def test_api_operations_kpis_returns_management_rollup(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

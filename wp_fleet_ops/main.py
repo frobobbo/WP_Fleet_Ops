@@ -179,6 +179,38 @@ def _current_snapshot_rows(rows: list[dict], now: datetime | None = None) -> lis
     ]
 
 
+def _current_care_check_urls(
+    care_checks: list[dict],
+    now: datetime | None = None,
+) -> set[str]:
+    """Return site URLs backed by a current care check."""
+    observed_at = now or datetime.now(timezone.utc)
+    return {
+        check["url"]
+        for check in care_checks
+        if _snapshot_is_current(
+            check.get("checked_at"),
+            observed_at,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+    }
+
+
+def _current_paired_snapshot_rows(
+    rows: list[dict],
+    care_checks: list[dict],
+    now: datetime | None = None,
+) -> list[dict]:
+    """Return current snapshots whose matching care check is also current."""
+    observed_at = now or datetime.now(timezone.utc)
+    current_care_urls = _current_care_check_urls(care_checks, observed_at)
+    return [
+        row
+        for row in _current_snapshot_rows(rows, observed_at)
+        if row["url"] in current_care_urls
+    ]
+
+
 def _freshness_counts(
     rows: list[dict],
     timestamp_field: str,
@@ -4201,12 +4233,20 @@ def api_site_priorities(limit: int = 10):
     """Return current site priorities plus coverage needed to trust the queue."""
     bounded_limit = max(1, min(limit, 50))
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
+    now = datetime.now(timezone.utc)
     dashboard_rows = store.latest_dashboard()
+    care_checks = store.latest_care_checks()
     tracked_sites = store.list_sites()
-    current_rows = _current_snapshot_rows(dashboard_rows)
+    current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
+    current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
+    current_care_urls = _current_care_check_urls(care_checks, now)
+    current_care_check_count = sum(
+        1 for site in tracked_sites if site["url"] in current_care_urls
+    )
     missing_snapshot_count = max(len(tracked_sites) - len(dashboard_rows), 0)
-    stale_snapshot_count = len(dashboard_rows) - len(current_rows)
-    monitoring_gap_count = missing_snapshot_count + stale_snapshot_count
+    stale_snapshot_count = len(dashboard_rows) - len(current_snapshot_rows)
+    current_evidence_count = len(current_rows)
+    monitoring_gap_count = len(tracked_sites) - current_evidence_count
     sites = []
     for row in current_rows:
         critical_alerts = sum(1 for alert in row["alerts"] if alert.get("severity") == "critical")
@@ -4245,12 +4285,17 @@ def api_site_priorities(limit: int = 10):
         "limit": bounded_limit,
         "site_count": len(tracked_sites),
         "monitored_site_count": len(dashboard_rows),
-        "current_snapshot_count": len(current_rows),
+        "current_snapshot_count": len(current_snapshot_rows),
+        "current_care_check_count": current_care_check_count,
+        "current_evidence_count": current_evidence_count,
         "missing_snapshot_count": missing_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
+        "care_check_gap_count": len(tracked_sites) - current_care_check_count,
         "monitoring_gap_count": monitoring_gap_count,
         "priority_evidence_percent": (
-            round((len(current_rows) / len(tracked_sites)) * 100) if tracked_sites else 100
+            round((current_evidence_count / len(tracked_sites)) * 100)
+            if tracked_sites
+            else 100
         ),
         "priority_site_count": len(sites),
         "returned_site_count": len(selected),
@@ -4265,23 +4310,25 @@ def api_client_priorities(limit: int = 10):
     now = datetime.now(timezone.utc)
     tracked_sites = store.list_sites()
     dashboard_rows = store.latest_dashboard()
-    latest_by_url = {row["url"]: row for row in dashboard_rows}
-    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    care_checks = store.latest_care_checks()
+    current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
+    current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
+    current_evidence_urls = {row["url"] for row in current_rows}
+    current_care_urls = _current_care_check_urls(care_checks, now)
+    current_care_check_count = sum(
+        1 for site in tracked_sites if site["url"] in current_care_urls
+    )
     tracked_clients = {site.get("client") or "Unassigned" for site in tracked_sites}
     monitored_clients = {row.get("client") or "Unassigned" for row in dashboard_rows}
     monitoring_gap_clients = {
         site.get("client") or "Unassigned"
         for site in tracked_sites
-        if site["url"] not in latest_by_url
-        or not _snapshot_is_current(
-            latest_by_url[site["url"]].get("captured_at"),
-            now,
-            SNAPSHOT_FRESHNESS_HOURS,
-        )
+        if site["url"] not in current_evidence_urls
     }
     missing_snapshot_count = max(len(tracked_sites) - len(dashboard_rows), 0)
-    stale_snapshot_count = len(dashboard_rows) - len(current_rows)
-    monitoring_gap_count = missing_snapshot_count + stale_snapshot_count
+    stale_snapshot_count = len(dashboard_rows) - len(current_snapshot_rows)
+    current_evidence_count = len(current_rows)
+    monitoring_gap_count = len(tracked_sites) - current_evidence_count
     clients: dict[str, dict] = {}
     for row in current_rows:
         priority_score = _site_priority_score(row)
@@ -4335,12 +4382,17 @@ def api_client_priorities(limit: int = 10):
         "monitoring_gap_client_count": len(monitoring_gap_clients),
         "tracked_site_count": len(tracked_sites),
         "monitored_site_count": len(dashboard_rows),
-        "current_snapshot_count": len(current_rows),
+        "current_snapshot_count": len(current_snapshot_rows),
+        "current_care_check_count": current_care_check_count,
+        "current_evidence_count": current_evidence_count,
         "missing_snapshot_count": missing_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
+        "care_check_gap_count": len(tracked_sites) - current_care_check_count,
         "monitoring_gap_count": monitoring_gap_count,
         "priority_evidence_percent": (
-            round((len(current_rows) / len(tracked_sites)) * 100) if tracked_sites else 100
+            round((current_evidence_count / len(tracked_sites)) * 100)
+            if tracked_sites
+            else 100
         ),
         "client_count": len(rows),
         "returned_client_count": len(selected),
