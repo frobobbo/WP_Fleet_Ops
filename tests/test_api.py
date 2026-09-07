@@ -2541,7 +2541,7 @@ def test_api_restore_drill_queue_fails_closed_for_incomplete_backup_evidence(tmp
     assert missing["backup_age_hours"] is None
     assert missing["last_observed_backup_age_hours"] is None
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot and verify backup restore readiness."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert stale["restore_drill_priority"] == "unknown"
     assert stale["snapshot_freshness"] == "stale"
@@ -2555,6 +2555,53 @@ def test_api_restore_drill_queue_fails_closed_for_incomplete_backup_evidence(tmp
     assert current["snapshot_freshness"] == "current"
     assert current["backup_age_hours"] == 180
     assert current["last_observed_backup_age_hours"] == 180
+
+
+def test_api_restore_drill_queue_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Restore Drill",
+            url="https://unpaired-restore-drill.example",
+            client="Client Restore Gap",
+            backup_age_hours="240",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/restore-drill-queue")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["unknown_count"] == 1
+    assert payload["urgent_count"] == 0
+    assert payload["high_count"] == 0
+    assert payload["watch_count"] == 0
+    assert payload["routine_count"] == 0
+    assert payload["restore_evidence_percent"] == 0
+
+    site = payload["sites"][0]
+    assert site["restore_drill_priority"] == "unknown"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["backup_age_hours"] is None
+    assert site["last_observed_backup_age_hours"] == 240
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on backup restore readiness."
+    )
 
 
 def test_api_security_highlights_header_coverage_gaps(tmp_path):

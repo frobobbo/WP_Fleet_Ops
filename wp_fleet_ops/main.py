@@ -1920,29 +1920,51 @@ def _restore_drill_recommended_action(priority: str) -> str:
     return "Keep the site in the normal quarterly restore-drill rotation."
 
 
-def _restore_drill_evidence_recommended_action(priority: str, freshness: str) -> str:
+def _restore_drill_evidence_recommended_action(
+    priority: str,
+    snapshot_freshness: str,
+    care_check_freshness: str = "current",
+) -> str:
     """Return a restore-drill next step without trusting incomplete evidence."""
-    if freshness == "missing":
+    if care_check_freshness != "current":
+        return _monitoring_coverage_action(
+            snapshot_freshness,
+            care_check_freshness,
+        ).replace("site health", "backup restore readiness")
+    if snapshot_freshness == "missing":
         return "Capture an initial fleet snapshot and verify backup restore readiness."
-    if freshness == "clock_skew":
+    if snapshot_freshness == "clock_skew":
         return "Correct the snapshot timestamp or source clock, then verify backup restore readiness."
-    if freshness == "invalid":
+    if snapshot_freshness == "invalid":
         return "Repair the invalid snapshot timestamp, then verify backup restore readiness."
-    if freshness == "stale":
+    if snapshot_freshness == "stale":
         return "Capture a fresh fleet snapshot before scheduling a restore drill."
     return _restore_drill_recommended_action(priority)
 
 
 @app.get("/api/restore-drill-queue")
 def api_restore_drill_queue():
-    """Return restore-drill priorities while failing closed on incomplete evidence."""
+    """Return restore-drill priorities only from current paired evidence."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     priority_rank = {"unknown": 0, "urgent": 1, "high": 2, "watch": 3, "routine": 4}
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
     for site in store.list_sites():
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             freshness = "missing"
             age_hours = None
@@ -1958,7 +1980,7 @@ def api_restore_drill_queue():
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_backup_age_hours = row["backup_age_hours"]
-            if freshness == "current":
+            if freshness == "current" and care_check_freshness == "current":
                 backup_age_hours = last_observed_backup_age_hours
                 priority = _restore_drill_priority(backup_age_hours)
             else:
@@ -1975,20 +1997,45 @@ def api_restore_drill_queue():
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest_snapshot_at,
-                "recommended_action": _restore_drill_evidence_recommended_action(priority, freshness),
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "evidence_status": (
+                    "current"
+                    if freshness == "current" and care_check_freshness == "current"
+                    else "incomplete"
+                ),
+                "recommended_action": _restore_drill_evidence_recommended_action(
+                    priority,
+                    freshness,
+                    care_check_freshness,
+                ),
             }
         )
 
     sites.sort(
         key=lambda site: (
             priority_rank.get(site["restore_drill_priority"], 99),
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             -(site["last_observed_backup_age_hours"] or 0),
             site["client"].lower(),
             site["name"].lower(),
         )
     )
-    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    current_snapshot_count = sum(
+        1 for site in sites if site["snapshot_freshness"] == "current"
+    )
+    current_care_check_count = sum(
+        1 for site in sites if site["care_check_freshness"] == "current"
+    )
+    current_evidence_count = sum(
+        1 for site in sites if site["evidence_status"] == "current"
+    )
     urgent_count = sum(1 for site in sites if site["restore_drill_priority"] == "urgent")
     high_count = sum(1 for site in sites if site["restore_drill_priority"] == "high")
     watch_count = sum(1 for site in sites if site["restore_drill_priority"] == "watch")
@@ -2000,7 +2047,12 @@ def api_restore_drill_queue():
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": len(sites) - current_snapshot_count,
+        "care_check_gap_count": len(sites) - current_care_check_count,
+        "monitoring_gap_count": unknown_count,
         "unknown_count": unknown_count,
         "urgent_count": urgent_count,
         "high_count": high_count,
