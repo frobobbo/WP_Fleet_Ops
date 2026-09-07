@@ -25,7 +25,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Fail-closed client digests at `/api/client-digest`, suppressing nested site health claims when either the fleet snapshot or paired care check is stale or missing, while retaining labeled observations and surfacing account-level evidence-restoration steps.
 - Fail-closed availability inventory at `/api/availability`, publishing reachability only when both the fleet snapshot and paired care check are current while retaining labeled observations for investigation.
 - Fail-closed SLA breach queue at `/api/sla-breaches`, separating current target misses from missing or stale evidence.
-- Fail-closed backup inventory at `/api/backups`, separating current backup age from missing, stale, invalid, or future-dated evidence.
+- Fail-closed backup inventory at `/api/backups`, publishing backup age only when both the fleet snapshot and paired care check are current while retaining labeled observations for investigation.
 - Fail-closed client backup remediation at `/api/backup-remediation`, keeping current backup risk separate from missing or stale evidence.
 - Fail-closed restore-drill queue at `/api/restore-drill-queue`, prioritizing only current backup evidence and surfacing monitoring gaps as unknown.
 - Fail-closed certificate inventory at `/api/certificates`, separating current expiry from missing, stale, invalid, or future-dated evidence.
