@@ -2079,27 +2079,49 @@ def _security_recommended_action(status: str) -> str:
     return "Continue normal security header monitoring."
 
 
-def _security_evidence_recommended_action(status: str, freshness: str) -> str:
-    """Return a security next step without trusting incomplete snapshot evidence."""
-    if freshness == "missing":
+def _security_evidence_recommended_action(
+    status: str,
+    snapshot_freshness: str,
+    care_check_freshness: str = "current",
+) -> str:
+    """Return a security next step without trusting incomplete paired evidence."""
+    if care_check_freshness != "current":
+        return _monitoring_coverage_action(
+            snapshot_freshness,
+            care_check_freshness,
+        ).replace("site health", "security coverage")
+    if snapshot_freshness == "missing":
         return "Capture an initial fleet snapshot and verify security header coverage."
-    if freshness == "clock_skew":
+    if snapshot_freshness == "clock_skew":
         return "Correct the snapshot timestamp or source clock, then verify security header coverage."
-    if freshness == "invalid":
+    if snapshot_freshness == "invalid":
         return "Repair the invalid snapshot timestamp, then verify security header coverage."
-    if freshness == "stale":
+    if snapshot_freshness == "stale":
         return "Capture a fresh fleet snapshot before relying on security coverage."
     return _security_recommended_action(status)
 
 
 @app.get("/api/security")
 def api_security():
-    """Return security status while failing closed on missing or stale evidence."""
+    """Return security status only when paired monitoring evidence is current."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     sites = []
     for site in store.list_sites():
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             freshness = "missing"
             age_hours = None
@@ -2115,7 +2137,7 @@ def api_security():
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_security_header_count = row["security_header_count"]
-            if freshness == "current":
+            if freshness == "current" and care_check_freshness == "current":
                 security_header_count = last_observed_security_header_count
                 status = _security_status(security_header_count)
             else:
@@ -2133,7 +2155,21 @@ def api_security():
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest_snapshot_at,
-                "recommended_action": _security_evidence_recommended_action(status, freshness),
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "evidence_status": (
+                    "current"
+                    if freshness == "current" and care_check_freshness == "current"
+                    else "incomplete"
+                ),
+                "recommended_action": _security_evidence_recommended_action(
+                    status,
+                    freshness,
+                    care_check_freshness,
+                ),
             }
         )
 
@@ -2142,13 +2178,24 @@ def api_security():
     sites.sort(
         key=lambda site: (
             status_rank.get(site["security_status"], 99),
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             site["security_header_count"] if site["security_header_count"] is not None else -1,
             site["client"].lower(),
             site["name"].lower(),
         )
     )
-    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    current_snapshot_count = sum(
+        1 for site in sites if site["snapshot_freshness"] == "current"
+    )
+    current_care_check_count = sum(
+        1 for site in sites if site["care_check_freshness"] == "current"
+    )
+    current_evidence_count = sum(
+        1 for site in sites if site["evidence_status"] == "current"
+    )
     covered_count = sum(1 for site in sites if site["security_status"] == "covered")
     warning_count = sum(1 for site in sites if site["security_status"] == "warning")
     critical_count = sum(1 for site in sites if site["security_status"] == "critical")
@@ -2164,7 +2211,12 @@ def api_security():
         "status": overall_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": len(sites) - current_snapshot_count,
+        "care_check_gap_count": len(sites) - current_care_check_count,
+        "monitoring_gap_count": unknown_count,
         "covered_count": covered_count,
         "warning_count": warning_count,
         "critical_count": critical_count,

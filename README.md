@@ -31,7 +31,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Fail-closed certificate inventory at `/api/certificates`, separating current expiry from missing, stale, invalid, or future-dated evidence.
 - Fail-closed certificate renewal calendar at `/api/certificate-renewal-calendar`, scheduling only current expiry evidence while surfacing monitoring gaps as unknown.
 - Fail-closed update inventory at `/api/updates`, separating current WordPress backlogs from missing, stale, invalid, or future-dated evidence.
-- Fail-closed security inventory at `/api/security`, separating current header coverage from missing, stale, invalid, or future-dated evidence.
+- Fail-closed security inventory at `/api/security`, publishing header coverage only from current paired fleet-snapshot and care-check evidence, retaining labeled observations for investigation, and reporting independent evidence gaps.
 - Fail-closed performance inventory at `/api/performance`, separating current response times from missing, stale, invalid, or future-dated evidence.
 - Fail-closed risk register at `/api/risk-register`, excluding stale observations from current planning risks while surfacing monitoring gaps.
 - Fail-closed executive account risk rollups at `/api/executive-risks`, `/api/fleet-brief`, and `/api/operator-handoff`, excluding stale critical scores and incidents while escalating incomplete paired fleet-snapshot and care-check evidence.
