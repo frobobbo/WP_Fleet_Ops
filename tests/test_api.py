@@ -1382,7 +1382,7 @@ def test_api_sla_breaches_fails_closed_for_incomplete_snapshot_evidence(tmp_path
     assert missing["breaches"] == []
     assert missing["last_observed_breaches"] is None
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot before evaluating SLA compliance."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert stale["sla_status"] == "unknown"
     assert stale["snapshot_freshness"] == "stale"
@@ -1391,6 +1391,54 @@ def test_api_sla_breaches_fails_closed_for_incomplete_snapshot_evidence(tmp_path
     assert stale["last_observed_breaches"][0]["target"] == "availability"
     assert stale["recommended_action"] == (
         "Capture a fresh fleet snapshot before evaluating SLA compliance."
+    )
+
+
+def test_api_sla_breaches_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired SLA Breach",
+            url="https://unpaired-sla-breach.example",
+            client="Client SLA Gap",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/sla-breaches")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["unknown_count"] == 1
+    assert payload["breach_count"] == 0
+    assert payload["critical_breach_count"] == 0
+    assert payload["warning_breach_count"] == 0
+    assert payload["sla_evidence_percent"] == 0
+
+    site = payload["sites"][0]
+    assert site["sla_status"] == "unknown"
+    assert site["score"] is None
+    assert site["last_observed_score"] == 55
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["breaches"] == []
+    assert site["last_observed_breaches"][0]["target"] == "availability"
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on SLA compliance."
     )
 
 

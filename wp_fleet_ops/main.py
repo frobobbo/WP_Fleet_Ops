@@ -928,22 +928,33 @@ def _sla_breaches(row: dict) -> list[dict]:
     return breaches
 
 
-def _sla_evidence_recommended_action(freshness: str) -> str:
-    """Return a next step when SLA evidence cannot be treated as current."""
-    if freshness == "missing":
+def _sla_evidence_recommended_action(
+    snapshot_freshness: str,
+    care_check_freshness: str = "current",
+) -> str:
+    """Return a next step when paired SLA evidence cannot be treated as current."""
+    if care_check_freshness != "current":
+        return _monitoring_coverage_action(
+            snapshot_freshness,
+            care_check_freshness,
+        ).replace("site health", "SLA compliance")
+    if snapshot_freshness == "missing":
         return "Capture an initial fleet snapshot before evaluating SLA compliance."
-    if freshness == "clock_skew":
+    if snapshot_freshness == "clock_skew":
         return "Correct the snapshot timestamp or source clock before evaluating SLA compliance."
-    if freshness == "invalid":
+    if snapshot_freshness == "invalid":
         return "Repair the invalid snapshot timestamp before evaluating SLA compliance."
     return "Capture a fresh fleet snapshot before evaluating SLA compliance."
 
 
 @app.get("/api/sla-breaches")
 def api_sla_breaches():
-    """Return current SLA breaches while failing closed on incomplete evidence."""
+    """Return SLA breaches only when paired monitoring evidence is current."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     tracked_sites = store.list_sites()
     severity_rank = {"critical": 0, "unknown": 1, "warning": 2, "info": 3}
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
@@ -951,6 +962,16 @@ def api_sla_breaches():
     current_evidence_count = 0
     for site in tracked_sites:
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             freshness = "missing"
             age_hours = None
@@ -970,7 +991,10 @@ def api_sla_breaches():
             )
             last_observed_score = row["score"]
 
-        if freshness != "current":
+        evidence_is_current = (
+            freshness == "current" and care_check_freshness == "current"
+        )
+        if not evidence_is_current:
             sites.append(
                 {
                     "name": site["name"],
@@ -984,15 +1008,25 @@ def api_sla_breaches():
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": age_hours,
                     "latest_snapshot_at": latest_snapshot_at,
+                    "care_check_freshness": care_check_freshness,
+                    "care_check_age_hours": care_check_age_hours,
+                    "latest_care_check_at": (
+                        care_check.get("checked_at") if care_check else None
+                    ),
+                    "evidence_status": "incomplete",
                     "breaches": [],
                     "last_observed_breaches": last_observed_breaches,
-                    "recommended_action": _sla_evidence_recommended_action(freshness),
+                    "recommended_action": _sla_evidence_recommended_action(
+                        freshness,
+                        care_check_freshness,
+                    ),
                 }
             )
             continue
 
         current_evidence_count += 1
-        assert row is not None and last_observed_breaches is not None
+        assert row is not None and care_check is not None
+        assert last_observed_breaches is not None
         if not last_observed_breaches:
             continue
         highest_severity = last_observed_breaches[0]["severity"]
@@ -1009,6 +1043,10 @@ def api_sla_breaches():
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest_snapshot_at,
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": care_check.get("checked_at"),
+                "evidence_status": "current",
                 "breaches": last_observed_breaches,
                 "last_observed_breaches": last_observed_breaches,
                 "recommended_action": last_observed_breaches[0]["recommended_action"],
@@ -1018,7 +1056,10 @@ def api_sla_breaches():
     sites.sort(
         key=lambda site: (
             severity_rank.get(site["highest_severity"], 99),
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             -site["breach_count"],
             site["score"] if site["score"] is not None else 101,
             site["client"].lower(),
@@ -1026,6 +1067,24 @@ def api_sla_breaches():
         )
     )
     site_count = len(tracked_sites)
+    current_snapshot_count = sum(
+        1
+        for site in tracked_sites
+        if _snapshot_is_current(
+            latest_by_url.get(site["url"], {}).get("captured_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+    )
+    current_care_check_count = sum(
+        1
+        for site in tracked_sites
+        if _snapshot_is_current(
+            care_checks_by_url.get(site["url"], {}).get("checked_at"),
+            now,
+            SNAPSHOT_FRESHNESS_HOURS,
+        )
+    )
     unknown_count = site_count - current_evidence_count
     breach_count = sum(1 for site in sites if site["sla_status"] == "breached")
     critical_breach_count = sum(
@@ -1044,7 +1103,12 @@ def api_sla_breaches():
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": site_count,
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": site_count - current_snapshot_count,
+        "care_check_gap_count": site_count - current_care_check_count,
+        "monitoring_gap_count": unknown_count,
         "unknown_count": unknown_count,
         "sla_evidence_percent": round((current_evidence_count / site_count) * 100) if site_count else 100,
         "breach_count": breach_count,
