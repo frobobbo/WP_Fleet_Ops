@@ -33,7 +33,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Fail-closed update inventory at `/api/updates`, publishing WordPress backlogs only from current paired fleet-snapshot and care-check evidence, retaining labeled observations for investigation, and reporting independent evidence gaps.
 - Fail-closed security inventory at `/api/security`, publishing header coverage only from current paired fleet-snapshot and care-check evidence, retaining labeled observations for investigation, and reporting independent evidence gaps.
 - Fail-closed performance inventory at `/api/performance`, publishing response times only from current paired fleet-snapshot and care-check evidence, retaining labeled observations for investigation, and reporting independent evidence gaps.
-- Fail-closed risk register at `/api/risk-register`, excluding stale observations from current planning risks while surfacing monitoring gaps.
+- Fail-closed risk register at `/api/risk-register`, publishing risks only from current paired fleet-snapshot and care-check evidence while exposing independent source gaps.
 - Fail-closed executive account risk rollups at `/api/executive-risks`, `/api/fleet-brief`, and `/api/operator-handoff`, excluding stale critical scores and incidents while escalating incomplete paired fleet-snapshot and care-check evidence.
 - Fail-closed maintenance views at `/api/maintenance-windows` and `/api/maintenance-calendar`, scheduling only work backed by current snapshots while reporting monitoring gaps.
 - Fail-closed fleet objectives at `/api/slo`, counting only current snapshots while treating missing or stale telemetry as objective misses.

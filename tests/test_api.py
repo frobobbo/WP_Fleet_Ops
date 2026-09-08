@@ -3592,6 +3592,49 @@ def test_api_risk_register_fails_closed_on_missing_or_stale_evidence(tmp_path):
     assert payload["entries"] == []
 
 
+def test_api_risk_register_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Critical Risk",
+            url="https://unpaired-critical-risk.example",
+            client="Client Risk Gap",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="8",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/risk-register")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["monitored_site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["missing_snapshot_count"] == 0
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["unknown_count"] == 1
+    assert payload["risk_evidence_percent"] == 0
+    assert payload["category_count"] == 0
+    assert payload["critical_category_count"] == 0
+    assert payload["warning_category_count"] == 0
+    assert payload["entries"] == []
+
+
 def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
