@@ -2248,27 +2248,49 @@ def _performance_recommended_action(status: str) -> str:
     return "Continue normal performance monitoring."
 
 
-def _performance_evidence_recommended_action(status: str, freshness: str) -> str:
-    """Return a performance next step without trusting incomplete evidence."""
-    if freshness == "missing":
+def _performance_evidence_recommended_action(
+    status: str,
+    snapshot_freshness: str,
+    care_check_freshness: str = "current",
+) -> str:
+    """Return a performance next step without trusting incomplete paired evidence."""
+    if care_check_freshness != "current":
+        return _monitoring_coverage_action(
+            snapshot_freshness,
+            care_check_freshness,
+        ).replace("site health", "performance status")
+    if snapshot_freshness == "missing":
         return "Capture an initial fleet snapshot and verify response time."
-    if freshness == "clock_skew":
+    if snapshot_freshness == "clock_skew":
         return "Correct the snapshot timestamp or source clock, then verify response time."
-    if freshness == "invalid":
+    if snapshot_freshness == "invalid":
         return "Repair the invalid snapshot timestamp, then verify response time."
-    if freshness == "stale":
+    if snapshot_freshness == "stale":
         return "Capture a fresh fleet snapshot before relying on performance status."
     return _performance_recommended_action(status)
 
 
 @app.get("/api/performance")
 def api_performance():
-    """Return performance status while failing closed on incomplete evidence."""
+    """Return performance status only when paired monitoring evidence is current."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     sites = []
     for site in store.list_sites():
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             freshness = "missing"
             age_hours = None
@@ -2284,7 +2306,7 @@ def api_performance():
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_response_ms = row["response_ms"]
-            if freshness == "current":
+            if freshness == "current" and care_check_freshness == "current":
                 response_ms = last_observed_response_ms
                 status = _performance_status(response_ms)
             else:
@@ -2302,7 +2324,21 @@ def api_performance():
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest_snapshot_at,
-                "recommended_action": _performance_evidence_recommended_action(status, freshness),
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "evidence_status": (
+                    "current"
+                    if freshness == "current" and care_check_freshness == "current"
+                    else "incomplete"
+                ),
+                "recommended_action": _performance_evidence_recommended_action(
+                    status,
+                    freshness,
+                    care_check_freshness,
+                ),
             }
         )
 
@@ -2311,13 +2347,24 @@ def api_performance():
     sites.sort(
         key=lambda site: (
             status_rank.get(site["performance_status"], 99),
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             -(site["last_observed_response_ms"] or 0),
             site["client"].lower(),
             site["name"].lower(),
         )
     )
-    current_evidence_count = sum(1 for site in sites if site["snapshot_freshness"] == "current")
+    current_snapshot_count = sum(
+        1 for site in sites if site["snapshot_freshness"] == "current"
+    )
+    current_care_check_count = sum(
+        1 for site in sites if site["care_check_freshness"] == "current"
+    )
+    current_evidence_count = sum(
+        1 for site in sites if site["evidence_status"] == "current"
+    )
     slow_count = sum(1 for site in sites if site["performance_status"] == "slow")
     warning_count = sum(1 for site in sites if site["performance_status"] == "warning")
     fast_count = sum(1 for site in sites if site["performance_status"] == "fast")
@@ -2333,7 +2380,12 @@ def api_performance():
         "status": overall_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": len(sites) - current_snapshot_count,
+        "care_check_gap_count": len(sites) - current_care_check_count,
+        "monitoring_gap_count": unknown_count,
         "slow_count": slow_count,
         "warning_count": warning_count,
         "fast_count": fast_count,

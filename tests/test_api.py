@@ -2872,7 +2872,12 @@ def test_api_performance_fails_closed_for_incomplete_snapshot_evidence(tmp_path)
     payload = response.json()
     assert payload["status"] == "yellow"
     assert payload["site_count"] == 5
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 4
     assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 4
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 4
     assert payload["slow_count"] == 0
     assert payload["warning_count"] == 0
     assert payload["fast_count"] == 1
@@ -2894,7 +2899,7 @@ def test_api_performance_fails_closed_for_incomplete_snapshot_evidence(tmp_path)
     assert missing["response_ms"] is None
     assert missing["last_observed_response_ms"] is None
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot and verify response time."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert invalid["snapshot_freshness"] == "invalid"
     assert future["snapshot_freshness"] == "clock_skew"
@@ -2910,6 +2915,54 @@ def test_api_performance_fails_closed_for_incomplete_snapshot_evidence(tmp_path)
     assert current["snapshot_freshness"] == "current"
     assert current["response_ms"] == 250
     assert current["last_observed_response_ms"] == 250
+
+
+def test_api_performance_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Performance",
+            url="https://unpaired-performance.example",
+            client="Client Performance Gap",
+            response_ms="2200",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/performance")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["slow_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["fast_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["performance_evidence_percent"] == 0
+    assert payload["average_response_ms"] == 0
+    assert payload["max_response_ms"] == 0
+
+    site = payload["sites"][0]
+    assert site["performance_status"] == "unknown"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["response_ms"] is None
+    assert site["last_observed_response_ms"] == 2200
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on performance status."
+    )
 
 
 def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
