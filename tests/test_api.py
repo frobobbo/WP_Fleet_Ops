@@ -3392,7 +3392,12 @@ def test_api_updates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     payload = response.json()
     assert payload["status"] == "yellow"
     assert payload["site_count"] == 5
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 4
     assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 4
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 4
     assert payload["critical_count"] == 0
     assert payload["warning_count"] == 1
     assert payload["current_count"] == 0
@@ -3415,7 +3420,7 @@ def test_api_updates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     assert missing["pending_updates"] is None
     assert missing["last_observed_pending_updates"] is None
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot and verify the WordPress update backlog."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert invalid["snapshot_freshness"] == "invalid"
     assert future["snapshot_freshness"] == "clock_skew"
@@ -3431,6 +3436,55 @@ def test_api_updates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     assert current["snapshot_freshness"] == "current"
     assert current["pending_updates"] == 3
     assert current["last_observed_pending_updates"] == 3
+
+
+def test_api_updates_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Update Backlog",
+            url="https://unpaired-updates.example",
+            client="Client Update Gap",
+            wp_updates="7",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/updates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["critical_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["current_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["update_evidence_percent"] == 0
+    assert payload["backlog_count"] == 0
+    assert payload["total_pending_updates"] == 0
+    assert payload["max_pending_updates"] == 0
+
+    site = payload["sites"][0]
+    assert site["update_status"] == "unknown"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["pending_updates"] is None
+    assert site["last_observed_pending_updates"] == 7
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on update status."
+    )
 
 
 def test_api_risk_register_groups_current_risks_by_category(tmp_path):
