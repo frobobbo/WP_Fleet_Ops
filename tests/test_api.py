@@ -3050,7 +3050,12 @@ def test_api_certificates_fails_closed_for_incomplete_snapshot_evidence(tmp_path
     payload = response.json()
     assert payload["status"] == "yellow"
     assert payload["site_count"] == 5
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 4
     assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 4
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 4
     assert payload["healthy_count"] == 1
     assert payload["warning_count"] == 0
     assert payload["critical_count"] == 0
@@ -3071,7 +3076,7 @@ def test_api_certificates_fails_closed_for_incomplete_snapshot_evidence(tmp_path
     assert missing["ssl_days_remaining"] is None
     assert missing["last_observed_ssl_days_remaining"] is None
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot and verify certificate expiry."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert invalid["snapshot_freshness"] == "invalid"
     assert future["snapshot_freshness"] == "clock_skew"
@@ -3087,6 +3092,53 @@ def test_api_certificates_fails_closed_for_incomplete_snapshot_evidence(tmp_path
     assert current["snapshot_freshness"] == "current"
     assert current["ssl_days_remaining"] == 90
     assert current["last_observed_ssl_days_remaining"] == 90
+
+
+def test_api_certificates_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Certificate",
+            url="https://unpaired-certificate.example",
+            client="Client Certificate Gap",
+            ssl_days="2",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/certificates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["critical_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["healthy_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["certificate_evidence_percent"] == 0
+    assert payload["minimum_ssl_days"] is None
+
+    site = payload["sites"][0]
+    assert site["certificate_status"] == "unknown"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["care_check_age_hours"] > 168
+    assert site["evidence_status"] == "incomplete"
+    assert site["ssl_days_remaining"] is None
+    assert site["last_observed_ssl_days_remaining"] == 2
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on certificate status."
+    )
 
 
 def test_api_actions_include_thirty_day_certificate_renewals(tmp_path):
