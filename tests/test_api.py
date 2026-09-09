@@ -4575,6 +4575,12 @@ def test_executive_handoffs_surface_stale_care_check_evidence(tmp_path):
             name="Executive Care Gap Site",
             url="https://executive-care-gap.example",
             client="Client Executive Care Gap",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
         ),
         follow_redirects=False,
     )
@@ -4593,6 +4599,19 @@ def test_executive_handoffs_surface_stale_care_check_evidence(tmp_path):
     assert risk["snapshot_gap_count"] == 0
     assert risk["care_check_gap_count"] == 1
     assert risk["paired_coverage_percent"] == 0
+    assert risk["critical_site_count"] == 0
+    assert risk["lowest_score"] == 100
+
+    actions = client.get("/api/actions").json()
+    assert actions["status"] == "yellow"
+    assert actions["current_snapshot_count"] == 1
+    assert actions["current_care_check_count"] == 0
+    assert actions["care_check_gap_count"] == 1
+    assert actions["current_evidence_count"] == 0
+    assert actions["monitoring_gap_count"] == 1
+    assert actions["paired_coverage_percent"] == 0
+    assert actions["action_count"] == 0
+    assert actions["actions"] == []
 
     fleet_brief = client.get("/api/fleet-brief").json()
 

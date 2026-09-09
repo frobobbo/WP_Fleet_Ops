@@ -1121,12 +1121,15 @@ def api_sla_breaches():
 def _current_actions(
     snapshot_rows: list[dict] | None = None,
     now: datetime | None = None,
+    care_checks: list[dict] | None = None,
 ) -> list[dict]:
-    """Build actions only from snapshots with current monitoring evidence."""
+    """Build actions only from snapshots with current paired monitoring evidence."""
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     actions = []
+    observed_at = now or datetime.now(timezone.utc)
     rows = snapshot_rows if snapshot_rows is not None else store.latest_dashboard()
-    for row in _current_snapshot_rows(rows, now):
+    paired_care_checks = care_checks if care_checks is not None else store.latest_care_checks()
+    for row in _current_paired_snapshot_rows(rows, paired_care_checks, observed_at):
         for alert in row["alerts"]:
             severity = alert.get("severity", "info")
             actions.append(
@@ -1155,16 +1158,29 @@ def _current_actions(
 
 @app.get("/api/actions")
 def api_actions():
-    """Return current fleet alerts without hiding incomplete monitoring evidence."""
+    """Return paired-evidence fleet alerts without hiding monitoring blind spots."""
     now = datetime.now(timezone.utc)
     dashboard_rows = store.latest_dashboard()
+    care_checks = store.latest_care_checks()
     tracked_sites = store.list_sites()
-    current_snapshot_count = len(_current_snapshot_rows(dashboard_rows, now))
+    current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
+    current_snapshot_urls = {row["url"] for row in current_snapshot_rows}
+    current_care_check_urls = _current_care_check_urls(care_checks, now)
+    current_snapshot_count = len(current_snapshot_rows)
     stale_snapshot_count = len(dashboard_rows) - current_snapshot_count
     monitored_urls = {row["url"] for row in dashboard_rows}
     missing_snapshot_count = sum(1 for site in tracked_sites if site["url"] not in monitored_urls)
-    monitoring_gap_count = stale_snapshot_count + missing_snapshot_count
-    actions = _current_actions(dashboard_rows, now)
+    current_care_check_count = sum(
+        1 for site in tracked_sites if site["url"] in current_care_check_urls
+    )
+    current_evidence_count = sum(
+        1
+        for site in tracked_sites
+        if site["url"] in current_snapshot_urls
+        and site["url"] in current_care_check_urls
+    )
+    monitoring_gap_count = len(tracked_sites) - current_evidence_count
+    actions = _current_actions(dashboard_rows, now, care_checks)
     critical_action_count = sum(1 for action in actions if action["severity"] == "critical")
     status = "red" if critical_action_count else ("yellow" if actions or monitoring_gap_count else "green")
     return {
@@ -1174,7 +1190,15 @@ def api_actions():
         "current_snapshot_count": current_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
         "missing_snapshot_count": missing_snapshot_count,
+        "current_care_check_count": current_care_check_count,
+        "care_check_gap_count": len(tracked_sites) - current_care_check_count,
+        "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": monitoring_gap_count,
+        "paired_coverage_percent": (
+            round((current_evidence_count / len(tracked_sites)) * 100)
+            if tracked_sites
+            else 100
+        ),
         "action_count": len(actions),
         "actions": actions,
     }
@@ -3782,7 +3806,10 @@ def _executive_risk_rows() -> list[dict]:
                 "top_monitoring_gap": monitoring["sites"][0] if monitoring else None,
             }
         )
-    for row in _current_snapshot_rows(store.latest_dashboard()):
+    for row in _current_paired_snapshot_rows(
+        store.latest_dashboard(),
+        store.latest_care_checks(),
+    ):
         client_name = row.get("client") or "Unassigned"
         summary = clients[client_name]
         summary["lowest_score"] = (
