@@ -3806,6 +3806,50 @@ def test_maintenance_views_fail_closed_on_missing_or_stale_evidence(tmp_path):
     assert calendar["windows"][0]["sites"][0]["name"] == "Current Routine Work"
 
 
+def test_maintenance_views_require_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Emergency Work",
+            url="https://unpaired-maintenance.example",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="8",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    windows = client.get("/api/maintenance-windows").json()
+    calendar = client.get("/api/maintenance-calendar").json()
+
+    for payload in (windows, calendar):
+        assert payload["status"] == "yellow"
+        assert payload["site_count"] == 1
+        assert payload["monitored_site_count"] == 1
+        assert payload["current_snapshot_count"] == 1
+        assert payload["current_care_check_count"] == 0
+        assert payload["current_evidence_count"] == 0
+        assert payload["missing_snapshot_count"] == 0
+        assert payload["stale_snapshot_count"] == 0
+        assert payload["snapshot_gap_count"] == 0
+        assert payload["care_check_gap_count"] == 1
+        assert payload["monitoring_gap_count"] == 1
+        assert payload["unknown_count"] == 1
+        assert payload["maintenance_evidence_percent"] == 0
+        assert payload["window_count"] == 0
+
+    assert windows["immediate_count"] == 0
+    assert windows["scheduled_count"] == 0
+    assert windows["sites"] == []
+    assert calendar["immediate_site_count"] == 0
+    assert calendar["scheduled_site_count"] == 0
+    assert calendar["windows"] == []
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

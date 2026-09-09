@@ -3029,16 +3029,26 @@ def api_risk_register():
 
 @app.get("/api/maintenance-windows")
 def api_maintenance_windows():
-    """Return current maintenance work while surfacing incomplete evidence."""
+    """Return maintenance work only from current paired monitoring evidence."""
     now = datetime.now(timezone.utc)
-    tracked_site_count = len(store.list_sites())
+    tracked_sites = store.list_sites()
+    tracked_site_count = len(tracked_sites)
+    tracked_urls = {site["url"] for site in tracked_sites}
     dashboard_rows = store.latest_dashboard()
-    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    care_checks = store.latest_care_checks()
+    current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
+    current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
+    current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
     monitored_site_count = len(dashboard_rows)
+    current_snapshot_count = len(current_snapshot_rows)
+    current_care_check_count = len(current_care_urls)
     current_evidence_count = len(current_rows)
     missing_snapshot_count = tracked_site_count - monitored_site_count
-    stale_snapshot_count = monitored_site_count - current_evidence_count
-    unknown_count = tracked_site_count - current_evidence_count
+    stale_snapshot_count = monitored_site_count - current_snapshot_count
+    snapshot_gap_count = tracked_site_count - current_snapshot_count
+    care_check_gap_count = tracked_site_count - current_care_check_count
+    monitoring_gap_count = tracked_site_count - current_evidence_count
+    unknown_count = monitoring_gap_count
     urgency_rank = {"immediate": 0, "scheduled": 1, "none": 2}
     sites = []
     for row in current_rows:
@@ -3070,9 +3080,14 @@ def api_maintenance_windows():
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": tracked_site_count,
         "monitored_site_count": monitored_site_count,
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
         "missing_snapshot_count": missing_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
+        "snapshot_gap_count": snapshot_gap_count,
+        "care_check_gap_count": care_check_gap_count,
+        "monitoring_gap_count": monitoring_gap_count,
         "unknown_count": unknown_count,
         "maintenance_evidence_percent": (
             round((current_evidence_count / tracked_site_count) * 100)
@@ -3159,16 +3174,26 @@ def _maintenance_calendar_windows(rows: list[dict]) -> list[dict]:
 
 @app.get("/api/maintenance-calendar")
 def api_maintenance_calendar():
-    """Return current maintenance windows while surfacing incomplete evidence."""
+    """Return maintenance windows only from current paired monitoring evidence."""
     now = datetime.now(timezone.utc)
-    tracked_site_count = len(store.list_sites())
+    tracked_sites = store.list_sites()
+    tracked_site_count = len(tracked_sites)
+    tracked_urls = {site["url"] for site in tracked_sites}
     dashboard_rows = store.latest_dashboard()
-    current_rows = _current_snapshot_rows(dashboard_rows, now)
+    care_checks = store.latest_care_checks()
+    current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
+    current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
+    current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
     monitored_site_count = len(dashboard_rows)
+    current_snapshot_count = len(current_snapshot_rows)
+    current_care_check_count = len(current_care_urls)
     current_evidence_count = len(current_rows)
     missing_snapshot_count = tracked_site_count - monitored_site_count
-    stale_snapshot_count = monitored_site_count - current_evidence_count
-    unknown_count = tracked_site_count - current_evidence_count
+    stale_snapshot_count = monitored_site_count - current_snapshot_count
+    snapshot_gap_count = tracked_site_count - current_snapshot_count
+    care_check_gap_count = tracked_site_count - current_care_check_count
+    monitoring_gap_count = tracked_site_count - current_evidence_count
+    unknown_count = monitoring_gap_count
     windows = _maintenance_calendar_windows(current_rows)
     immediate_site_count = sum(window["site_count"] for window in windows if window["window"] == "immediate")
     scheduled_site_count = sum(window["site_count"] for window in windows if window["window"] == "scheduled")
@@ -3181,9 +3206,14 @@ def api_maintenance_calendar():
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": tracked_site_count,
         "monitored_site_count": monitored_site_count,
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
         "missing_snapshot_count": missing_snapshot_count,
         "stale_snapshot_count": stale_snapshot_count,
+        "snapshot_gap_count": snapshot_gap_count,
+        "care_check_gap_count": care_check_gap_count,
+        "monitoring_gap_count": monitoring_gap_count,
         "unknown_count": unknown_count,
         "maintenance_evidence_percent": (
             round((current_evidence_count / tracked_site_count) * 100)
