@@ -1660,6 +1660,42 @@ def test_api_site_watchlist_surfaces_missing_snapshot_evidence(tmp_path):
     assert payload["sites"] == []
 
 
+def test_api_site_watchlist_requires_current_paired_care_check_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Watch Site",
+            url="https://stale-care-watch.example",
+            client="Client Watch Gap",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="5",
+            backup_age_hours="120",
+            response_ms="2200",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/site-watchlist").json()
+
+    assert payload["status"] == "yellow"
+    assert payload["tracked_site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["current_care_check_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["watchlist_count"] == 0
+    assert payload["critical_watch_count"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_site_watchlist_returns_only_attention_sites(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
