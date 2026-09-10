@@ -5782,10 +5782,10 @@ def fetch_care_check(
         client,
         fleet_site,
         # A fetched check knows which headers are present, while FleetSite keeps
-        # only their count. Preserve the detailed care score so redundant
+        # only their count. Preserve the detailed care score and alert so redundant
         # clickjacking headers cannot conceal a missing HSTS control.
         check.score,
-        generate_alerts(fleet_site),
+        generate_alerts(fleet_site, check.security_headers),
         check,
     )
     return RedirectResponse("/", status_code=303)

@@ -87,6 +87,16 @@ def test_fetched_check_uses_detailed_security_header_score(
     assert care_check["score"] == 96
     assert snapshot["security_header_count"] == 2
     assert snapshot["score"] == care_check["score"]
+    assert any(
+        alert["severity"] == "info" and "HSTS" in alert["message"]
+        for alert in snapshot["alerts"]
+    )
+    actions = client.get("/api/actions").json()
+    assert actions["action_count"] == 1
+    assert "HSTS" in actions["actions"][0]["message"]
+    assert actions["actions"][0]["recommended_action"] == (
+        "Add or correct the missing security headers."
+    )
 
 
 def test_manual_check_records_unreachable_http_sentinel(tmp_path):

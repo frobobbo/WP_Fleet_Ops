@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
@@ -66,7 +67,11 @@ def calculate_health_score(site: FleetSite) -> int:
     return max(0, min(100, score))
 
 
-def generate_alerts(site: FleetSite) -> list[Alert]:
+def generate_alerts(
+    site: FleetSite,
+    security_headers: Collection[str] | None = None,
+) -> list[Alert]:
+    """Generate fleet alerts, using header identities when they are available."""
     alerts: list[Alert] = []
     if not site.uptime_ok:
         alerts.append(Alert(site.name, "critical", f"{site.name} appears down or unreachable."))
@@ -87,8 +92,26 @@ def generate_alerts(site: FleetSite) -> list[Alert]:
         alerts.append(Alert(site.name, "warning", f"Latest backup is {site.backup_age_hours} hours old."))
     if site.response_ms > 1200:
         alerts.append(Alert(site.name, "warning", f"Homepage response time is {site.response_ms} ms."))
-    if site.security_header_count < 2:
+    if security_headers is None and site.security_header_count < 2:
         alerts.append(Alert(site.name, "info", "Security headers need review."))
+    elif security_headers is not None:
+        normalized_headers = {header.lower() for header in security_headers}
+        missing_controls = []
+        if "strict-transport-security" not in normalized_headers:
+            missing_controls.append("HSTS")
+        if not {
+            "x-frame-options",
+            "content-security-policy",
+        } & normalized_headers:
+            missing_controls.append("clickjacking protection")
+        if missing_controls:
+            alerts.append(
+                Alert(
+                    site.name,
+                    "info",
+                    f"Security headers need review: missing {' and '.join(missing_controls)}.",
+                )
+            )
     return alerts
 
 
