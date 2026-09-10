@@ -101,7 +101,9 @@ SQLite lock wait to return a controlled response during brief contention.
 The Deployment also requires five seconds of sustained readiness before a new
 Pod is counted as available, so a single transient probe cannot prematurely
 complete a Helm rollout. Set `minReadySeconds` to tune that stabilization
-window.
+window. A five-minute `progressDeadlineSeconds` limit marks a stalled rollout
+with `ProgressDeadlineExceeded`, giving operators and automation an explicit
+failure signal; tune the value when startup requirements materially change.
 The default Pod security context uses `fsGroupChangePolicy: OnRootMismatch`, so
 the retained SQLite volume is recursively relabeled only when its root ownership
 does not match the configured group instead of on every maintenance rollout.

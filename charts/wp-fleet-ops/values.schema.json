@@ -8,6 +8,11 @@
       "maximum": 1,
       "description": "WP FleetOps requires exactly one replica because it uses a single SQLite database."
     },
+    "progressDeadlineSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum time in seconds for a Deployment rollout to make progress before Kubernetes reports failure."
+    },
     "deploymentStrategy": {
       "type": "object",
       "required": ["type"],

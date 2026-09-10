@@ -10,6 +10,11 @@ revisionHistoryLimit: 3
 # prevents a single transient readiness success from completing the rollout.
 minReadySeconds: 5
 
+# Mark a rollout failed when it cannot make progress within five minutes. This
+# gives operators and automation an explicit ProgressDeadlineExceeded condition
+# instead of leaving a broken Deployment indefinitely marked as progressing.
+progressDeadlineSeconds: 300
+
 deploymentStrategy:
   # Recreate avoids RWO PVC multi-attach stalls and overlapping SQLite writers
   # during single-replica upgrades. values.schema.json rejects other strategies.

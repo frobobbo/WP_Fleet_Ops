@@ -8,6 +8,7 @@ spec:
   replicas: {{ .Values.replicaCount }}
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   minReadySeconds: {{ .Values.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds }}
   strategy:
     type: {{ .Values.deploymentStrategy.type | default "RollingUpdate" | quote }}
   selector:

@@ -238,6 +238,20 @@ def test_helm_rollout_requires_sustained_readiness_before_availability():
     assert "minReadySeconds: {{ .Values.minReadySeconds }}" in deployment
 
 
+def test_helm_rollout_has_a_bounded_progress_deadline():
+    """A broken rollout must become observably failed instead of progressing forever."""
+    chart = Path(__file__).parents[1] / "charts" / "wp-fleet-ops"
+    values = (chart / "values.yaml").read_text()
+    schema = json.loads((chart / "values.schema.json").read_text())
+    deployment = (chart / "templates" / "deployment.yaml").read_text()
+
+    assert "progressDeadlineSeconds: 300" in values
+    assert "progressDeadlineSeconds: {{ .Values.progressDeadlineSeconds }}" in deployment
+    deadline_schema = schema["properties"]["progressDeadlineSeconds"]
+    assert deadline_schema["type"] == "integer"
+    assert deadline_schema["minimum"] == 1
+
+
 def test_helm_source_bundle_init_container_uses_restricted_security_context():
     deployment = (
         Path(__file__).parents[1]
