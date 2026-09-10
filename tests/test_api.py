@@ -3913,6 +3913,13 @@ def test_api_slo_returns_service_objective_compliance(tmp_path):
     payload = response.json()
     assert payload["generated_at"].endswith("+00:00")
     assert payload["site_count"] == 2
+    assert payload["current_snapshot_count"] == 2
+    assert payload["current_care_check_count"] == 2
+    assert payload["current_evidence_count"] == 2
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["paired_coverage_percent"] == 100
     assert payload["objective_count"] == 6
     assert payload["at_risk_count"] == 5
     assert payload["worst_objective"]["compliance_percent"] == 50.0
@@ -3933,7 +3940,7 @@ def test_api_slo_returns_service_objective_compliance(tmp_path):
     assert objectives["monitoring"] == {
         "name": "monitoring",
         "label": "Current monitoring evidence",
-        "threshold": "snapshot <= 168 hours old",
+        "threshold": "paired snapshot and care check <= 168 hours old",
         "met_count": 2,
         "miss_count": 0,
         "compliance_percent": 100.0,
@@ -3964,6 +3971,12 @@ def test_api_slo_fails_closed_when_monitoring_evidence_is_missing_or_stale(tmp_p
     assert payload["site_count"] == 2
     assert payload["monitored_site_count"] == 1
     assert payload["current_snapshot_count"] == 0
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 2
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 2
+    assert payload["paired_coverage_percent"] == 0
     assert payload["at_risk_count"] == 6
     objectives = {objective["name"]: objective for objective in payload["objectives"]}
     assert set(objectives) == {"availability", "tls", "backups", "performance", "security", "monitoring"}
@@ -3973,6 +3986,38 @@ def test_api_slo_fails_closed_when_monitoring_evidence_is_missing_or_stale(tmp_p
         assert objective["compliance_percent"] == 0.0
         assert objective["status"] == "at_risk"
     assert payload["worst_objective"] == objectives["availability"]
+
+
+def test_api_slo_requires_current_paired_care_check_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care SLO Evidence",
+            url="https://stale-care-slo-evidence.example",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/slo").json()
+
+    assert payload["site_count"] == 1
+    assert payload["monitored_site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["at_risk_count"] == 6
+    for objective in payload["objectives"]:
+        assert objective["met_count"] == 0
+        assert objective["miss_count"] == 1
+        assert objective["compliance_percent"] == 0.0
+        assert objective["status"] == "at_risk"
 
 
 def test_api_remediation_plan_groups_actions_by_operational_timing(tmp_path):

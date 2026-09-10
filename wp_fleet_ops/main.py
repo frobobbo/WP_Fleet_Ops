@@ -3282,16 +3282,24 @@ def api_maintenance_calendar():
 
 @app.get("/api/slo")
 def api_slo():
-    """Return fleet-level service objective compliance for leadership review."""
+    """Return fleet objectives backed by current paired monitoring evidence."""
     now = datetime.now(timezone.utc)
     rows = store.latest_dashboard()
-    current_rows = _current_snapshot_rows(rows, now)
+    care_checks = store.latest_care_checks()
+    tracked_sites = store.list_sites()
+    current_snapshot_rows = _current_snapshot_rows(rows, now)
+    current_care_urls = _current_care_check_urls(care_checks, now)
+    current_rows = _current_paired_snapshot_rows(rows, care_checks, now)
     monitored_total = len(rows)
-    tracked_total = len(store.list_sites())
-    current_snapshot_count = len(current_rows)
+    tracked_total = len(tracked_sites)
+    current_snapshot_count = len(current_snapshot_rows)
+    current_care_check_count = sum(
+        1 for site in tracked_sites if site["url"] in current_care_urls
+    )
+    current_evidence_count = len(current_rows)
     # Every objective uses the full tracked fleet as its denominator and only
-    # current snapshots as evidence. A stale or missing snapshot therefore
-    # cannot make an operational objective look healthy.
+    # paired current snapshots and care checks as evidence. A stale or missing
+    # half of the observation therefore cannot make an objective look healthy.
     objectives = [
         _slo_row("availability", "Sites reachable", tracked_total, sum(1 for row in current_rows if row["uptime_ok"]), "site reachable"),
         _slo_row("tls", "TLS renewal buffer", tracked_total, sum(1 for row in current_rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
@@ -3302,8 +3310,8 @@ def api_slo():
             "monitoring",
             "Current monitoring evidence",
             tracked_total,
-            current_snapshot_count,
-            f"snapshot <= {SNAPSHOT_FRESHNESS_HOURS} hours old",
+            current_evidence_count,
+            f"paired snapshot and care check <= {SNAPSHOT_FRESHNESS_HOURS} hours old",
         ),
     ]
     objectives.sort(key=lambda objective: (objective["compliance_percent"], objective["name"]))
@@ -3313,6 +3321,16 @@ def api_slo():
         "site_count": tracked_total,
         "monitored_site_count": monitored_total,
         "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
+        "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": tracked_total - current_snapshot_count,
+        "care_check_gap_count": tracked_total - current_care_check_count,
+        "monitoring_gap_count": tracked_total - current_evidence_count,
+        "paired_coverage_percent": (
+            round((current_evidence_count / tracked_total) * 100)
+            if tracked_total
+            else 100
+        ),
         "objective_count": len(objectives),
         "at_risk_count": sum(1 for objective in objectives if objective["status"] == "at_risk"),
         "worst_objective": worst_objective,
