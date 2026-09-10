@@ -48,6 +48,47 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_fetched_check_uses_detailed_security_header_score(
+    tmp_path,
+    monkeypatch,
+):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    check = main.evaluate_site(
+        "Missing HSTS",
+        "https://missing-hsts.example",
+        200,
+        250,
+        60,
+        "unknown",
+        0,
+        24,
+        {
+            "x-frame-options": "SAMEORIGIN",
+            "content-security-policy": "frame-ancestors 'self'",
+        },
+    )
+    monkeypatch.setattr(main, "fetch_basic_site_check", lambda *_args: check)
+
+    response = client.post(
+        "/care/fetch-check",
+        data={
+            "name": "Missing HSTS",
+            "url": "https://missing-hsts.example",
+            "client": "Security Client",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    care_check = client.get("/api/care-check-history").json()["care_checks"][0]
+    snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    assert care_check["score"] == 96
+    assert snapshot["security_header_count"] == 2
+    assert snapshot["score"] == care_check["score"]
+
+
 def test_manual_check_records_unreachable_http_sentinel(tmp_path):
     client = make_test_client(tmp_path)
 

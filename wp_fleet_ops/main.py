@@ -5781,7 +5781,10 @@ def fetch_care_check(
         check.url,
         client,
         fleet_site,
-        calculate_health_score(fleet_site),
+        # A fetched check knows which headers are present, while FleetSite keeps
+        # only their count. Preserve the detailed care score so redundant
+        # clickjacking headers cannot conceal a missing HSTS control.
+        check.score,
         generate_alerts(fleet_site),
         check,
     )
