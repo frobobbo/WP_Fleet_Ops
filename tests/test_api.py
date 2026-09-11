@@ -942,7 +942,9 @@ def test_api_sites_marks_old_snapshots_stale(tmp_path):
 
     assert site["name"] == "Stale Site"
     assert site["status"] == "unknown"
+    assert site["score"] is None
     assert site["observed_status"] == "red"
+    assert site["observed_score"] == 30
     assert site["critical_alerts"] == 0
     assert site["observed_critical_alerts"] >= 1
     assert site["alerts"] == []
@@ -1092,7 +1094,9 @@ def test_api_site_directory_surfaces_stale_snapshot_freshness(tmp_path):
     assert site["name"] == "Stale Directory Site"
     assert site["monitoring_status"] == "monitored"
     assert site["status"] == "unknown"
+    assert site["score"] is None
     assert site["observed_status"] == "green"
+    assert site["observed_score"] == 100
     assert site["snapshot_freshness"] == "stale"
     assert site["snapshot_age_hours"] > 168
     assert site["recommended_action"] == (
