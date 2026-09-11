@@ -5658,6 +5658,7 @@ def api_account_agenda(limit: int = 10):
 def index(request: Request):
     now = datetime.now(timezone.utc)
     fleet_rows = store.latest_dashboard()
+    snapshot_freshness_by_url = {}
     for row in fleet_rows:
         freshness, age_hours = _snapshot_freshness(
             row.get("captured_at"),
@@ -5666,7 +5667,9 @@ def index(request: Request):
         )
         row["snapshot_freshness"] = freshness
         row["snapshot_age_hours"] = age_hours
+        snapshot_freshness_by_url[row["url"]] = freshness
     care_checks = store.latest_care_checks()
+    care_check_freshness_by_url = {}
     for check in care_checks:
         freshness, age_hours = _snapshot_freshness(
             check.get("checked_at"),
@@ -5675,6 +5678,27 @@ def index(request: Request):
         )
         check["check_freshness"] = freshness
         check["check_age_hours"] = age_hours
+        care_check_freshness_by_url[check["url"]] = freshness
+    for row in fleet_rows:
+        row["care_check_freshness"] = care_check_freshness_by_url.get(
+            row["url"],
+            "missing",
+        )
+        row["evidence_status"] = (
+            "current"
+            if row["snapshot_freshness"] == row["care_check_freshness"] == "current"
+            else "incomplete"
+        )
+    for check in care_checks:
+        check["snapshot_freshness"] = snapshot_freshness_by_url.get(
+            check["url"],
+            "missing",
+        )
+        check["evidence_status"] = (
+            "current"
+            if check["snapshot_freshness"] == check["check_freshness"] == "current"
+            else "incomplete"
+        )
     sites = store.list_sites()
     return templates.TemplateResponse(
         request,

@@ -79,6 +79,28 @@ def test_dashboard_banner_warns_when_paired_care_evidence_is_stale(tmp_path):
     assert "Monitoring current" not in response.text
 
 
+def test_dashboard_rows_require_current_paired_evidence_for_health_claims(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Dashboard Pair Gap",
+            url="https://dashboard-pair-gap.example",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert '<span class="tag yellow">unknown · care stale</span>' in response.text
+    assert response.text.count('<span class="mono">observed 100</span>') == 2
+    assert '<span class="score green"><span class="dot"></span>100</span>' not in response.text
+    assert '<span class="tag green">green</span>' not in response.text
+
+
 def test_fetched_check_uses_detailed_security_header_score(
     tmp_path,
     monkeypatch,
@@ -880,7 +902,8 @@ def test_dashboard_fails_closed_on_stale_health_observations(tmp_path):
     assert "1 stale snapshot" in page
     assert '<strong>—</strong><span>current average fleet score</span>' in page
     assert '<label>Current healthy sites</label><strong class="green">0</strong>' in page
-    assert "unknown · stale" in page
+    assert "unknown · snapshot stale" in page
+    assert "unknown · care stale" in page
     assert "observed 100" in page
     assert "observed green" in page
 
