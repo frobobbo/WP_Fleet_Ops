@@ -59,6 +59,26 @@ def test_dashboard_displays_running_revision_safely(tmp_path):
     assert "sha-123<unsafe>" not in response.text
 
 
+def test_dashboard_banner_warns_when_paired_care_evidence_is_stale(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Banner Gap Site",
+            url="https://banner-gap.example",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "1 monitoring evidence gap" in response.text
+    assert "Monitoring current" not in response.text
+
+
 def test_fetched_check_uses_detailed_security_header_score(
     tmp_path,
     monkeypatch,
