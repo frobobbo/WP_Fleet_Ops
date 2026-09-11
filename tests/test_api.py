@@ -48,6 +48,17 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_dashboard_displays_running_revision_safely(tmp_path):
+    client = make_test_client(tmp_path, revision='sha-123<unsafe>')
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'data-app-revision="sha-123&lt;unsafe&gt;"' in response.text
+    assert "Revision sha-123&lt;unsafe&gt;" in response.text
+    assert "sha-123<unsafe>" not in response.text
+
+
 def test_fetched_check_uses_detailed_security_header_score(
     tmp_path,
     monkeypatch,

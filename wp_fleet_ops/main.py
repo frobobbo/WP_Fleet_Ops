@@ -5677,6 +5677,7 @@ def index(request: Request):
         request,
         "index.html",
         {
+            "app_revision": APP_REVISION,
             "fleet_rows": fleet_rows,
             "care_checks": care_checks,
             "sites": sites,
