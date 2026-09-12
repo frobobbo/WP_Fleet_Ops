@@ -323,6 +323,75 @@ def test_helm_source_bundle_bounds_dependency_install_storage():
     ) in deployment
 
 
+@pytest.mark.parametrize(
+    ("headers", "expected_headers", "expected_score", "expected_actions"),
+    [
+        (
+            {
+                "strict-transport-security": "max-age=0",
+                "x-frame-options": "SAMEORIGIN",
+            },
+            {"x-frame-options": "SAMEORIGIN"},
+            96,
+            ["Add or verify HSTS security header."],
+        ),
+        (
+            {
+                "strict-transport-security": "max-age=31536000",
+                "x-frame-options": "ALLOW-FROM https://example.com",
+            },
+            {"strict-transport-security": "max-age=31536000"},
+            96,
+            ["Add clickjacking protection header."],
+        ),
+        (
+            {
+                "strict-transport-security": "max-age=31536000",
+                "content-security-policy": "default-src 'self'",
+            },
+            {"strict-transport-security": "max-age=31536000"},
+            96,
+            ["Add clickjacking protection header."],
+        ),
+        (
+            {
+                "strict-transport-security": " ",
+                "x-frame-options": "",
+                "content-security-policy": "frame-ancestors",
+            },
+            {},
+            92,
+            [
+                "Add or verify HSTS security header.",
+                "Add clickjacking protection header.",
+            ],
+        ),
+    ],
+)
+def test_care_score_rejects_ineffective_security_header_values(
+    headers,
+    expected_headers,
+    expected_score,
+    expected_actions,
+):
+    check = evaluate_site(
+        "Header Validation",
+        "https://header-validation.example",
+        200,
+        200,
+        90,
+        "6.6",
+        0,
+        12,
+        headers,
+    )
+
+    assert check.security_headers == expected_headers
+    assert check.score == expected_score
+    assert check.status == "green"
+    assert check.actions == expected_actions
+
+
 def test_care_score_and_report_are_client_friendly():
     good = evaluate_site("Church", "church.example", 200, 200, 90, "6.6", 0, 12, {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"})
     bad = evaluate_site("Client", "https://client.example", 500, 1800, 5, "6.2", 6, 120, {})

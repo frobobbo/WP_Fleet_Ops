@@ -270,6 +270,43 @@ def status_from_score(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
 
+def _security_header_is_effective(name: str, value: str) -> bool:
+    """Return whether a monitored header contains an effective control value."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    normalized_name = name.lower()
+    if normalized_name == "strict-transport-security":
+        max_age_values = []
+        for directive in value.split(";"):
+            directive_name, separator, directive_value = directive.partition("=")
+            if directive_name.strip().lower() == "max-age":
+                max_age_values.append(directive_value.strip() if separator else "")
+        return (
+            len(max_age_values) == 1
+            and max_age_values[0].isdigit()
+            and int(max_age_values[0]) > 0
+        )
+    if normalized_name == "x-frame-options":
+        return value.strip().lower() in {"deny", "sameorigin"}
+    if normalized_name == "content-security-policy":
+        return any(
+            len(parts) > 1 and parts[0].lower() == "frame-ancestors"
+            for directive in value.split(";")
+            if (parts := directive.strip().split())
+        )
+    return False
+
+
+def _effective_security_headers(headers) -> dict[str, str]:
+    """Retain only monitored headers whose values enforce the scored control."""
+    return {
+        name.lower(): value
+        for name, value in headers.items()
+        if name.lower() in MONITORED_SECURITY_HEADERS
+        and _security_header_is_effective(name, value)
+    }
+
+
 def evaluate_site(
     name: str,
     url: str,
@@ -293,7 +330,9 @@ def evaluate_site(
             raise ValueError(f"{field} must not be negative.")
     name = normalize_site_name(name)
     wordpress_version = normalize_wordpress_version(wordpress_version)
-    headers = {k.lower(): v for k, v in (security_headers or {}).items()}
+    # Header presence alone does not prove a browser protection is active.
+    # Discard disabled/invalid values before scoring and persisting the evidence.
+    headers = _effective_security_headers(security_headers or {})
     score = 100
     actions: list[str] = []
     if http_status < 200 or http_status >= 400:
@@ -366,12 +405,8 @@ def ssl_days_remaining(url: str, timeout: int = 10) -> int:
 
 
 def _monitored_security_headers(headers) -> dict[str, str]:
-    """Retain only response headers used by FleetOps security scoring."""
-    return {
-        name.lower(): value
-        for name, value in headers.items()
-        if name.lower() in MONITORED_SECURITY_HEADERS
-    }
+    """Retain effective response headers used by FleetOps security scoring."""
+    return _effective_security_headers(headers)
 
 
 def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:

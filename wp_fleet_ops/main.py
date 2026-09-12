@@ -5822,8 +5822,13 @@ def fetch_care_check(
 def _security_headers_from_count(security_header_count: int) -> dict[str, str]:
     """Represent count-only snapshots in care reports without losing coverage."""
     bounded_count = max(0, min(security_header_count, len(MONITORED_SECURITY_HEADERS)))
+    representative_values = {
+        "strict-transport-security": "max-age=1",
+        "x-frame-options": "SAMEORIGIN",
+        "content-security-policy": "frame-ancestors 'self'",
+    }
     return {
-        header: "reported present"
+        header: representative_values[header]
         for header in MONITORED_SECURITY_HEADERS[:bounded_count]
     }
 
