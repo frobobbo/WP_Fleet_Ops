@@ -1263,6 +1263,31 @@ def test_api_clients_excludes_stale_risk_from_current_account_health(tmp_path):
     assert account["status"] == "yellow"
 
 
+def test_api_clients_excludes_future_timestamps_from_latest_snapshot_marker(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Future Client Snapshot",
+            url="https://future-client-snapshot.example",
+            client="Client Clock Skew",
+        ),
+        follow_redirects=False,
+    )
+    future_captured_at = (
+        datetime.now(timezone.utc) + timedelta(hours=24)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", (future_captured_at,))
+
+    payload = client.get("/api/clients").json()
+
+    account = payload["clients"][0]
+    assert account["current_snapshot_count"] == 0
+    assert account["latest_snapshot_at"] is None
+    assert account["status"] == "yellow"
+
+
 def test_api_clients_requires_current_paired_care_evidence_for_health_claims(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

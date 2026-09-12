@@ -783,7 +783,10 @@ def api_clients():
             else:
                 summary["stale_snapshot_count"] += 1
             captured_dt = _parse_captured_at(row.get("captured_at"))
-            if captured_dt and (
+            # A future timestamp is evidence of clock skew, not account recency.
+            # Keep the marker aligned with the trusted latest timestamp exposed
+            # by the fleet summary so handoffs cannot advertise a future check.
+            if captured_dt and captured_dt <= now and (
                 summary["_latest_snapshot_dt"] is None
                 or captured_dt > summary["_latest_snapshot_dt"]
             ):
