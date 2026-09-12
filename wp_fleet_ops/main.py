@@ -4970,7 +4970,9 @@ def _operations_kpi_status(
 @app.get("/api/operations-kpis")
 def api_operations_kpis():
     """Return compact fleet KPIs backed by paired monitoring evidence."""
-    rows = _current_snapshot_rows(store.latest_dashboard())
+    dashboard_rows = store.latest_dashboard()
+    care_checks = store.latest_care_checks()
+    rows = _current_paired_snapshot_rows(dashboard_rows, care_checks)
     fleet_summary = api_summary()
     coverage = api_monitoring_coverage()
     # An unfiltered coverage read always returns a payload; only an unknown

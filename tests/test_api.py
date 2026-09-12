@@ -6062,6 +6062,12 @@ def test_api_operations_kpis_warns_when_care_check_evidence_is_stale(tmp_path):
             name="Stale Care KPI Site",
             url="https://stale-care-kpi.example",
             client="Client KPI Care Gap",
+            uptime_ok="false",
+            ssl_days="3",
+            wp_updates="6",
+            backup_age_hours="100",
+            response_ms="2400",
+            security_header_count="0",
         ),
         follow_redirects=False,
     )
@@ -6079,7 +6085,13 @@ def test_api_operations_kpis_warns_when_care_check_evidence_is_stale(tmp_path):
     assert payload["snapshot_gap_count"] == 0
     assert payload["care_check_gap_count"] == 1
     assert payload["paired_coverage_percent"] == 0
+    assert payload["average_score"] == 100
+    assert payload["red_site_count"] == 0
+    assert payload["yellow_site_count"] == 0
+    assert payload["green_site_count"] == 0
     assert payload["open_action_count"] == 0
+    assert payload["priority_site_count"] == 0
+    assert payload["top_priority_site"] is None
     assert payload["recommended_focus"] == (
         "Capture a fresh care check before relying on site health."
     )
