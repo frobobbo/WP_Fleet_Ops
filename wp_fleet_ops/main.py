@@ -5838,7 +5838,9 @@ def snapshot(
     name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
     url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
     client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
-    uptime_ok: bool = Form(True),
+    # HTML omits unchecked checkboxes entirely. Default a missing field to down
+    # rather than silently recording an operator-reported outage as reachable.
+    uptime_ok: bool = Form(False),
     ssl_days: int = Form(60, ge=0, le=SQLITE_INTEGER_MAX),
     wp_updates: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),
     backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),

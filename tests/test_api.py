@@ -183,6 +183,28 @@ def test_manual_check_records_unreachable_http_sentinel(tmp_path):
     )
 
 
+def test_snapshot_treats_omitted_uptime_checkbox_as_down(tmp_path):
+    """Browsers omit unchecked checkboxes instead of submitting ``false``."""
+    client = make_test_client(tmp_path)
+    payload = valid_snapshot_payload(
+        name="Unchecked Outage",
+        url="https://unchecked-outage.example",
+    )
+    payload.pop("uptime_ok")
+
+    response = client.post("/snapshot", data=payload, follow_redirects=False)
+
+    assert response.status_code == 303
+    snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    care_check = client.get("/api/care-check-history").json()["care_checks"][0]
+    assert snapshot["uptime_ok"] is False
+    assert any(
+        alert["severity"] == "critical" and "down" in alert["message"].lower()
+        for alert in snapshot["alerts"]
+    )
+    assert care_check["http_status"] == 0
+
+
 @pytest.mark.parametrize("http_status", [1, 99])
 def test_manual_check_rejects_non_http_statuses_without_partial_state(
     tmp_path,
