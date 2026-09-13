@@ -4598,6 +4598,44 @@ def test_api_client_escalations_groups_critical_incidents_by_client(tmp_path):
     assert {incident["site"] for incident in escalation["incidents"]} == {"Critical Storefront", "Second Critical"}
 
 
+def test_api_client_escalations_surfaces_gaps_without_escalating_stale_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unverified Critical Site",
+            url="https://unverified-critical.example",
+            client="Client Evidence Gap",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/client-escalations")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client_count"] == 0
+    assert payload["critical_incident_count"] == 0
+    assert payload["affected_site_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_status"] == "incomplete"
+    assert payload["monitoring_gaps"] == [
+        {
+            "name": "Unverified Critical Site",
+            "url": "https://unverified-critical.example",
+            "client": "Client Evidence Gap",
+            "snapshot_freshness": "current",
+            "care_check_freshness": "stale",
+            "recommended_action": "Capture a fresh care check before relying on site health.",
+        }
+    ]
+
+
 def test_api_stale_snapshots_flags_missing_and_old_snapshots(tmp_path):
     client = make_test_client(tmp_path)
     db_path = tmp_path / "test.sqlite3"

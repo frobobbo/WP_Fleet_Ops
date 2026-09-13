@@ -16,6 +16,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Fail-closed operator watchlist at `/api/site-watchlist`, publishing alerts only from current paired fleet-snapshot and care-check evidence while reporting independent source gaps so incomplete monitoring cannot create a false escalation or a false healthy queue.
 - Fail-closed prioritized action queue at `/api/actions`, publishing alerts only from current paired fleet-snapshot and care-check evidence while reporting independent care-check and snapshot coverage so a suppressed queue cannot be mistaken for fleet health.
 - Fail-closed critical incident feed at `/api/incidents`, keeping stale alerts out of current escalations while surfacing missing or stale paired fleet-snapshot and care-check evidence.
+- Coverage-aware client escalation feed at `/api/client-escalations`, grouping only critical incidents backed by current paired evidence while returning snapshot and care-check gaps separately so an empty escalation list cannot imply complete monitoring.
 - Fail-closed client workload at `/api/client-workload`, keeping current fleet actions separate from account-grouped paired snapshot and care-check evidence gaps.
 - Fail-closed action matrix at `/api/action-matrix`, grouping current dispatch work by client and site while listing paired monitoring gaps separately.
 - Paired-evidence management KPIs at `/api/operations-kpis`, warning when either fleet snapshots or care checks are incomplete and recommending the next evidence-restoration step.

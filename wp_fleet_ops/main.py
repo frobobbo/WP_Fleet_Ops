@@ -3747,13 +3747,34 @@ def _client_escalation_rows() -> list[dict]:
 
 @app.get("/api/client-escalations")
 def api_client_escalations():
-    """Return client-level critical incident escalations for urgent follow-up."""
+    """Return verified client escalations without hiding monitoring gaps."""
     clients = _client_escalation_rows()
+    coverage = api_monitoring_coverage()
+    # An unfiltered coverage read always returns a payload; only an unknown
+    # explicit client filter can produce the endpoint's 404 JSONResponse.
+    assert isinstance(coverage, dict)
+    monitoring_gaps = [
+        {
+            "name": site["name"],
+            "url": site["url"],
+            "client": site["client"],
+            "snapshot_freshness": site["snapshot_freshness"],
+            "care_check_freshness": site["care_check_freshness"],
+            "recommended_action": site["recommended_action"],
+        }
+        for site in coverage["sites"]
+        if site["coverage_status"] == "gap"
+    ]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "client_count": len(clients),
         "critical_incident_count": sum(client["critical_incident_count"] for client in clients),
         "affected_site_count": sum(client["affected_site_count"] for client in clients),
+        "monitoring_status": "incomplete" if monitoring_gaps else "complete",
+        "monitoring_gap_count": coverage["monitoring_gap_count"],
+        "snapshot_gap_count": coverage["snapshot_gap_count"],
+        "care_check_gap_count": coverage["care_check_gap_count"],
+        "monitoring_gaps": monitoring_gaps,
         "clients": clients,
     }
 
