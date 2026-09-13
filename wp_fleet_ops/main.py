@@ -365,6 +365,7 @@ def _summary_payload(
         if alert.get("severity") == "critical"
     )
     last_snapshot_at = _latest_trusted_timestamp(fleet_rows, "captured_at", now)
+    last_care_check_at = _latest_trusted_timestamp(care_checks, "checked_at", now)
     average_score = round(score_total / len(current_rows)) if current_rows else None
     observed_average_score = (
         round(observed_score_total / len(fleet_rows)) if fleet_rows else None
@@ -417,6 +418,7 @@ def _summary_payload(
         "average_score": average_score,
         "observed_average_score": observed_average_score,
         "last_snapshot_at": last_snapshot_at,
+        "last_care_check_at": last_care_check_at,
     }
 
 
