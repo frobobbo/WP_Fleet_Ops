@@ -1233,7 +1233,7 @@ def test_store_keeps_empty_path_parameter_target_distinct(tmp_path):
     }
 
 
-def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypatch):
+def test_fetch_basic_site_check_rejects_hsts_from_plain_http_error(monkeypatch):
     headers = Message()
     headers["Strict-Transport-Security"] = "max-age=31536000"
     headers["Set-Cookie"] = "session=sensitive"
@@ -1246,13 +1246,12 @@ def test_fetch_basic_site_check_preserves_http_error_status_and_headers(monkeypa
     check = fetch_basic_site_check("Unavailable", "http://unavailable.example")
 
     assert check.http_status == 503
-    assert check.security_headers == {
-        "strict-transport-security": "max-age=31536000",
-    }
+    assert check.security_headers == {}
     assert "HTTP status is 503" in check.actions[0]
+    assert "Add or verify HSTS security header." in check.actions
 
 
-def test_fetch_basic_site_check_retains_only_monitored_security_headers(monkeypatch):
+def test_fetch_basic_site_check_retains_only_effective_monitored_security_headers(monkeypatch):
     headers = Message()
     headers["Strict-Transport-Security"] = "max-age=31536000"
     headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -1286,10 +1285,10 @@ def test_fetch_basic_site_check_retains_only_monitored_security_headers(monkeypa
     )
 
     assert check.security_headers == {
-        "strict-transport-security": "max-age=31536000",
         "x-frame-options": "SAMEORIGIN",
         "content-security-policy": "frame-ancestors 'self'",
     }
+    assert "Add or verify HSTS security header." in check.actions
 
 
 def test_fetch_basic_site_check_uses_final_https_redirect_for_certificate(monkeypatch):
@@ -1328,4 +1327,7 @@ def test_fetch_basic_site_check_uses_final_https_redirect_for_certificate(monkey
 
     assert check.url == "http://redirect.example"
     assert check.ssl_days_remaining == 90
+    assert check.security_headers == {
+        "strict-transport-security": "max-age=31536000",
+    }
     assert checked_urls == [("https://www.redirect.example/home", 7)]

@@ -404,9 +404,14 @@ def ssl_days_remaining(url: str, timeout: int = 10) -> int:
         return 0
 
 
-def _monitored_security_headers(headers) -> dict[str, str]:
-    """Retain effective response headers used by FleetOps security scoring."""
-    return _effective_security_headers(headers)
+def _monitored_security_headers(headers, response_url: str) -> dict[str, str]:
+    """Retain controls that browsers enforce for the response transport."""
+    effective_headers = _effective_security_headers(headers)
+    if urlparse(response_url).scheme != "https":
+        # Browsers ignore HSTS received over insecure HTTP, so retaining it would
+        # overstate the live origin's transport-security coverage.
+        effective_headers.pop("strict-transport-security", None)
+    return effective_headers
 
 
 def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
@@ -420,16 +425,20 @@ def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
         req = urllib.request.Request(url, headers={"User-Agent": "WP FleetOps/0.1"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.status
+            effective_url = normalize_site_url(resp.geturl())
             # Cookies and unrelated origin metadata are neither needed for
             # scoring nor safe to retain in operational history.
-            headers = _monitored_security_headers(resp.headers)
-            effective_url = normalize_site_url(resp.geturl())
+            headers = _monitored_security_headers(resp.headers, effective_url)
     except urllib.error.HTTPError as exc:
         # HTTPError still represents a completed HTTP response. Preserve its
         # status and headers so operators see the actual server-side failure.
         status = exc.code
-        headers = _monitored_security_headers(exc.headers) if exc.headers else {}
         effective_url = normalize_site_url(exc.geturl())
+        headers = (
+            _monitored_security_headers(exc.headers, effective_url)
+            if exc.headers
+            else {}
+        )
     except Exception:
         status = 0
     latency_ms = int((time.monotonic() - started) * 1000)
