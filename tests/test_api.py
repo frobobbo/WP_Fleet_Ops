@@ -1187,6 +1187,7 @@ def test_api_clients_rolls_up_account_health(tmp_path):
     assert clients[0]["status"] == "red"
     assert clients[0]["critical_alerts"] >= 1
     assert clients[0]["needs_attention"] == 1
+    assert clients[0]["latest_care_check_at"]
     assert clients[1]["site_count"] == 1
 
 
@@ -1285,6 +1286,32 @@ def test_api_clients_excludes_future_timestamps_from_latest_snapshot_marker(tmp_
     account = payload["clients"][0]
     assert account["current_snapshot_count"] == 0
     assert account["latest_snapshot_at"] is None
+    assert account["status"] == "yellow"
+
+
+def test_api_clients_excludes_future_timestamps_from_latest_care_check_marker(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Future Client Care Check",
+            url="https://future-client-care-check.example",
+            client="Client Care Clock Skew",
+        ),
+        follow_redirects=False,
+    )
+    future_checked_at = (
+        datetime.now(timezone.utc) + timedelta(hours=24)
+    ).isoformat()
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", (future_checked_at,))
+
+    payload = client.get("/api/clients").json()
+
+    account = payload["clients"][0]
+    assert account["current_care_check_count"] == 0
+    assert account["latest_snapshot_at"] is not None
+    assert account["latest_care_check_at"] is None
     assert account["status"] == "yellow"
 
 

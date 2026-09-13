@@ -763,6 +763,8 @@ def api_clients():
                 "critical_alerts": 0,
                 "latest_snapshot_at": None,
                 "_latest_snapshot_dt": None,
+                "latest_care_check_at": None,
+                "_latest_care_check_dt": None,
             },
         )
         summary["site_count"] += 1
@@ -809,6 +811,13 @@ def api_clients():
                 summary["current_care_check_count"] += 1
             else:
                 summary["stale_care_check_count"] += 1
+            checked_dt = _parse_captured_at(care_check.get("checked_at"))
+            if checked_dt and checked_dt <= now and (
+                summary["_latest_care_check_dt"] is None
+                or checked_dt > summary["_latest_care_check_dt"]
+            ):
+                summary["_latest_care_check_dt"] = checked_dt
+                summary["latest_care_check_at"] = care_check["checked_at"]
 
         if not snapshot_is_current or not care_check_is_current:
             continue
@@ -834,6 +843,7 @@ def api_clients():
             else 100
         )
         summary.pop("_latest_snapshot_dt")
+        summary.pop("_latest_care_check_dt")
         summary["average_score"] = average_score
         summary["monitoring_coverage_percent"] = round(
             (monitored_site_count / summary["site_count"]) * 100
