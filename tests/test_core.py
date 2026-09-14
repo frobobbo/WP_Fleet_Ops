@@ -366,6 +366,15 @@ def test_helm_source_bundle_bounds_dependency_install_storage():
                 "Add clickjacking protection header.",
             ],
         ),
+        (
+            {
+                "strict-transport-security": "max-age=31536000",
+                "content-security-policy": "frame-ancestors *",
+            },
+            {"strict-transport-security": "max-age=31536000"},
+            96,
+            ["Add clickjacking protection header."],
+        ),
     ],
 )
 def test_care_score_rejects_ineffective_security_header_values(

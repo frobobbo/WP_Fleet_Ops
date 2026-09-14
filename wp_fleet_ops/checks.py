@@ -290,7 +290,13 @@ def _security_header_is_effective(name: str, value: str) -> bool:
         return value.strip().lower() in {"deny", "sameorigin"}
     if normalized_name == "content-security-policy":
         return any(
-            len(parts) > 1 and parts[0].lower() == "frame-ancestors"
+            len(parts) > 1
+            and parts[0].lower() == "frame-ancestors"
+            # A wildcard permits arbitrary web origins to frame the site, so the
+            # directive exists but does not provide the clickjacking restriction
+            # represented by this score. This also rejects policies that mix a
+            # wildcard with narrower sources because the wildcard still wins.
+            and "*" not in {source.lower() for source in parts[1:]}
             for directive in value.split(";")
             if (parts := directive.strip().split())
         )
