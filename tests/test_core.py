@@ -337,6 +337,15 @@ def test_helm_source_bundle_bounds_dependency_install_storage():
         ),
         (
             {
+                "strict-transport-security": "max-age=１２３",
+                "x-frame-options": "SAMEORIGIN",
+            },
+            {"x-frame-options": "SAMEORIGIN"},
+            96,
+            ["Add or verify HSTS security header."],
+        ),
+        (
+            {
                 "strict-transport-security": "max-age=31536000",
                 "x-frame-options": "ALLOW-FROM https://example.com",
             },

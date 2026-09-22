@@ -283,7 +283,9 @@ def _security_header_is_effective(name: str, value: str) -> bool:
                 max_age_values.append(directive_value.strip() if separator else "")
         return (
             len(max_age_values) == 1
-            and max_age_values[0].isdigit()
+            # RFC 6797 defines max-age as ASCII DIGIT bytes. ``str.isdigit``
+            # also accepts Unicode numerals that browsers do not parse as HSTS.
+            and re.fullmatch(r"[0-9]+", max_age_values[0]) is not None
             and int(max_age_values[0]) > 0
         )
     if normalized_name == "x-frame-options":
