@@ -1383,6 +1383,59 @@ def test_fetch_basic_site_check_honors_only_first_hsts_header(
     )
 
 
+@pytest.mark.parametrize(
+    "x_frame_options_values",
+    [
+        ("DENY", "ALLOW-FROM https://trusted.example"),
+        ("ALLOW-FROM https://trusted.example", "SAMEORIGIN"),
+        ("DENY", "SAMEORIGIN"),
+    ],
+)
+def test_fetch_basic_site_check_rejects_duplicate_x_frame_options_headers(
+    monkeypatch,
+    x_frame_options_values,
+):
+    import wp_fleet_ops.checks as checks
+
+    headers = Message()
+    headers["Strict-Transport-Security"] = "max-age=31536000"
+    for value in x_frame_options_values:
+        headers["X-Frame-Options"] = value
+
+    class SuccessfulResponse:
+        status = 200
+
+        def __init__(self, response_headers):
+            self.headers = response_headers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://duplicate-xfo.example"
+
+    monkeypatch.setattr(
+        checks.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: SuccessfulResponse(headers),
+    )
+    monkeypatch.setattr(checks, "ssl_days_remaining", lambda *_args, **_kwargs: 90)
+
+    check = fetch_basic_site_check(
+        "Duplicate XFO",
+        "https://duplicate-xfo.example",
+    )
+
+    assert check.security_headers == {
+        "strict-transport-security": "max-age=31536000",
+    }
+    assert "Add clickjacking protection header." in check.actions
+    assert check.score == 96
+
+
 def test_fetch_basic_site_check_uses_final_https_redirect_for_certificate(monkeypatch):
     import wp_fleet_ops.checks as checks
 

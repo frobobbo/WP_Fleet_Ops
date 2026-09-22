@@ -314,6 +314,7 @@ def _effective_security_headers(headers) -> dict[str, str]:
     """Retain only monitored headers whose values enforce the scored control."""
     effective_headers: dict[str, str] = {}
     hsts_seen = False
+    x_frame_options_seen = False
     for name, value in headers.items():
         normalized_name = name.lower()
         if normalized_name not in MONITORED_SECURITY_HEADERS:
@@ -325,6 +326,14 @@ def _effective_security_headers(headers) -> dict[str, str]:
             if hsts_seen:
                 continue
             hsts_seen = True
+        if normalized_name == "x-frame-options":
+            # X-Frame-Options defines one mutually exclusive field value. Multiple
+            # fields are ambiguous across user agents and intermediaries, so do
+            # not let one effective-looking value conceal duplicate evidence.
+            if x_frame_options_seen:
+                effective_headers.pop(normalized_name, None)
+                continue
+            x_frame_options_seen = True
         if _security_header_is_effective(name, value):
             effective_headers[normalized_name] = value
     return effective_headers
