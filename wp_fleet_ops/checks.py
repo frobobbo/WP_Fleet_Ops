@@ -291,17 +291,22 @@ def _security_header_is_effective(name: str, value: str) -> bool:
     if normalized_name == "x-frame-options":
         return value.strip().lower() in {"deny", "sameorigin"}
     if normalized_name == "content-security-policy":
-        return any(
-            len(parts) > 1
-            and parts[0].lower() == "frame-ancestors"
-            # A wildcard permits arbitrary web origins to frame the site, so the
-            # directive exists but does not provide the clickjacking restriction
-            # represented by this score. This also rejects policies that mix a
-            # wildcard with narrower sources because the wildcard still wins.
-            and "*" not in {source.lower() for source in parts[1:]}
-            for directive in value.split(";")
-            if (parts := directive.strip().split())
-        )
+        for directive in value.split(";"):
+            parts = directive.strip().split()
+            if not parts or parts[0].lower() != "frame-ancestors":
+                continue
+            # CSP ignores later directives with a duplicate name, so evaluate
+            # only the first frame-ancestors directive. Otherwise an ineffective
+            # leading wildcard could be hidden by a stricter duplicate that the
+            # browser never applies.
+            return (
+                len(parts) > 1
+                # A wildcard permits arbitrary web origins to frame the site, so
+                # it does not provide the clickjacking restriction represented by
+                # this score. Mixing it with narrower sources remains ineffective.
+                and "*" not in {source.lower() for source in parts[1:]}
+            )
+        return False
     return False
 
 
