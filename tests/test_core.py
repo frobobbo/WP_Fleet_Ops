@@ -1330,6 +1330,59 @@ def test_fetch_basic_site_check_retains_only_effective_monitored_security_header
     assert "Add or verify HSTS security header." in check.actions
 
 
+@pytest.mark.parametrize(
+    ("hsts_values", "expected_hsts"),
+    [
+        (("max-age=0", "max-age=31536000"), None),
+        (("max-age=31536000", "max-age=0"), "max-age=31536000"),
+    ],
+)
+def test_fetch_basic_site_check_honors_only_first_hsts_header(
+    monkeypatch,
+    hsts_values,
+    expected_hsts,
+):
+    import wp_fleet_ops.checks as checks
+
+    headers = Message()
+    for value in hsts_values:
+        headers["Strict-Transport-Security"] = value
+    headers["X-Frame-Options"] = "SAMEORIGIN"
+
+    class SuccessfulResponse:
+        status = 200
+
+        def __init__(self, response_headers):
+            self.headers = response_headers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://duplicate-hsts.example"
+
+    monkeypatch.setattr(
+        checks.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: SuccessfulResponse(headers),
+    )
+    monkeypatch.setattr(checks, "ssl_days_remaining", lambda *_args, **_kwargs: 90)
+
+    check = fetch_basic_site_check(
+        "Duplicate HSTS",
+        "https://duplicate-hsts.example",
+    )
+
+    assert check.security_headers.get("strict-transport-security") == expected_hsts
+    assert check.security_headers["x-frame-options"] == "SAMEORIGIN"
+    assert ("Add or verify HSTS security header." in check.actions) is (
+        expected_hsts is None
+    )
+
+
 def test_fetch_basic_site_check_uses_final_https_redirect_for_certificate(monkeypatch):
     import wp_fleet_ops.checks as checks
 

@@ -312,12 +312,22 @@ def _security_header_is_effective(name: str, value: str) -> bool:
 
 def _effective_security_headers(headers) -> dict[str, str]:
     """Retain only monitored headers whose values enforce the scored control."""
-    return {
-        name.lower(): value
-        for name, value in headers.items()
-        if name.lower() in MONITORED_SECURITY_HEADERS
-        and _security_header_is_effective(name, value)
-    }
+    effective_headers: dict[str, str] = {}
+    hsts_seen = False
+    for name, value in headers.items():
+        normalized_name = name.lower()
+        if normalized_name not in MONITORED_SECURITY_HEADERS:
+            continue
+        if normalized_name == "strict-transport-security":
+            # RFC 6797 requires user agents to process only the first STS field.
+            # Mark it seen before validation so a disabled or malformed first
+            # field cannot be hidden by an effective-looking duplicate.
+            if hsts_seen:
+                continue
+            hsts_seen = True
+        if _security_header_is_effective(name, value):
+            effective_headers[normalized_name] = value
+    return effective_headers
 
 
 def evaluate_site(
