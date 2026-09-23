@@ -431,6 +431,27 @@ def test_care_score_rejects_ineffective_security_header_values(
     assert check.actions == expected_actions
 
 
+def test_care_score_rejects_hsts_evidence_from_plain_http():
+    check = evaluate_site(
+        "Plain HTTP",
+        "http://plain-http.example",
+        200,
+        250,
+        90,
+        "6.6",
+        0,
+        24,
+        {
+            "strict-transport-security": "max-age=31536000",
+            "x-frame-options": "SAMEORIGIN",
+        },
+    )
+
+    assert check.security_headers == {"x-frame-options": "SAMEORIGIN"}
+    assert check.score == 96
+    assert check.actions == ["Add or verify HSTS security header."]
+
+
 def test_care_score_and_report_are_client_friendly():
     good = evaluate_site("Church", "church.example", 200, 200, 90, "6.6", 0, 12, {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"})
     bad = evaluate_site("Client", "https://client.example", 500, 1800, 5, "6.2", 6, 120, {})
@@ -708,6 +729,24 @@ def test_fleet_security_score_matches_care_checks(security_header_count, securit
     fleet_site = FleetSite("Security Coverage", care_check.url, True, 60, 0, 24, 250, security_header_count)
 
     assert calculate_health_score(fleet_site) == care_check.score == expected_score
+
+
+def test_count_only_plain_http_snapshot_cannot_claim_hsts_coverage():
+    site = FleetSite(
+        "Plain HTTP",
+        "http://plain-http.example",
+        True,
+        90,
+        0,
+        24,
+        250,
+        3,
+    )
+
+    assert calculate_health_score(site) == 96
+    assert [alert.message for alert in generate_alerts(site)] == [
+        "Security headers need review: HSTS is ineffective over HTTP."
+    ]
 
 
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):

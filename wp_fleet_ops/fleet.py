@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
@@ -61,9 +62,17 @@ def calculate_health_score(site: FleetSite) -> int:
         # CarePulse deducts four points for missing HSTS and four for missing
         # clickjacking protection. Match that breakdown so the dashboard and
         # paired care report assign the same score to count-only snapshots.
-        score -= 8
+        missing_security_points = 8
     elif site.security_header_count == 1:
-        score -= 4
+        missing_security_points = 4
+    else:
+        missing_security_points = 0
+    if urlparse(site.url).scheme.lower() == "http":
+        # HSTS received over HTTP is ignored by browsers. Count-only snapshots
+        # therefore cannot claim complete transport-security coverage for a
+        # plain-HTTP endpoint, even when all three monitored fields were reported.
+        missing_security_points = max(4, missing_security_points)
+    score -= missing_security_points
     return max(0, min(100, score))
 
 
@@ -92,7 +101,15 @@ def generate_alerts(
         alerts.append(Alert(site.name, "warning", f"Latest backup is {site.backup_age_hours} hours old."))
     if site.response_ms > 1200:
         alerts.append(Alert(site.name, "warning", f"Homepage response time is {site.response_ms} ms."))
-    if security_headers is None and site.security_header_count < 2:
+    if security_headers is None and urlparse(site.url).scheme.lower() == "http":
+        alerts.append(
+            Alert(
+                site.name,
+                "info",
+                "Security headers need review: HSTS is ineffective over HTTP.",
+            )
+        )
+    elif security_headers is None and site.security_header_count < 2:
         alerts.append(Alert(site.name, "info", "Security headers need review."))
     elif security_headers is not None:
         normalized_headers = {header.lower() for header in security_headers}

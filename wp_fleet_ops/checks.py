@@ -349,6 +349,7 @@ def evaluate_site(
     update_count: int,
     backup_age_hours: int,
     security_headers: dict[str, str] | None = None,
+    security_header_url: str | None = None,
 ) -> SiteCheck:
     if http_status != 0 and not 100 <= http_status <= 599:
         raise ValueError("http_status must be 0 or between 100 and 599.")
@@ -361,10 +362,19 @@ def evaluate_site(
         if value < 0:
             raise ValueError(f"{field} must not be negative.")
     name = normalize_site_name(name)
+    normalized_url = normalize_site_url(url)
     wordpress_version = normalize_wordpress_version(wordpress_version)
     # Header presence alone does not prove a browser protection is active.
     # Discard disabled/invalid values before scoring and persisting the evidence.
-    headers = _effective_security_headers(security_headers or {})
+    # HSTS is also ineffective over plain HTTP. Live checks may provide the final
+    # redirect URL so HTTPS response evidence is evaluated against the transport
+    # where the browser actually received it while the configured URL is retained.
+    header_response_url = (
+        normalize_site_url(security_header_url)
+        if security_header_url is not None
+        else normalized_url
+    )
+    headers = _monitored_security_headers(security_headers or {}, header_response_url)
     score = 100
     actions: list[str] = []
     if http_status < 200 or http_status >= 400:
@@ -404,7 +414,7 @@ def evaluate_site(
         summary = f"{name} needs attention before the next client report."
     return SiteCheck(
         name,
-        normalize_site_url(url),
+        normalized_url,
         http_status,
         latency_ms,
         ssl_days_remaining,
@@ -479,7 +489,18 @@ def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
     # certificate, while retaining the operator-configured URL in the record.
     effective_scheme = urlparse(effective_url).scheme
     ssl_days = ssl_days_remaining(effective_url, timeout=timeout) if effective_scheme == "https" else 0
-    return evaluate_site(name, url, status, latency_ms, ssl_days, "unknown", 0, 0, headers)
+    return evaluate_site(
+        name,
+        url,
+        status,
+        latency_ms,
+        ssl_days,
+        "unknown",
+        0,
+        0,
+        headers,
+        security_header_url=effective_url,
+    )
 
 
 def summarize_care_report(checks: list[SiteCheck]) -> str:
