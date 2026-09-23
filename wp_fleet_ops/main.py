@@ -4,6 +4,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, Request
 from fastapi.middleware.gzip import GZipMiddleware
@@ -301,6 +302,8 @@ def _recommended_action(alert: dict) -> str:
         return "Schedule WordPress core, plugin, and theme updates."
     if "slow" in message or "response" in message or "latency" in message:
         return "Review performance, caching, and upstream response time."
+    if "hsts is ineffective over http" in message:
+        return "Serve the site over HTTPS before relying on HSTS coverage."
     if "security" in message or "header" in message:
         return "Add or correct the missing security headers."
     return "Review the site dashboard and resolve the reported condition."
@@ -2134,7 +2137,10 @@ def api_restore_drill_queue():
     }
 
 
-def _security_status(security_header_count: int) -> str:
+def _security_status(security_header_count: int, url: str | None = None) -> str:
+    """Classify observed headers without treating HTTP-delivered HSTS as coverage."""
+    if url is not None and urlparse(url).scheme.lower() == "http":
+        security_header_count = min(security_header_count, 2)
     if security_header_count >= 3:
         return "covered"
     if security_header_count >= 2:
@@ -2142,7 +2148,11 @@ def _security_status(security_header_count: int) -> str:
     return "critical"
 
 
-def _security_recommended_action(status: str) -> str:
+def _security_recommended_action(status: str, url: str | None = None) -> str:
+    if url is not None and urlparse(url).scheme.lower() == "http":
+        if status == "critical":
+            return "Serve the site over HTTPS, then add HSTS and clickjacking protection headers."
+        return "Serve the site over HTTPS before relying on HSTS coverage."
     if status == "critical":
         return "Add HSTS and clickjacking protection headers."
     if status == "warning":
@@ -2154,6 +2164,7 @@ def _security_evidence_recommended_action(
     status: str,
     snapshot_freshness: str,
     care_check_freshness: str = "current",
+    url: str | None = None,
 ) -> str:
     """Return a security next step without trusting incomplete paired evidence."""
     if care_check_freshness != "current":
@@ -2169,7 +2180,7 @@ def _security_evidence_recommended_action(
         return "Repair the invalid snapshot timestamp, then verify security header coverage."
     if snapshot_freshness == "stale":
         return "Capture a fresh fleet snapshot before relying on security coverage."
-    return _security_recommended_action(status)
+    return _security_recommended_action(status, url)
 
 
 @app.get("/api/security")
@@ -2210,7 +2221,7 @@ def api_security():
             last_observed_security_header_count = row["security_header_count"]
             if freshness == "current" and care_check_freshness == "current":
                 security_header_count = last_observed_security_header_count
-                status = _security_status(security_header_count)
+                status = _security_status(security_header_count, site["url"])
             else:
                 security_header_count = None
                 status = "unknown"
@@ -2240,6 +2251,7 @@ def api_security():
                     status,
                     freshness,
                     care_check_freshness,
+                    site["url"],
                 ),
             }
         )
@@ -4220,7 +4232,7 @@ def _site_scorecard_rows() -> list[dict]:
             "updates": _update_status(row["wp_updates"]),
             "backups": _backup_status(row["backup_age_hours"]),
             "performance": _performance_status(row["response_ms"]),
-            "security": _security_status(row["security_header_count"]),
+            "security": _security_status(row["security_header_count"], row["url"]),
         }
         observed_status = _site_scorecard_status(row, observed_badges)
         observed_alert_count = len(row["alerts"])

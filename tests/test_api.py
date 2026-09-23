@@ -2883,6 +2883,37 @@ def test_api_security_highlights_header_coverage_gaps(tmp_path):
     assert payload["sites"][2]["security_status"] == "covered"
 
 
+def test_plain_http_security_cannot_be_reported_as_covered(tmp_path):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Plain HTTP Headers",
+            url="http://plain-http-headers.example",
+            security_header_count="3",
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    security = client.get("/api/security").json()
+    assert security["status"] == "yellow"
+    assert security["covered_count"] == 0
+    assert security["warning_count"] == 1
+    assert security["sites"][0]["security_header_count"] == 3
+    assert security["sites"][0]["security_status"] == "warning"
+    assert security["sites"][0]["recommended_action"] == (
+        "Serve the site over HTTPS before relying on HSTS coverage."
+    )
+
+    scorecard = client.get("/api/site-scorecards").json()["sites"][0]
+    assert scorecard["status"] == "warning"
+    assert scorecard["badges"]["security"] == "warning"
+    assert scorecard["next_action"] == (
+        "Serve the site over HTTPS before relying on HSTS coverage."
+    )
+
+
 def test_api_security_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     for name, url in (
