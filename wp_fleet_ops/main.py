@@ -5836,9 +5836,18 @@ def fetch_care_check(
     name: str = Form(..., min_length=1, max_length=MAX_SITE_NAME_LENGTH),
     url: str = Form(..., min_length=1, max_length=MAX_SITE_URL_LENGTH),
     client: str = Form("", max_length=MAX_CLIENT_NAME_LENGTH),
+    wordpress_version: str = Form("unknown", max_length=MAX_WORDPRESS_VERSION_LENGTH),
+    update_count: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),
+    backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),
 ):
     name = normalize_site_name(name)
-    check = fetch_basic_site_check(name, url)
+    check = fetch_basic_site_check(
+        name,
+        url,
+        wordpress_version=wordpress_version,
+        update_count=update_count,
+        backup_age_hours=backup_age_hours,
+    )
     security_header_count = sum(
         1
         for header in MONITORED_SECURITY_HEADERS

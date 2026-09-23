@@ -1258,6 +1258,44 @@ def test_fetch_basic_site_check_requests_an_ascii_uri_for_unicode_paths(monkeypa
     assert check.http_status == 200
 
 
+def test_fetch_basic_site_check_preserves_supplied_care_metadata(monkeypatch):
+    import wp_fleet_ops.checks as checks
+
+    class SuccessfulResponse:
+        status = 200
+        headers = Message()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://metadata.example"
+
+    monkeypatch.setattr(
+        checks.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: SuccessfulResponse(),
+    )
+    monkeypatch.setattr(checks, "ssl_days_remaining", lambda *_args, **_kwargs: 90)
+
+    check = fetch_basic_site_check(
+        "Metadata",
+        "https://metadata.example",
+        wordpress_version="6.8.2",
+        update_count=3,
+        backup_age_hours=50,
+    )
+
+    assert check.wordpress_version == "6.8.2"
+    assert check.update_count == 3
+    assert check.backup_age_hours == 50
+    assert any("3 pending updates" in action for action in check.actions)
+    assert any("50 hours old" in action for action in check.actions)
+
+
 def test_store_deduplicates_unicode_and_percent_encoded_paths(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
 

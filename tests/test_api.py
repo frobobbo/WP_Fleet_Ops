@@ -122,7 +122,7 @@ def test_fetched_check_uses_detailed_security_header_score(
             "content-security-policy": "frame-ancestors 'self'",
         },
     )
-    monkeypatch.setattr(main, "fetch_basic_site_check", lambda *_args: check)
+    monkeypatch.setattr(main, "fetch_basic_site_check", lambda *_args, **_kwargs: check)
 
     response = client.post(
         "/care/fetch-check",
@@ -150,6 +150,80 @@ def test_fetched_check_uses_detailed_security_header_score(
     assert actions["actions"][0]["recommended_action"] == (
         "Add or correct the missing security headers."
     )
+
+
+def test_fetched_check_preserves_submitted_care_metadata(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    captured = {}
+
+    def fetched(
+        name,
+        url,
+        timeout=10,
+        *,
+        wordpress_version="unknown",
+        update_count=0,
+        backup_age_hours=0,
+    ):
+        captured.update(
+            {
+                "name": name,
+                "url": url,
+                "timeout": timeout,
+                "wordpress_version": wordpress_version,
+                "update_count": update_count,
+                "backup_age_hours": backup_age_hours,
+            }
+        )
+        return main.evaluate_site(
+            name,
+            url,
+            200,
+            250,
+            90,
+            wordpress_version,
+            update_count,
+            backup_age_hours,
+            {
+                "strict-transport-security": "max-age=31536000",
+                "x-frame-options": "SAMEORIGIN",
+            },
+        )
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fetched)
+
+    response = client.post(
+        "/care/fetch-check",
+        data={
+            "name": "Fetched Metadata",
+            "url": "https://fetched-metadata.example",
+            "client": "Metadata Client",
+            "wordpress_version": "6.8.2",
+            "update_count": "3",
+            "backup_age_hours": "50",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert captured == {
+        "name": "Fetched Metadata",
+        "url": "https://fetched-metadata.example",
+        "timeout": 10,
+        "wordpress_version": "6.8.2",
+        "update_count": 3,
+        "backup_age_hours": 50,
+    }
+    care_check = client.get("/api/care-check-history").json()["care_checks"][0]
+    snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    assert care_check["wordpress_version"] == "6.8.2"
+    assert care_check["update_count"] == 3
+    assert care_check["backup_age_hours"] == 50
+    assert snapshot["wp_updates"] == 3
+    assert snapshot["backup_age_hours"] == 50
+    assert snapshot["score"] == care_check["score"]
 
 
 def test_manual_check_records_unreachable_http_sentinel(tmp_path):
@@ -7102,7 +7176,7 @@ def test_dashboard_exposes_live_care_check_action(tmp_path):
 def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
-    def fake_fetch(name, url):
+    def fake_fetch(name, url, **_kwargs):
         from wp_fleet_ops.checks import evaluate_site
 
         return evaluate_site(
@@ -7138,7 +7212,7 @@ def test_fetch_check_populates_fleet_dashboard_snapshot(tmp_path, monkeypatch):
 def test_report_preserves_fetched_security_header_coverage(tmp_path, monkeypatch):
     client = make_test_client(tmp_path)
 
-    def fake_fetch(name, url):
+    def fake_fetch(name, url, **_kwargs):
         from wp_fleet_ops.checks import evaluate_site
 
         return evaluate_site(

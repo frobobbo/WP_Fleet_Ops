@@ -459,9 +459,24 @@ def _monitored_security_headers(headers, response_url: str) -> dict[str, str]:
     return effective_headers
 
 
-def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
+def fetch_basic_site_check(
+    name: str,
+    url: str,
+    timeout: int = 10,
+    *,
+    wordpress_version: str = "unknown",
+    update_count: int = 0,
+    backup_age_hours: int = 0,
+) -> SiteCheck:
     name = normalize_site_name(name)
     url = normalize_site_url(url)
+    wordpress_version = normalize_wordpress_version(wordpress_version)
+    for field, value in (
+        ("update_count", update_count),
+        ("backup_age_hours", backup_age_hours),
+    ):
+        if value < 0:
+            raise ValueError(f"{field} must not be negative.")
     effective_url = url
     started = time.monotonic()
     status = 0
@@ -498,9 +513,9 @@ def fetch_basic_site_check(name: str, url: str, timeout: int = 10) -> SiteCheck:
         status,
         latency_ms,
         ssl_days,
-        "unknown",
-        0,
-        0,
+        wordpress_version,
+        update_count,
+        backup_age_hours,
         headers,
         security_header_url=effective_url,
     )
