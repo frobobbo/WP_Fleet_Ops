@@ -286,7 +286,10 @@ def _security_header_is_effective(name: str, value: str) -> bool:
             # RFC 6797 defines max-age as ASCII DIGIT bytes. ``str.isdigit``
             # also accepts Unicode numerals that browsers do not parse as HSTS.
             and re.fullmatch(r"[0-9]+", max_age_values[0]) is not None
-            and int(max_age_values[0]) > 0
+            # Avoid converting an attacker-controlled header value to ``int``:
+            # Python rejects unusually long digit strings, which would otherwise
+            # turn a successful site response into an apparent availability failure.
+            and any(digit != "0" for digit in max_age_values[0])
         )
     if normalized_name == "x-frame-options":
         return value.strip().lower() in {"deny", "sameorigin"}

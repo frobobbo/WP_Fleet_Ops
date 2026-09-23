@@ -452,6 +452,30 @@ def test_care_score_rejects_hsts_evidence_from_plain_http():
     assert check.actions == ["Add or verify HSTS security header."]
 
 
+def test_care_score_handles_large_ascii_hsts_max_age_without_integer_conversion():
+    max_age = "1" + ("0" * 5000)
+
+    check = evaluate_site(
+        "Large HSTS",
+        "https://large-hsts.example",
+        200,
+        250,
+        90,
+        "6.6",
+        0,
+        24,
+        {
+            "strict-transport-security": f"max-age={max_age}",
+            "x-frame-options": "SAMEORIGIN",
+        },
+    )
+
+    assert check.http_status == 200
+    assert check.security_headers["strict-transport-security"] == f"max-age={max_age}"
+    assert check.score == 100
+    assert check.actions == []
+
+
 def test_care_score_and_report_are_client_friendly():
     good = evaluate_site("Church", "church.example", 200, 200, 90, "6.6", 0, 12, {"strict-transport-security": "max-age=1", "x-frame-options": "SAMEORIGIN"})
     bad = evaluate_site("Client", "https://client.example", 500, 1800, 5, "6.2", 6, 120, {})
