@@ -2669,10 +2669,18 @@ def _certificate_renewal_action(window: str) -> str:
     return "No renewal action is needed in the next 30 days."
 
 
-def _certificate_renewal_evidence_action(window: str, freshness: str) -> str:
+def _certificate_renewal_evidence_action(
+    window: str,
+    snapshot_freshness: str,
+    care_check_freshness: str = "current",
+) -> str:
     """Return a calendar action without treating incomplete evidence as current."""
-    if freshness != "current":
-        return _certificate_evidence_recommended_action("unknown", freshness)
+    if snapshot_freshness != "current" or care_check_freshness != "current":
+        return _certificate_evidence_recommended_action(
+            "unknown",
+            snapshot_freshness,
+            care_check_freshness,
+        )
     return _certificate_renewal_action(window)
 
 
@@ -2682,12 +2690,25 @@ def api_certificate_renewal_calendar():
     now = datetime.now(timezone.utc)
     tracked_sites = store.list_sites()
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     window_rank = {"overdue": 0, "immediate": 1, "unknown": 2, "scheduled": 3}
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
     current_evidence_count = 0
     for site in tracked_sites:
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         if row is None:
             freshness = "missing"
             age_hours = None
@@ -2703,7 +2724,7 @@ def api_certificate_renewal_calendar():
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_ssl_days = row["ssl_days"]
-            if freshness == "current":
+            if freshness == "current" and care_check_freshness == "current":
                 current_evidence_count += 1
                 ssl_days = last_observed_ssl_days
                 window = _certificate_renewal_window(ssl_days)
@@ -2724,14 +2745,31 @@ def api_certificate_renewal_calendar():
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
                 "latest_snapshot_at": latest_snapshot_at,
-                "recommended_action": _certificate_renewal_evidence_action(window, freshness),
+                "care_check_freshness": care_check_freshness,
+                "care_check_age_hours": care_check_age_hours,
+                "latest_care_check_at": (
+                    care_check.get("checked_at") if care_check else None
+                ),
+                "evidence_status": (
+                    "current"
+                    if freshness == "current" and care_check_freshness == "current"
+                    else "incomplete"
+                ),
+                "recommended_action": _certificate_renewal_evidence_action(
+                    window,
+                    freshness,
+                    care_check_freshness,
+                ),
             }
         )
 
     sites.sort(
         key=lambda site: (
             window_rank[site["renewal_window"]],
-            freshness_rank.get(site["snapshot_freshness"], 99),
+            min(
+                freshness_rank.get(site["snapshot_freshness"], 99),
+                freshness_rank.get(site["care_check_freshness"], 99),
+            ),
             site["last_observed_ssl_days_remaining"]
             if site["last_observed_ssl_days_remaining"] is not None
             else float("inf"),

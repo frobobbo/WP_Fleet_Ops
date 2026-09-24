@@ -3627,8 +3627,10 @@ def test_api_certificate_renewal_calendar_fails_closed_for_incomplete_evidence(t
     assert missing["snapshot_freshness"] == "missing"
     assert missing["ssl_days_remaining"] is None
     assert missing["last_observed_ssl_days_remaining"] is None
+    assert missing["care_check_freshness"] == "missing"
+    assert missing["evidence_status"] == "incomplete"
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot and verify certificate expiry."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert stale["renewal_window"] == "unknown"
     assert stale["snapshot_freshness"] == "stale"
@@ -3642,6 +3644,46 @@ def test_api_certificate_renewal_calendar_fails_closed_for_incomplete_evidence(t
     assert current["snapshot_freshness"] == "current"
     assert current["ssl_days_remaining"] == 21
     assert current["last_observed_ssl_days_remaining"] == 21
+
+
+def test_api_certificate_renewal_calendar_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Stale Care Renewal",
+            url="https://stale-care-calendar-renewal.example",
+            ssl_days="5",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = (select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://stale-care-calendar-renewal.example"),
+        )
+
+    response = client.get("/api/certificate-renewal-calendar")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_evidence_count"] == 0
+    assert payload["renewal_count"] == 0
+    assert payload["immediate_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["renewal_evidence_percent"] == 0
+    site = payload["sites"][0]
+    assert site["renewal_window"] == "unknown"
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["evidence_status"] == "incomplete"
+    assert site["ssl_days_remaining"] is None
+    assert site["last_observed_ssl_days_remaining"] == 5
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on certificate status."
+    )
 
 
 def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
