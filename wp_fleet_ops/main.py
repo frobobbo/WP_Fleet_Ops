@@ -5098,13 +5098,17 @@ def api_client_priorities(limit: int = 10):
 def _operations_kpi_status(
     immediate_actions: int,
     scheduled_actions: int,
-    average_score: int,
+    average_score: int | None,
     monitoring_gap_count: int = 0,
 ) -> str:
     """Return a fleet KPI status for management dashboards."""
     if immediate_actions:
         return "red"
-    if scheduled_actions or monitoring_gap_count or average_score < 85:
+    if (
+        scheduled_actions
+        or monitoring_gap_count
+        or (average_score is not None and average_score < 85)
+    ):
         return "yellow"
     return "green"
 
@@ -5121,7 +5125,19 @@ def api_operations_kpis():
     # explicit client filter can produce the endpoint's 404 JSONResponse.
     assert isinstance(coverage, dict)
     actions = _current_actions()
-    average_score = round(sum(row["score"] or 0 for row in rows) / len(rows)) if rows else 100
+    average_score = (
+        round(sum(row["score"] or 0 for row in rows) / len(rows))
+        if rows
+        else None
+    )
+    observed_average_score = (
+        round(
+            sum(row["score"] or 0 for row in dashboard_rows)
+            / len(dashboard_rows)
+        )
+        if dashboard_rows
+        else None
+    )
     immediate_actions = [action for action in actions if _remediation_bucket(action) == "immediate"]
     scheduled_actions = [action for action in actions if _remediation_bucket(action) == "scheduled"]
     watch_actions = [action for action in actions if _remediation_bucket(action) == "watch"]
@@ -5166,6 +5182,7 @@ def api_operations_kpis():
         "care_check_gap_count": coverage["care_check_gap_count"],
         "paired_coverage_percent": coverage["combined_coverage_percent"],
         "average_score": average_score,
+        "observed_average_score": observed_average_score,
         "green_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "green"),
         "yellow_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "yellow"),
         "red_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "red"),

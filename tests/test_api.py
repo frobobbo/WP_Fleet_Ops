@@ -1894,7 +1894,8 @@ def test_stale_critical_snapshot_does_not_pollute_current_priority_views(tmp_pat
     assert client_priorities["total_priority_score"] == 0
     assert client_priorities["clients"] == []
     assert kpis["status"] == "yellow"
-    assert kpis["average_score"] == 100
+    assert kpis["average_score"] is None
+    assert kpis["observed_average_score"] < 65
     assert kpis["red_site_count"] == 0
     assert kpis["yellow_site_count"] == 0
     assert kpis["green_site_count"] == 0
@@ -6359,6 +6360,8 @@ def test_api_operations_kpis_warns_about_monitoring_gaps(tmp_path):
     assert payload["stale_snapshot_count"] == 1
     assert payload["monitoring_coverage_percent"] == 50
     assert payload["snapshot_freshness_percent"] == 0
+    assert payload["average_score"] is None
+    assert payload["observed_average_score"] == 100
     assert payload["recommended_focus"] == "Capture initial fleet snapshots for unmonitored sites."
 
 
@@ -6393,7 +6396,8 @@ def test_api_operations_kpis_warns_when_care_check_evidence_is_stale(tmp_path):
     assert payload["snapshot_gap_count"] == 0
     assert payload["care_check_gap_count"] == 1
     assert payload["paired_coverage_percent"] == 0
-    assert payload["average_score"] == 100
+    assert payload["average_score"] is None
+    assert payload["observed_average_score"] < 65
     assert payload["red_site_count"] == 0
     assert payload["yellow_site_count"] == 0
     assert payload["green_site_count"] == 0
