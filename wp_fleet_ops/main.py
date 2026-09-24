@@ -1828,16 +1828,31 @@ def api_backup_remediation():
     """Group current backup work by client while failing closed on incomplete evidence."""
     now = datetime.now(timezone.utc)
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    care_checks_by_url = {
+        check["url"]: check for check in store.latest_care_checks()
+    }
     tracked_sites = store.list_sites()
     client_rows: dict[str, dict] = {}
     for site in tracked_sites:
         row = latest_by_url.get(site["url"])
+        care_check = care_checks_by_url.get(site["url"])
+        care_check_freshness, care_check_age_hours = (
+            _snapshot_freshness(
+                care_check.get("checked_at"),
+                now,
+                SNAPSHOT_FRESHNESS_HOURS,
+            )
+            if care_check
+            else ("missing", None)
+        )
         client_name = site.get("client") or "Unassigned"
         summary = client_rows.setdefault(
             client_name,
             {
                 "client": client_name,
                 "site_count": 0,
+                "current_snapshot_count": 0,
+                "current_care_check_count": 0,
                 "current_evidence_count": 0,
                 "unknown_site_count": 0,
                 "fresh_site_count": 0,
@@ -1865,7 +1880,12 @@ def api_backup_remediation():
             latest_snapshot_at = row.get("captured_at")
             last_observed_backup_age_hours = row["backup_age_hours"]
 
-        if freshness != "current":
+        if freshness == "current":
+            summary["current_snapshot_count"] += 1
+        if care_check_freshness == "current":
+            summary["current_care_check_count"] += 1
+
+        if freshness != "current" or care_check_freshness != "current":
             summary["unknown_site_count"] += 1
             if summary["backup_status"] != "critical":
                 summary["backup_status"] = "unknown"
@@ -1879,12 +1899,23 @@ def api_backup_remediation():
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": snapshot_age_hours,
                     "latest_snapshot_at": latest_snapshot_at,
-                    "recommended_action": _backup_evidence_recommended_action("unknown", freshness),
+                    "care_check_freshness": care_check_freshness,
+                    "care_check_age_hours": care_check_age_hours,
+                    "latest_care_check_at": (
+                        care_check.get("checked_at") if care_check else None
+                    ),
+                    "evidence_status": "incomplete",
+                    "recommended_action": _backup_evidence_recommended_action(
+                        "unknown",
+                        freshness,
+                        care_check_freshness,
+                    ),
                 }
             )
             continue
 
         assert row is not None and last_observed_backup_age_hours is not None
+        assert care_check is not None
         summary["current_evidence_count"] += 1
         status = _backup_status(last_observed_backup_age_hours)
         summary["oldest_backup_age_hours"] = max(
@@ -1914,7 +1945,15 @@ def api_backup_remediation():
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": snapshot_age_hours,
                     "latest_snapshot_at": latest_snapshot_at,
-                    "recommended_action": _backup_recommended_action(status),
+                    "care_check_freshness": care_check_freshness,
+                    "care_check_age_hours": care_check_age_hours,
+                    "latest_care_check_at": care_check.get("checked_at"),
+                    "evidence_status": "current",
+                    "recommended_action": _backup_evidence_recommended_action(
+                        status,
+                        freshness,
+                        care_check_freshness,
+                    ),
                 }
             )
 
@@ -1922,10 +1961,20 @@ def api_backup_remediation():
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     clients = []
     for summary in client_rows.values():
+        summary["snapshot_gap_count"] = (
+            summary["site_count"] - summary["current_snapshot_count"]
+        )
+        summary["care_check_gap_count"] = (
+            summary["site_count"] - summary["current_care_check_count"]
+        )
+        summary["monitoring_gap_count"] = summary["unknown_site_count"]
         summary["sites"].sort(
             key=lambda site: (
                 status_rank.get(site["backup_status"], 99),
-                freshness_rank.get(site["snapshot_freshness"], 99),
+                min(
+                    freshness_rank.get(site["snapshot_freshness"], 99),
+                    freshness_rank.get(site["care_check_freshness"], 99),
+                ),
                 -(site["last_observed_backup_age_hours"] or 0),
                 site["name"].lower(),
             )
@@ -1952,6 +2001,8 @@ def api_backup_remediation():
         )
     )
     site_count = len(tracked_sites)
+    current_snapshot_count = sum(row["current_snapshot_count"] for row in clients)
+    current_care_check_count = sum(row["current_care_check_count"] for row in clients)
     current_evidence_count = sum(row["current_evidence_count"] for row in clients)
     unknown_count = site_count - current_evidence_count
     stale_site_count = sum(row["stale_site_count"] for row in clients)
@@ -1964,7 +2015,12 @@ def api_backup_remediation():
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "client_count": len(clients),
         "site_count": site_count,
+        "current_snapshot_count": current_snapshot_count,
+        "current_care_check_count": current_care_check_count,
         "current_evidence_count": current_evidence_count,
+        "snapshot_gap_count": site_count - current_snapshot_count,
+        "care_check_gap_count": site_count - current_care_check_count,
+        "monitoring_gap_count": unknown_count,
         "unknown_count": unknown_count,
         "backup_evidence_percent": round((current_evidence_count / site_count) * 100) if site_count else 100,
         "stale_site_count": stale_site_count,

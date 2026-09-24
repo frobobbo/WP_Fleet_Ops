@@ -2716,7 +2716,7 @@ def test_api_backup_remediation_fails_closed_for_incomplete_snapshot_evidence(tm
     assert missing["backup_age_hours"] is None
     assert missing["last_observed_backup_age_hours"] is None
     assert missing["recommended_action"] == (
-        "Capture an initial fleet snapshot and verify backup freshness."
+        "Capture an initial combined care check and fleet snapshot."
     )
     assert stale["backup_status"] == "unknown"
     assert stale["snapshot_freshness"] == "stale"
@@ -2725,6 +2725,64 @@ def test_api_backup_remediation_fails_closed_for_incomplete_snapshot_evidence(tm
     assert stale["snapshot_age_hours"] > 168
     assert stale["recommended_action"] == (
         "Capture a fresh fleet snapshot before relying on backup status."
+    )
+
+
+def test_api_backup_remediation_requires_current_paired_care_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unpaired Critical Backup",
+            url="https://unpaired-remediation-backup.example",
+            client="Client Recovery Gap",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set checked_at = ?", ("2000-01-01 00:00:00",))
+
+    response = client.get("/api/backup-remediation")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 1
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["unknown_count"] == 1
+    assert payload["backup_evidence_percent"] == 0
+    assert payload["stale_site_count"] == 0
+    assert payload["critical_site_count"] == 0
+
+    account = payload["clients"][0]
+    assert account["client"] == "Client Recovery Gap"
+    assert account["site_count"] == 1
+    assert account["current_snapshot_count"] == 1
+    assert account["current_care_check_count"] == 0
+    assert account["current_evidence_count"] == 0
+    assert account["snapshot_gap_count"] == 0
+    assert account["care_check_gap_count"] == 1
+    assert account["monitoring_gap_count"] == 1
+    assert account["unknown_site_count"] == 1
+    assert account["backup_status"] == "unknown"
+    assert account["oldest_backup_age_hours"] == 0
+    assert account["backup_evidence_percent"] == 0
+
+    site = account["sites"][0]
+    assert site["backup_status"] == "unknown"
+    assert site["backup_age_hours"] is None
+    assert site["last_observed_backup_age_hours"] == 120
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "stale"
+    assert site["evidence_status"] == "incomplete"
+    assert site["recommended_action"] == (
+        "Capture a fresh care check before relying on backup status."
     )
 
 
