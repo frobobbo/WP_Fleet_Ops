@@ -1313,7 +1313,8 @@ def test_api_clients_warns_about_account_monitoring_gaps(tmp_path):
     assert account["stale_snapshot_count"] == 1
     assert account["monitoring_coverage_percent"] == 50
     assert account["snapshot_freshness_percent"] == 0
-    assert account["average_score"] == 100
+    assert account["average_score"] is None
+    assert account["observed_average_score"] == 100
     assert account["status"] == "yellow"
 
 
@@ -1344,7 +1345,8 @@ def test_api_clients_excludes_stale_risk_from_current_account_health(tmp_path):
     assert account["monitored_site_count"] == 1
     assert account["current_snapshot_count"] == 0
     assert account["stale_snapshot_count"] == 1
-    assert account["average_score"] == 100
+    assert account["average_score"] is None
+    assert account["observed_average_score"] < 65
     assert account["healthy_sites"] == 0
     assert account["needs_attention"] == 0
     assert account["critical_alerts"] == 0
@@ -1436,7 +1438,8 @@ def test_api_clients_requires_current_paired_care_evidence_for_health_claims(tmp
     assert account["current_evidence_count"] == 0
     assert account["monitoring_gap_count"] == 1
     assert account["paired_coverage_percent"] == 0
-    assert account["average_score"] == 100
+    assert account["average_score"] is None
+    assert account["observed_average_score"] < 65
     assert account["healthy_sites"] == 0
     assert account["needs_attention"] == 0
     assert account["critical_alerts"] == 0
@@ -4690,7 +4693,8 @@ def test_api_client_digest_warns_about_account_monitoring_gaps(tmp_path):
     assert digest["stale_snapshot_count"] == 1
     assert digest["monitoring_coverage_percent"] == 50
     assert digest["snapshot_freshness_percent"] == 0
-    assert digest["average_score"] == 100
+    assert digest["average_score"] is None
+    assert digest["observed_average_score"] < 65
     assert digest["open_action_count"] == 0
     assert [site["snapshot_freshness"] for site in digest["sites"]] == ["missing", "stale"]
     stale_site = next(site for site in digest["sites"] if site["snapshot_freshness"] == "stale")

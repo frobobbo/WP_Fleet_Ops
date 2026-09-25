@@ -129,6 +129,11 @@ def _dashboard_status(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
 
+def _score_sort_value(score: int | None) -> int:
+    """Keep unknown current scores sortable without presenting them as healthy."""
+    return score if score is not None else 101
+
+
 def _parse_captured_at(value: str | None) -> datetime | None:
     """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
     if not value:
@@ -763,6 +768,8 @@ def api_clients():
                 "stale_care_check_count": 0,
                 "current_evidence_count": 0,
                 "score_total": 0,
+                "observed_score_total": 0,
+                "observed_score_count": 0,
                 "healthy_sites": 0,
                 "needs_attention": 0,
                 "critical_alerts": 0,
@@ -779,6 +786,8 @@ def api_clients():
             snapshot_is_current = False
         else:
             summary["monitored_site_count"] += 1
+            summary["observed_score_total"] += row["score"] or 0
+            summary["observed_score_count"] += 1
             snapshot_freshness, _ = _snapshot_freshness(
                 row.get("captured_at"),
                 now,
@@ -845,11 +854,18 @@ def api_clients():
         average_score = (
             round(summary.pop("score_total") / current_evidence_count)
             if current_evidence_count
-            else 100
+            else None
+        )
+        observed_score_count = summary.pop("observed_score_count")
+        observed_average_score = (
+            round(summary.pop("observed_score_total") / observed_score_count)
+            if observed_score_count
+            else None
         )
         summary.pop("_latest_snapshot_dt")
         summary.pop("_latest_care_check_dt")
         summary["average_score"] = average_score
+        summary["observed_average_score"] = observed_average_score
         summary["monitoring_coverage_percent"] = round(
             (monitored_site_count / summary["site_count"]) * 100
         ) if summary["site_count"] else 100
@@ -872,16 +888,26 @@ def api_clients():
         summary["paired_coverage_percent"] = round(
             (current_evidence_count / summary["site_count"]) * 100
         ) if summary["site_count"] else 100
-        if summary["critical_alerts"] or average_score < 65:
+        if summary["critical_alerts"] or (
+            average_score is not None and average_score < 65
+        ):
             summary["status"] = "red"
-        elif summary["monitoring_gap_count"] or average_score < 85:
+        elif summary["monitoring_gap_count"] or (
+            average_score is not None and average_score < 85
+        ):
             summary["status"] = "yellow"
         else:
             summary["status"] = "green"
         clients.append(summary)
 
     status_rank = {"red": 0, "yellow": 1, "green": 2}
-    clients.sort(key=lambda row: (status_rank[row["status"]], row["average_score"], row["client"].lower()))
+    clients.sort(
+        key=lambda row: (
+            status_rank[row["status"]],
+            _score_sort_value(row["average_score"]),
+            row["client"].lower(),
+        )
+    )
     site_count = sum(client["site_count"] for client in clients)
     current_evidence_count = sum(client["current_evidence_count"] for client in clients)
     return {
@@ -3602,13 +3628,17 @@ def api_remediation_plan():
 def _client_digest_status(
     immediate_count: int,
     scheduled_count: int,
-    average_score: int,
+    average_score: int | None,
     monitoring_gap_count: int = 0,
 ) -> str:
     """Return a client-friendly status for an account digest."""
     if immediate_count:
         return "red"
-    if scheduled_count or monitoring_gap_count or average_score < 85:
+    if (
+        scheduled_count
+        or monitoring_gap_count
+        or (average_score is not None and average_score < 85)
+    ):
         return "yellow"
     return "green"
 
@@ -3639,6 +3669,7 @@ def api_client_digest():
             "monitoring_coverage_percent": account["monitoring_coverage_percent"],
             "snapshot_freshness_percent": account["snapshot_freshness_percent"],
             "average_score": account["average_score"],
+            "observed_average_score": account["observed_average_score"],
             "latest_snapshot_at": account["latest_snapshot_at"],
             "sites": [],
         }
@@ -3779,7 +3810,7 @@ def api_client_digest():
             {"red": 0, "yellow": 1, "green": 2}.get(row["status"], 99),
             -row["immediate_action_count"],
             -row["scheduled_action_count"],
-            row["average_score"],
+            _score_sort_value(row["average_score"]),
             row["client"].lower(),
         )
     )
@@ -4018,7 +4049,14 @@ def _executive_risk_rows() -> list[dict]:
         summary["lowest_score"] = summary["lowest_score"] if summary["lowest_score"] is not None else 100
         if counts.get("critical", 0) or summary["critical_site_count"]:
             risk_level = "critical"
-        elif counts.get("warning", 0) or summary["monitoring_gap_count"] or summary["average_score"] < 85:
+        elif (
+            counts.get("warning", 0)
+            or summary["monitoring_gap_count"]
+            or (
+                summary["average_score"] is not None
+                and summary["average_score"] < 85
+            )
+        ):
             risk_level = "elevated"
         else:
             risk_level = "stable"
@@ -5319,7 +5357,7 @@ def _client_update_brief_rows() -> list[dict]:
             status_rank.get(row["status"], 99),
             -row["immediate_action_count"],
             -row["scheduled_action_count"],
-            row["average_score"],
+            _score_sort_value(row["average_score"]),
             row["client"].lower(),
         )
     )
@@ -5358,7 +5396,14 @@ def _client_service_review_rows() -> list[dict]:
         monitoring_gap_count = brief["monitoring_gap_count"]
         if brief["immediate_action_count"]:
             review_priority = "urgent"
-        elif brief["scheduled_action_count"] or monitoring_gap_count or brief["average_score"] < 85:
+        elif (
+            brief["scheduled_action_count"]
+            or monitoring_gap_count
+            or (
+                brief["average_score"] is not None
+                and brief["average_score"] < 85
+            )
+        ):
             review_priority = "scheduled"
         else:
             review_priority = "routine"
@@ -5399,7 +5444,7 @@ def _client_service_review_rows() -> list[dict]:
         key=lambda row: (
             priority_rank.get(row["review_priority"], 99),
             -row["open_action_count"],
-            row["average_score"],
+            _score_sort_value(row["average_score"]),
             row["client"].lower(),
         )
     )
@@ -5756,7 +5801,7 @@ def _account_agenda_focus(review: dict) -> str:
         return "maintenance planning"
     if review["monitoring_gap_count"]:
         return "monitoring restoration"
-    if review["average_score"] < 85:
+    if review["average_score"] is not None and review["average_score"] < 85:
         return "health improvement"
     return "routine review"
 
