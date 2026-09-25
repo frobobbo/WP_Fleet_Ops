@@ -4953,6 +4953,107 @@ def test_api_stale_snapshots_flags_invalid_timestamps_for_repair(tmp_path):
     assert site["recommended_action"] == "Repair the invalid snapshot timestamp, then capture a fresh snapshot."
 
 
+def test_api_stale_care_checks_reports_missing_stale_invalid_and_clock_skew_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    db_path = tmp_path / "test.sqlite3"
+    client.post(
+        "/sites",
+        data={
+            "name": "Missing Care Check",
+            "url": "https://missing-care-check.example",
+            "client": "Client Missing",
+        },
+        follow_redirects=False,
+    )
+    for name, url, client_name in (
+        ("Current Care Check", "https://current-care-check.example", "Client Current"),
+        ("Stale Care Check", "https://stale-care-check.example", "Client Stale"),
+        ("Invalid Care Check", "https://invalid-care-check.example", "Client Invalid"),
+        ("Future Care Check", "https://future-care-check.example", "Client Future"),
+    ):
+        client.post(
+            "/care/manual-check",
+            data={"name": name, "url": url, "client": client_name},
+            follow_redirects=False,
+        )
+
+    stale_checked_at = (
+        datetime.now(timezone.utc) - timedelta(hours=240)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    future_checked_at = (
+        datetime.now(timezone.utc) + timedelta(hours=24)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            "update care_checks set checked_at=? where site_id=(select id from sites where url=?)",
+            (stale_checked_at, "https://stale-care-check.example"),
+        )
+        con.execute(
+            "update care_checks set checked_at=? where site_id=(select id from sites where url=?)",
+            ("not-a-timestamp", "https://invalid-care-check.example"),
+        )
+        con.execute(
+            "update care_checks set checked_at=? where site_id=(select id from sites where url=?)",
+            (future_checked_at, "https://future-care-check.example"),
+        )
+
+    response = client.get("/api/stale-care-checks?threshold_hours=168")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"].endswith("+00:00")
+    assert payload["threshold_hours"] == 168
+    assert payload["site_count"] == 5
+    assert payload["stale_count"] == 4
+    assert payload["missing_care_check_count"] == 1
+    assert payload["invalid_timestamp_count"] == 1
+    assert payload["clock_skew_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["care_check_coverage_percent"] == 20
+    assert [site["name"] for site in payload["sites"]] == [
+        "Missing Care Check",
+        "Invalid Care Check",
+        "Future Care Check",
+        "Stale Care Check",
+    ]
+    by_status = {site["staleness_status"]: site for site in payload["sites"]}
+    assert by_status["missing"]["care_check_age_hours"] is None
+    assert by_status["missing"]["recommended_action"] == (
+        "Capture an initial care check and verify client-care evidence."
+    )
+    assert by_status["invalid"]["care_check_age_hours"] is None
+    assert by_status["invalid"]["recommended_action"] == (
+        "Repair the invalid care-check timestamp, then capture a fresh care check."
+    )
+    assert by_status["clock_skew"]["care_check_age_hours"] <= -23
+    assert by_status["clock_skew"]["recommended_action"] == (
+        "Correct the care-check timestamp or source clock, then capture a fresh care check."
+    )
+    assert by_status["stale"]["care_check_age_hours"] >= 239
+    assert by_status["stale"]["recommended_action"] == (
+        "Capture a fresh care check and verify client-care evidence."
+    )
+
+
+def test_api_stale_care_checks_clamps_non_positive_threshold(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/care/manual-check",
+        data={
+            "name": "Fresh Care Check",
+            "url": "https://fresh-care-threshold.example",
+        },
+        follow_redirects=False,
+    )
+
+    payload = client.get("/api/stale-care-checks?threshold_hours=0").json()
+
+    assert payload["threshold_hours"] == 1
+    assert payload["stale_count"] == 0
+    assert payload["current_care_check_count"] == 1
+    assert payload["care_check_coverage_percent"] == 100
+
+
 def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

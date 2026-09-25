@@ -3978,6 +3978,86 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
     }
 
 
+@app.get("/api/stale-care-checks")
+def api_stale_care_checks(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
+    """Return sites whose latest care check is missing, invalid, or stale."""
+    threshold_hours = max(threshold_hours, 1)
+    now = datetime.now(timezone.utc)
+    all_sites = store.list_sites()
+    latest_by_url = {row["url"]: row for row in store.latest_care_checks()}
+    sites = []
+    for site in all_sites:
+        row = latest_by_url.get(site["url"])
+        checked_at = row.get("checked_at") if row else None
+        freshness, age_hours = _snapshot_freshness(checked_at, now, threshold_hours)
+        if row is not None and freshness == "current":
+            continue
+        if row is None:
+            staleness_status = "missing"
+            recommended_action = (
+                "Capture an initial care check and verify client-care evidence."
+            )
+        elif freshness == "clock_skew":
+            staleness_status = "clock_skew"
+            recommended_action = (
+                "Correct the care-check timestamp or source clock, then capture a fresh care check."
+            )
+        elif freshness == "invalid":
+            staleness_status = "invalid"
+            recommended_action = (
+                "Repair the invalid care-check timestamp, then capture a fresh care check."
+            )
+        else:
+            staleness_status = "stale"
+            recommended_action = (
+                "Capture a fresh care check and verify client-care evidence."
+            )
+        sites.append(
+            {
+                "name": site["name"],
+                "url": site["url"],
+                "client": site.get("client") or "Unassigned",
+                "latest_care_check_at": checked_at,
+                "care_check_age_hours": age_hours,
+                "staleness_status": staleness_status,
+                "recommended_action": recommended_action,
+            }
+        )
+
+    status_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3}
+    sites.sort(
+        key=lambda site: (
+            status_rank.get(site["staleness_status"], 99),
+            -(site["care_check_age_hours"] or 10**9),
+            site["client"].lower(),
+            site["name"].lower(),
+        )
+    )
+    current_care_check_count = len(all_sites) - len(sites)
+    return {
+        "generated_at": now.isoformat(),
+        "threshold_hours": threshold_hours,
+        "site_count": len(all_sites),
+        "stale_count": len(sites),
+        "missing_care_check_count": sum(
+            1 for site in sites if site["staleness_status"] == "missing"
+        ),
+        "invalid_timestamp_count": sum(
+            1 for site in sites if site["staleness_status"] == "invalid"
+        ),
+        "clock_skew_count": sum(
+            1 for site in sites if site["staleness_status"] == "clock_skew"
+        ),
+        "current_care_check_count": current_care_check_count,
+        "care_check_coverage_percent": (
+            round((current_care_check_count / len(all_sites)) * 100)
+            if all_sites
+            else 100
+        ),
+        "sites": sites,
+    }
+
+
 def _executive_risk_rows() -> list[dict]:
     """Return compact account risks backed by paired monitoring evidence."""
     action_counts: dict[str, dict[str, int]] = {}
