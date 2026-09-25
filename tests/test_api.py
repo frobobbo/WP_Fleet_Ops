@@ -1236,6 +1236,85 @@ def test_api_site_directory_surfaces_stale_snapshot_freshness(tmp_path):
     )
 
 
+def test_api_site_directory_filters_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Directory Site",
+            url="https://alpha-directory.example",
+            client="Client Alpha",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Beta Directory Site",
+            "url": "https://beta-directory.example",
+            "client": "Client Beta",
+        },
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Directory Site",
+            "url": "https://unassigned-directory.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    alpha_response = client.get(
+        "/api/site-directory",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["site_count"] == 1
+    assert alpha["monitored_count"] == 1
+    assert alpha["current_evidence_count"] == 1
+    assert [site["name"] for site in alpha["sites"]] == ["Alpha Directory Site"]
+
+    unassigned = client.get(
+        "/api/site-directory",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert unassigned["missing_snapshot_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Directory Site"
+    ]
+
+
+def test_api_site_directory_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/sites",
+        data={
+            "name": "Known Directory Site",
+            "url": "https://known-directory.example",
+            "client": "Known Client",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/site-directory",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_clients_rolls_up_account_health(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -7946,6 +8025,7 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
 @pytest.mark.parametrize(
     "path",
     [
+        "/api/site-directory",
         "/api/monitoring-coverage",
         "/api/stale-snapshots",
         "/api/stale-care-checks",
