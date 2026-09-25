@@ -5054,6 +5054,72 @@ def test_api_stale_care_checks_clamps_non_positive_threshold(tmp_path):
     assert payload["care_check_coverage_percent"] == 100
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/stale-snapshots",
+        "/api/stale-care-checks",
+    ],
+)
+def test_stale_evidence_queues_filter_by_client_and_unassigned(tmp_path, path):
+    client = make_test_client(tmp_path)
+    for name, url, client_name in (
+        ("Alpha Missing Evidence", "https://alpha-stale-queue.example", "Client Alpha"),
+        ("Beta Missing Evidence", "https://beta-stale-queue.example", "Client Beta"),
+        ("Unassigned Missing Evidence", "https://unassigned-stale-queue.example", ""),
+    ):
+        client.post(
+            "/sites",
+            data={"name": name, "url": url, "client": client_name},
+            follow_redirects=False,
+        )
+
+    alpha_response = client.get(path, params={"client": "  Client Alpha  "})
+
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["site_count"] == 1
+    assert alpha["stale_count"] == 1
+    assert [site["name"] for site in alpha["sites"]] == ["Alpha Missing Evidence"]
+
+    unassigned = client.get(path, params={"client": "unassigned"}).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert unassigned["stale_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Missing Evidence"
+    ]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/stale-snapshots",
+        "/api/stale-care-checks",
+    ],
+)
+def test_stale_evidence_queues_reject_unknown_client(tmp_path, path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/sites",
+        data={
+            "name": "Known Queue Site",
+            "url": "https://known-stale-queue.example",
+            "client": "Known Client",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(path, params={"client": "Unknown Client"})
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -7881,6 +7947,8 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
     "path",
     [
         "/api/monitoring-coverage",
+        "/api/stale-snapshots",
+        "/api/stale-care-checks",
         "/api/snapshot-history",
         "/api/care-check-history",
     ],

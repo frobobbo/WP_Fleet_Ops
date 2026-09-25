@@ -3917,11 +3917,28 @@ def api_client_escalations():
 
 
 @app.get("/api/stale-snapshots")
-def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
-    """Return sites whose latest fleet snapshot is missing, invalid, or stale."""
+def api_stale_snapshots(
+    threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS,
+    client: str | None = None,
+):
+    """Return stale fleet evidence, optionally scoped to one client."""
     threshold_hours = max(threshold_hours, 1)
     now = datetime.now(timezone.utc)
-    all_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    all_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not all_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     sites = []
     for site in all_sites:
@@ -3966,6 +3983,7 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
     current_snapshot_count = len(all_sites) - len(sites)
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "threshold_hours": threshold_hours,
         "site_count": len(all_sites),
         "stale_count": len(sites),
@@ -3979,11 +3997,28 @@ def api_stale_snapshots(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
 
 
 @app.get("/api/stale-care-checks")
-def api_stale_care_checks(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
-    """Return sites whose latest care check is missing, invalid, or stale."""
+def api_stale_care_checks(
+    threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS,
+    client: str | None = None,
+):
+    """Return stale care evidence, optionally scoped to one client."""
     threshold_hours = max(threshold_hours, 1)
     now = datetime.now(timezone.utc)
-    all_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    all_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not all_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     latest_by_url = {row["url"]: row for row in store.latest_care_checks()}
     sites = []
     for site in all_sites:
@@ -4036,6 +4071,7 @@ def api_stale_care_checks(threshold_hours: int = SNAPSHOT_FRESHNESS_HOURS):
     current_care_check_count = len(all_sites) - len(sites)
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "threshold_hours": threshold_hours,
         "site_count": len(all_sites),
         "stale_count": len(sites),
