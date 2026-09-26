@@ -1131,6 +1131,65 @@ def test_api_sites_fails_closed_without_current_paired_care_evidence(
     assert site["observed_alerts"]
 
 
+def test_api_sites_filters_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, client_name in (
+        ("Alpha Status Site", "https://alpha-status.example", "Client Alpha"),
+        ("Beta Status Site", "https://beta-status.example", "Client Beta"),
+        ("Unassigned Status Site", "https://unassigned-status.example", ""),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=client_name),
+            follow_redirects=False,
+        )
+
+    alpha_response = client.get(
+        "/api/sites",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["site_count"] == 1
+    assert [site["name"] for site in alpha["sites"]] == ["Alpha Status Site"]
+
+    unassigned = client.get(
+        "/api/sites",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Status Site"
+    ]
+
+
+def test_api_sites_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Status Site",
+            url="https://known-status.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/sites",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):
     client = make_test_client(tmp_path)
     client.post("/sites", data={"name": "Needs First Snapshot", "url": "https://needs-first.example", "client": "Client Missing"}, follow_redirects=False)

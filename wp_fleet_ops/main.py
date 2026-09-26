@@ -442,14 +442,34 @@ def api_summary():
 
 
 @app.get("/api/sites")
-def api_sites():
-    """Return latest per-site status only when paired monitoring evidence is current."""
+def api_sites(client: str | None = None):
+    """Return latest paired-evidence status, optionally scoped to one client."""
     now = datetime.now(timezone.utc)
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
     care_checks_by_url = {
-        check["url"]: check for check in store.latest_care_checks()
+        check["url"]: check
+        for check in store.latest_care_checks()
+        if normalized_client is None or check["url"] in tracked_urls
     }
     sites = []
     for row in store.latest_dashboard():
+        if normalized_client is not None and row["url"] not in tracked_urls:
+            continue
         freshness, age_hours = _snapshot_freshness(
             row.get("captured_at"),
             now,
@@ -501,7 +521,9 @@ def api_sites():
         )
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
+        "site_count": len(sites),
         "sites": sites,
     }
 
