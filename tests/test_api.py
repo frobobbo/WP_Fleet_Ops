@@ -5649,6 +5649,87 @@ def test_api_site_scorecards_returns_compact_per_site_status_cards(tmp_path):
     assert payload["sites"][1]["next_action"] == "Continue normal maintenance cadence."
 
 
+def test_api_site_scorecards_filters_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, client_name, overrides in (
+        (
+            "Alpha Scorecard",
+            "https://alpha-scorecard.example",
+            "Client Alpha",
+            {"uptime_ok": "false", "ssl_days": "3"},
+        ),
+        (
+            "Beta Scorecard",
+            "https://beta-scorecard.example",
+            "Client Beta",
+            {},
+        ),
+        (
+            "Unassigned Scorecard",
+            "https://unassigned-scorecard.example",
+            "",
+            {},
+        ),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name,
+                url=url,
+                client=client_name,
+                **overrides,
+            ),
+            follow_redirects=False,
+        )
+
+    alpha_response = client.get(
+        "/api/site-scorecards",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["site_count"] == 1
+    assert alpha["critical_count"] == 1
+    assert alpha["healthy_count"] == 0
+    assert [site["name"] for site in alpha["sites"]] == ["Alpha Scorecard"]
+
+    unassigned = client.get(
+        "/api/site-scorecards",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert unassigned["healthy_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Scorecard"
+    ]
+
+
+def test_api_site_scorecards_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Scorecard",
+            url="https://known-scorecard.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/site-scorecards",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+    }
+
+
 def test_api_site_scorecards_fail_closed_on_stale_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

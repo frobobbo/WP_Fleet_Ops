@@ -4611,9 +4611,17 @@ def _site_scorecard_rows() -> list[dict]:
 
 
 @app.get("/api/site-scorecards")
-def api_site_scorecards():
-    """Return compact per-site operational status cards for portals and widgets."""
+def api_site_scorecards(client: str | None = None):
+    """Return compact scorecards, optionally scoped to one client account."""
+    normalized_client = _normalize_client_filter(client)
     sites = _site_scorecard_rows()
+    if normalized_client is not None:
+        sites = [site for site in sites if site["client"] == normalized_client]
+        if not sites:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No tracked sites found for client '{normalized_client}'.",
+            )
     current_snapshot_count = sum(
         1 for site in sites if site["snapshot_freshness"] == "current"
     )
@@ -4631,6 +4639,7 @@ def api_site_scorecards():
     )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client": normalized_client,
         "site_count": len(sites),
         "monitored_site_count": len(sites) - missing_snapshot_count,
         "current_snapshot_count": current_snapshot_count,
