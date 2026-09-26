@@ -747,6 +747,89 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
     assert summary["critical_alerts"] >= 1
 
 
+def test_api_summary_filters_rollups_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, client_name, overrides in (
+        (
+            "Alpha Summary Site",
+            "https://alpha-summary.example",
+            "Client Alpha",
+            {"uptime_ok": "false", "ssl_days": "3"},
+        ),
+        (
+            "Beta Summary Site",
+            "https://beta-summary.example",
+            "Client Beta",
+            {},
+        ),
+        (
+            "Unassigned Summary Site",
+            "https://unassigned-summary.example",
+            "",
+            {},
+        ),
+    ):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name,
+                url=url,
+                client=client_name,
+                **overrides,
+            ),
+            follow_redirects=False,
+        )
+
+    alpha_response = client.get(
+        "/api/summary",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["sites"] == 1
+    assert alpha["fleet_snapshots"] == 1
+    assert alpha["care_checks"] == 1
+    assert alpha["healthy_sites"] == 0
+    assert alpha["needs_attention"] == 1
+    assert alpha["overall_status"] == "red"
+
+    unassigned = client.get(
+        "/api/summary",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["sites"] == 1
+    assert unassigned["fleet_snapshots"] == 1
+    assert unassigned["care_checks"] == 1
+    assert unassigned["healthy_sites"] == 1
+    assert unassigned["overall_status"] == "green"
+
+
+def test_api_summary_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Summary Site",
+            url="https://known-summary.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/summary",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+    }
+
+
 def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

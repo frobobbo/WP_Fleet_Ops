@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -431,14 +431,39 @@ def _summary_payload(
 
 
 @app.get("/api/summary")
-def api_summary():
-    """Return compact dashboard rollups for automation and lightweight checks."""
-    return _summary_payload(
-        store.latest_dashboard(),
-        store.latest_care_checks(),
-        store.list_sites(),
+def api_summary(client: str | None = None):
+    """Return compact fleet or client-scoped dashboard rollups."""
+    normalized_client = _normalize_client_filter(client)
+    sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    site_urls = {site["url"] for site in sites}
+    fleet_rows = [
+        row
+        for row in store.latest_dashboard()
+        if normalized_client is None or row["url"] in site_urls
+    ]
+    care_checks = [
+        check
+        for check in store.latest_care_checks()
+        if normalized_client is None or check["url"] in site_urls
+    ]
+    payload = _summary_payload(
+        fleet_rows,
+        care_checks,
+        sites,
         datetime.now(timezone.utc),
     )
+    payload["client"] = normalized_client
+    return payload
 
 
 @app.get("/api/sites")
