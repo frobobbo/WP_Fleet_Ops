@@ -6162,6 +6162,89 @@ def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     assert improving["recommended_action"] == "Continue monitoring the site trend."
 
 
+def test_api_site_trends_filters_history_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    for response_ms in (200, 1800):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Alpha Trend",
+                url="https://alpha-client-trend.example",
+                client="Client Alpha",
+                response_ms=str(response_ms),
+            ),
+            follow_redirects=False,
+        )
+    for response_ms in (200, 300, 400, 500):
+        client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Noisy Beta Trend",
+                url="https://beta-client-trend.example",
+                client="Client Beta",
+                response_ms=str(response_ms),
+            ),
+            follow_redirects=False,
+        )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Unassigned Trend",
+            url="https://unassigned-client-trend.example",
+            client="",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/site-trends",
+        params={"client": "  Client Alpha  ", "limit": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["snapshot_limit"] == 2
+    assert payload["site_count"] == 1
+    assert payload["regressing_count"] == 1
+    assert [trend["name"] for trend in payload["trends"]] == ["Alpha Trend"]
+    assert payload["trends"][0]["previous_score"] is not None
+    assert payload["trends"][0]["trend_status"] == "regressing"
+
+    unassigned = client.get(
+        "/api/site-trends",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert [trend["name"] for trend in unassigned["trends"]] == [
+        "Unassigned Trend"
+    ]
+
+
+def test_api_site_trends_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Trend",
+            url="https://known-client-trend.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/site-trends",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+    }
+
+
 def test_api_site_trends_includes_tracked_sites_missing_snapshot_history(tmp_path):
     client = make_test_client(tmp_path)
     for index in range(3):

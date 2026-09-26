@@ -4848,19 +4848,31 @@ def _site_trend_evidence_action(
     return f"{action.removesuffix('.')} before relying on site trend status."
 
 
-def _site_trend_rows(limit: int) -> list[dict]:
-    """Compare snapshots only when the latest paired site evidence is current."""
+def _site_trend_rows(limit: int, client: str | None = None) -> list[dict]:
+    """Compare current paired evidence, optionally within one client account."""
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
-    care_checks_by_url = {row["url"]: row for row in store.latest_care_checks()}
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if client is None or (site.get("client") or "Unassigned") == client
+    ]
+    tracked_urls = {site["url"] for site in tracked_sites}
+    care_checks_by_url = {
+        row["url"]: row
+        for row in store.latest_care_checks()
+        if row["url"] in tracked_urls
+    }
     history_by_url: dict[str, list[dict]] = {}
-    for snapshot in store.recent_trend_snapshots(limit):
+    for snapshot in store.recent_trend_snapshots(limit, client=client):
         history_by_url.setdefault(snapshot["url"], []).append(snapshot)
-    # The comparison query is globally bounded, so an older site's history may
-    # be omitted even though that site is monitored. Preserve an accurate fleet
-    # inventory by backfilling only its latest snapshot; the row remains a
-    # current/stale "new" trend without pretending a prior comparison exists.
+    # The comparison query is bounded within the selected fleet or account, so
+    # an older site's history may still be omitted even though that site is
+    # monitored. Preserve an accurate inventory by backfilling only its latest
+    # snapshot; the row remains a current/stale "new" trend without pretending
+    # a prior comparison exists.
     for snapshot in store.latest_dashboard():
+        if snapshot["url"] not in tracked_urls:
+            continue
         history_by_url.setdefault(snapshot["url"], [snapshot])
 
     rows = []
@@ -4986,10 +4998,16 @@ def _site_trend_rows(limit: int) -> list[dict]:
 
 
 @app.get("/api/site-trends")
-def api_site_trends(limit: int = 100):
-    """Return site trends only when paired monitoring evidence is current."""
+def api_site_trends(limit: int = 100, client: str | None = None):
+    """Return paired-evidence trends, optionally scoped to one client account."""
     bounded_limit = max(2, min(limit, 500))
-    trends = _site_trend_rows(bounded_limit)
+    normalized_client = _normalize_client_filter(client)
+    trends = _site_trend_rows(bounded_limit, normalized_client)
+    if normalized_client is not None and not trends:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
     current_snapshot_count = sum(
         1 for trend in trends if trend["snapshot_freshness"] == "current"
     )
@@ -5007,6 +5025,7 @@ def api_site_trends(limit: int = 100):
     regressing_count = sum(1 for trend in trends if trend["trend_status"] == "regressing")
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client": normalized_client,
         "status": "red" if regressing_count else ("yellow" if unknown_count else "green"),
         "snapshot_limit": bounded_limit,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
