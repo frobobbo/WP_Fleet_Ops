@@ -1267,12 +1267,32 @@ def _current_actions(
 
 
 @app.get("/api/actions")
-def api_actions():
-    """Return paired-evidence fleet alerts without hiding monitoring blind spots."""
+def api_actions(client: str | None = None):
+    """Return paired-evidence alerts, optionally scoped to one client account."""
     now = datetime.now(timezone.utc)
-    dashboard_rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
+    dashboard_rows = [
+        row
+        for row in store.latest_dashboard()
+        if normalized_client is None or row["url"] in tracked_urls
+    ]
+    care_checks = [
+        check
+        for check in store.latest_care_checks()
+        if normalized_client is None or check["url"] in tracked_urls
+    ]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_snapshot_urls = {row["url"] for row in current_snapshot_rows}
     current_care_check_urls = _current_care_check_urls(care_checks, now)
@@ -1295,6 +1315,7 @@ def api_actions():
     status = "red" if critical_action_count else ("yellow" if actions or monitoring_gap_count else "green")
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "tracked_site_count": len(tracked_sites),
         "current_snapshot_count": current_snapshot_count,
