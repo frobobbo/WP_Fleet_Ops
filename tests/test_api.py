@@ -2291,6 +2291,107 @@ def test_api_site_watchlist_requires_current_paired_care_check_evidence(tmp_path
     assert payload["sites"] == []
 
 
+def test_api_site_watchlist_filters_sites_and_coverage_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Watch Site",
+            url="https://alpha-watch-filter.example",
+            client="Client Alpha",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Critical Watch Site",
+            url="https://beta-critical-watch-filter.example",
+            client="Client Beta",
+            uptime_ok="false",
+            ssl_days="2",
+            wp_updates="5",
+            backup_age_hours="120",
+            response_ms="2600",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Watch Gap",
+            "url": "https://unassigned-watch-gap.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/site-watchlist",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 1
+    assert payload["tracked_site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["stale_snapshot_count"] == 0
+    assert payload["missing_snapshot_count"] == 0
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["paired_coverage_percent"] == 100
+    assert payload["watchlist_count"] == 1
+    assert payload["critical_watch_count"] == 0
+    assert [site["name"] for site in payload["sites"]] == ["Alpha Watch Site"]
+
+    unassigned = client.get(
+        "/api/site-watchlist",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 0
+    assert unassigned["tracked_site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["missing_snapshot_count"] == 1
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["paired_coverage_percent"] == 0
+    assert unassigned["watchlist_count"] == 0
+    assert unassigned["sites"] == []
+
+
+def test_api_site_watchlist_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Watch Site",
+            url="https://known-watch-filter.example",
+            client="Known Client",
+            wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/site-watchlist",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+    }
+
+
 def test_api_site_watchlist_returns_only_attention_sites(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

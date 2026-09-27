@@ -1382,12 +1382,32 @@ def _site_watchlist_rows(
 
 
 @app.get("/api/site-watchlist")
-def api_site_watchlist():
-    """Return paired-evidence attention sites plus monitoring-gap counts."""
+def api_site_watchlist(client: str | None = None):
+    """Return paired-evidence attention sites, optionally scoped by client."""
     now = datetime.now(timezone.utc)
-    dashboard_rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
+    dashboard_rows = [
+        row
+        for row in store.latest_dashboard()
+        if normalized_client is None or row["url"] in tracked_urls
+    ]
+    care_checks = [
+        check
+        for check in store.latest_care_checks()
+        if normalized_client is None or check["url"] in tracked_urls
+    ]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_snapshot_urls = {row["url"] for row in current_snapshot_rows}
     current_care_check_urls = _current_care_check_urls(care_checks, now)
@@ -1410,6 +1430,7 @@ def api_site_watchlist():
     status = "red" if critical_watch_count else ("yellow" if sites or monitoring_gap_count else "green")
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "site_count": len(dashboard_rows),
         "tracked_site_count": len(tracked_sites),
