@@ -1613,12 +1613,18 @@ def api_client_workload():
 
 
 @app.get("/api/incidents")
-def api_incidents():
-    """Return critical current incidents without hiding monitoring blind spots."""
-    incidents = [action for action in _current_actions() if action["severity"] == "critical"]
-    coverage = api_monitoring_coverage()
-    # An unfiltered coverage read always returns a payload; only an unknown
-    # explicit client filter can produce the endpoint's 404 JSONResponse.
+def api_incidents(client: str | None = None):
+    """Return critical current incidents, optionally scoped to one client."""
+    action_queue = api_actions(client)
+    assert isinstance(action_queue, dict)
+    incidents = [
+        action
+        for action in action_queue["actions"]
+        if action["severity"] == "critical"
+    ]
+    coverage = api_monitoring_coverage(client)
+    # api_actions validates an explicit account filter before coverage is read,
+    # so this direct call always returns a payload rather than a 404 response.
     assert isinstance(coverage, dict)
     monitoring_sites = [
         site for site in coverage["sites"] if site["coverage_status"] == "gap"
@@ -1628,6 +1634,7 @@ def api_incidents():
     )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client": action_queue["client"],
         "status": status,
         "tracked_site_count": coverage["tracked_site_count"],
         "current_evidence_count": coverage["current_evidence_count"],

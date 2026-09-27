@@ -2711,6 +2711,106 @@ def test_api_incidents_returns_only_critical_alerts(tmp_path):
     assert payload["incidents"][0]["recommended_action"]
 
 
+def test_api_incidents_filters_current_incidents_and_coverage_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Critical Incident",
+            url="https://alpha-incident-filter.example",
+            client="Client Alpha",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Critical Incident",
+            url="https://beta-incident-filter.example",
+            client="Client Beta",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Incident Gap",
+            "url": "https://unassigned-incident-gap.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/incidents",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["tracked_site_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["incident_count"] == 1
+    assert payload["affected_site_count"] == 1
+    assert payload["affected_client_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["paired_coverage_percent"] == 100
+    assert {incident["site"] for incident in payload["incidents"]} == {
+        "Alpha Critical Incident"
+    }
+    assert payload["monitoring_sites"] == []
+
+    unassigned = client.get(
+        "/api/incidents",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["tracked_site_count"] == 1
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["incident_count"] == 0
+    assert unassigned["affected_site_count"] == 0
+    assert unassigned["affected_client_count"] == 0
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["paired_coverage_percent"] == 0
+    assert unassigned["incidents"] == []
+    assert [site["name"] for site in unassigned["monitoring_sites"]] == [
+        "Unassigned Incident Gap"
+    ]
+
+
+def test_api_incidents_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Incident Site",
+            url="https://known-incident-filter.example",
+            client="Known Client",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/incidents",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+    }
+
+
 def test_api_incidents_surfaces_paired_monitoring_gaps_without_escalating_stale_alerts(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
