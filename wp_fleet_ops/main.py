@@ -1058,14 +1058,32 @@ def _sla_evidence_recommended_action(
 
 
 @app.get("/api/sla-breaches")
-def api_sla_breaches():
-    """Return SLA breaches only when paired monitoring evidence is current."""
+def api_sla_breaches(client: str | None = None):
+    """Return current SLA breaches, optionally scoped to one client account."""
     now = datetime.now(timezone.utc)
-    latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
-    care_checks_by_url = {
-        check["url"]: check for check in store.latest_care_checks()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
+    latest_by_url = {
+        row["url"]: row
+        for row in store.latest_dashboard()
+        if normalized_client is None or row["url"] in tracked_urls
     }
-    tracked_sites = store.list_sites()
+    care_checks_by_url = {
+        check["url"]: check
+        for check in store.latest_care_checks()
+        if normalized_client is None or check["url"] in tracked_urls
+    }
     severity_rank = {"critical": 0, "unknown": 1, "warning": 2, "info": 3}
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
@@ -1210,6 +1228,7 @@ def api_sla_breaches():
     status = "red" if critical_breach_count else ("yellow" if warning_breach_count or unknown_count else "green")
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": site_count,

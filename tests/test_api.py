@@ -1803,6 +1803,107 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     assert payload["sites"][2]["breaches"][0]["severity"] == "warning"
 
 
+def test_api_sla_breaches_filters_sites_and_evidence_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha SLA Breach",
+            url="https://alpha-sla-filter.example",
+            client="Client Alpha",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta SLA Warning",
+            url="https://beta-sla-filter.example",
+            client="Client Beta",
+            ssl_days="13",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned SLA Gap",
+            "url": "https://unassigned-sla-gap.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/sla-breaches",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["sla_evidence_percent"] == 100
+    assert payload["breach_count"] == 1
+    assert payload["critical_breach_count"] == 1
+    assert payload["warning_breach_count"] == 0
+    assert [site["name"] for site in payload["sites"]] == ["Alpha SLA Breach"]
+
+    unassigned = client.get(
+        "/api/sla-breaches",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["sla_evidence_percent"] == 0
+    assert unassigned["breach_count"] == 0
+    assert unassigned["critical_breach_count"] == 0
+    assert unassigned["warning_breach_count"] == 0
+    assert [site["name"] for site in unassigned["sites"]] == ["Unassigned SLA Gap"]
+    assert unassigned["sites"][0]["sla_status"] == "unknown"
+
+
+def test_api_sla_breaches_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known SLA Site",
+            url="https://known-sla-filter.example",
+            client="Known Client",
+            ssl_days="13",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/sla-breaches",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+    }
+
+
 def test_api_sla_breaches_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
