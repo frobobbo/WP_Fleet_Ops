@@ -2967,6 +2967,102 @@ def test_api_availability_fails_closed_for_missing_and_stale_evidence(tmp_path):
     assert healthy["reachable"] is True
 
 
+def test_api_availability_filters_sites_and_evidence_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Availability",
+            url="https://alpha-availability-filter.example",
+            client="Client Alpha",
+            uptime_ok="false",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Availability",
+            url="https://beta-availability-filter.example",
+            client="Client Beta",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Availability Gap",
+            "url": "https://unassigned-availability-gap.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/availability",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["available_count"] == 0
+    assert payload["down_count"] == 1
+    assert payload["unknown_count"] == 0
+    assert payload["availability_evidence_percent"] == 100
+    assert [site["name"] for site in payload["sites"]] == [
+        "Alpha Availability"
+    ]
+
+    unassigned = client.get(
+        "/api/availability",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["available_count"] == 0
+    assert unassigned["down_count"] == 0
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["availability_evidence_percent"] == 0
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Availability Gap"
+    ]
+
+
+def test_api_availability_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Availability Site",
+            url="https://known-availability-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/availability",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_availability_requires_current_paired_care_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
