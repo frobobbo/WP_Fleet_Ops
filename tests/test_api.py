@@ -3945,6 +3945,109 @@ def test_api_security_highlights_header_coverage_gaps(tmp_path):
     assert payload["sites"][2]["security_status"] == "covered"
 
 
+def test_api_security_filters_coverage_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Missing Headers",
+            url="https://alpha-security-filter.example",
+            client="Client Alpha",
+            security_header_count="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Covered Headers",
+            url="https://beta-security-filter.example",
+            client="Client Beta",
+            security_header_count="3",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Security Gap",
+            "url": "https://unassigned-security-filter.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/security",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["covered_count"] == 0
+    assert payload["critical_count"] == 1
+    assert payload["unknown_count"] == 0
+    assert payload["security_evidence_percent"] == 100
+    assert payload["average_security_header_count"] == 0
+    assert [site["name"] for site in payload["sites"]] == [
+        "Alpha Missing Headers"
+    ]
+
+    unassigned = client.get(
+        "/api/security",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["covered_count"] == 0
+    assert unassigned["critical_count"] == 0
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["security_evidence_percent"] == 0
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Security Gap"
+    ]
+
+
+def test_api_security_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Security Site",
+            url="https://known-security-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/security",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_plain_http_security_cannot_be_reported_as_covered(tmp_path):
     client = make_test_client(tmp_path)
     response = client.post(
@@ -9038,6 +9141,7 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
     [
         "/api/site-directory",
         "/api/monitoring-coverage",
+        "/api/security",
         "/api/stale-snapshots",
         "/api/stale-care-checks",
         "/api/snapshot-history",
