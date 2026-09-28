@@ -3151,6 +3151,107 @@ def test_api_backups_highlights_stale_backup_queue(tmp_path):
     assert payload["sites"][2]["backup_status"] == "fresh"
 
 
+def test_api_backups_filters_sites_and_evidence_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Backup",
+            url="https://alpha-backup-filter.example",
+            client="Client Alpha",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Backup",
+            url="https://beta-backup-filter.example",
+            client="Client Beta",
+            backup_age_hours="12",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Backup Gap",
+            "url": "https://unassigned-backup-gap.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/backups",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["fresh_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["critical_count"] == 1
+    assert payload["stale_count"] == 1
+    assert payload["unknown_count"] == 0
+    assert payload["backup_evidence_percent"] == 100
+    assert payload["oldest_backup_age_hours"] == 120
+    assert [site["name"] for site in payload["sites"]] == ["Alpha Backup"]
+
+    unassigned = client.get(
+        "/api/backups",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["fresh_count"] == 0
+    assert unassigned["warning_count"] == 0
+    assert unassigned["critical_count"] == 0
+    assert unassigned["stale_count"] == 0
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["backup_evidence_percent"] == 0
+    assert unassigned["oldest_backup_age_hours"] == 0
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Backup Gap"
+    ]
+
+
+def test_api_backups_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Backup Site",
+            url="https://known-backup-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/backups",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_backups_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     for name, url in (
