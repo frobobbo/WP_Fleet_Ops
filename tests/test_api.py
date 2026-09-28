@@ -3468,6 +3468,112 @@ def test_api_backup_remediation_groups_stale_backup_work_by_client(tmp_path):
     assert payload["clients"][1]["backup_status"] == "critical"
 
 
+def test_api_backup_remediation_filters_work_and_coverage_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Critical Backup",
+            url="https://alpha-remediation-filter.example",
+            client="Client Alpha",
+            backup_age_hours="120",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Fresh Backup",
+            url="https://beta-remediation-filter.example",
+            client="Client Beta",
+            backup_age_hours="12",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Remediation Gap",
+            "url": "https://unassigned-remediation-gap.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/backup-remediation",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["client_count"] == 1
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["backup_evidence_percent"] == 100
+    assert payload["stale_site_count"] == 1
+    assert payload["critical_site_count"] == 1
+    assert [row["client"] for row in payload["clients"]] == ["Client Alpha"]
+    assert [site["name"] for site in payload["clients"][0]["sites"]] == [
+        "Alpha Critical Backup"
+    ]
+
+    unassigned = client.get(
+        "/api/backup-remediation",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["client_count"] == 1
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["backup_evidence_percent"] == 0
+    assert unassigned["stale_site_count"] == 0
+    assert unassigned["critical_site_count"] == 0
+    assert [row["client"] for row in unassigned["clients"]] == ["Unassigned"]
+    assert [site["name"] for site in unassigned["clients"][0]["sites"]] == [
+        "Unassigned Remediation Gap"
+    ]
+
+
+def test_api_backup_remediation_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Remediation Site",
+            url="https://known-remediation-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/backup-remediation",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_backup_remediation_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
