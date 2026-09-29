@@ -4258,6 +4258,112 @@ def test_api_performance_prioritizes_slowest_sites(tmp_path):
     assert payload["sites"][2]["performance_status"] == "fast"
 
 
+def test_api_performance_filters_status_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Slow Site",
+            url="https://alpha-performance-filter.example",
+            client="Client Alpha",
+            response_ms="2200",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Fast Site",
+            url="https://beta-performance-filter.example",
+            client="Client Beta",
+            response_ms="250",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Performance Gap",
+            "url": "https://unassigned-performance-filter.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/performance",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["slow_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["fast_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["performance_evidence_percent"] == 100
+    assert payload["average_response_ms"] == 2200
+    assert payload["max_response_ms"] == 2200
+    assert [site["name"] for site in payload["sites"]] == ["Alpha Slow Site"]
+
+    unassigned = client.get(
+        "/api/performance",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["slow_count"] == 0
+    assert unassigned["warning_count"] == 0
+    assert unassigned["fast_count"] == 0
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["performance_evidence_percent"] == 0
+    assert unassigned["average_response_ms"] == 0
+    assert unassigned["max_response_ms"] == 0
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Performance Gap"
+    ]
+
+
+def test_api_performance_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Performance Site",
+            url="https://known-performance-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/performance",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_performance_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     for name, url in (
@@ -9142,6 +9248,7 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
         "/api/site-directory",
         "/api/monitoring-coverage",
         "/api/security",
+        "/api/performance",
         "/api/stale-snapshots",
         "/api/stale-care-checks",
         "/api/snapshot-history",
