@@ -2277,9 +2277,24 @@ def _restore_drill_evidence_recommended_action(
 
 
 @app.get("/api/restore-drill-queue")
-def api_restore_drill_queue():
-    """Return restore-drill priorities only from current paired evidence."""
+def api_restore_drill_queue(client: str | None = None):
+    """Return paired-evidence restore priorities, optionally for one account."""
     now = datetime.now(timezone.utc)
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     care_checks_by_url = {
         check["url"]: check for check in store.latest_care_checks()
@@ -2287,7 +2302,7 @@ def api_restore_drill_queue():
     priority_rank = {"unknown": 0, "urgent": 1, "high": 2, "watch": 3, "routine": 4}
     freshness_rank = {"missing": 0, "invalid": 1, "clock_skew": 2, "stale": 3, "current": 4}
     sites = []
-    for site in store.list_sites():
+    for site in tracked_sites:
         row = latest_by_url.get(site["url"])
         care_check = care_checks_by_url.get(site["url"])
         care_check_freshness, care_check_age_hours = (
@@ -2378,6 +2393,7 @@ def api_restore_drill_queue():
     status = "red" if urgent_count else ("yellow" if unknown_count or high_count or watch_count else "green")
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),

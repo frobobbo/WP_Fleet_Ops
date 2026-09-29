@@ -3775,6 +3775,58 @@ def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
     assert payload["sites"][3]["restore_drill_priority"] == "routine"
 
 
+def test_api_restore_drill_queue_filters_account_risk_and_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, backup_age in (
+        ("Alpha High", "https://alpha-high-dr.example", "Client Alpha", "96"),
+        ("Beta Urgent", "https://beta-urgent-dr.example", "Client Beta", "240"),
+        ("Unassigned Routine", "https://unassigned-dr.example", "", "12"),
+    ):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name, url=url, client=account, backup_age_hours=backup_age,
+            ),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    response = client.post(
+        "/sites",
+        data={"name": "Alpha Missing", "url": "https://alpha-missing-dr.example", "client": "Client Alpha"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    response = client.get("/api/restore-drill-queue", params={"client": " Client Alpha "})
+    assert response.status_code == 200
+    alpha = response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["site_count"] == 2
+    assert alpha["status"] == "yellow"
+    assert alpha["high_count"] == 1
+    assert alpha["urgent_count"] == 0
+    assert alpha["unknown_count"] == alpha["monitoring_gap_count"] == 1
+    assert alpha["current_evidence_count"] == 1
+    assert alpha["snapshot_gap_count"] == alpha["care_check_gap_count"] == 1
+    assert alpha["restore_evidence_percent"] == 50
+    assert {site["name"] for site in alpha["sites"]} == {"Alpha High", "Alpha Missing"}
+
+    unassigned = client.get(
+        "/api/restore-drill-queue", params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "green"
+    assert unassigned["site_count"] == unassigned["routine_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == ["Unassigned Routine"]
+
+    unknown = client.get("/api/restore-drill-queue", params={"client": "Unknown Client"})
+    assert unknown.status_code == 404
+    assert unknown.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_restore_drill_queue_fails_closed_for_incomplete_backup_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -9466,6 +9518,7 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
         "/api/security",
         "/api/performance",
         "/api/certificates",
+        "/api/restore-drill-queue",
         "/api/stale-snapshots",
         "/api/stale-care-checks",
         "/api/snapshot-history",
