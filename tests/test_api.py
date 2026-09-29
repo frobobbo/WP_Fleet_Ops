@@ -5032,6 +5032,116 @@ def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
     assert payload["sites"][2]["update_status"] == "current"
 
 
+def test_api_updates_filters_status_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Update Backlog",
+            url="https://alpha-update-filter.example",
+            client="Client Alpha",
+            wp_updates="6",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Current Updates",
+            url="https://beta-update-filter.example",
+            client="Client Beta",
+            wp_updates="0",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Update Gap",
+            "url": "https://unassigned-update-filter.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/updates",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["critical_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["current_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["update_evidence_percent"] == 100
+    assert payload["backlog_count"] == 1
+    assert payload["total_pending_updates"] == 6
+    assert payload["max_pending_updates"] == 6
+    assert [site["name"] for site in payload["sites"]] == [
+        "Alpha Update Backlog"
+    ]
+
+    unassigned = client.get(
+        "/api/updates",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["critical_count"] == 0
+    assert unassigned["warning_count"] == 0
+    assert unassigned["current_count"] == 0
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["update_evidence_percent"] == 0
+    assert unassigned["backlog_count"] == 0
+    assert unassigned["total_pending_updates"] == 0
+    assert unassigned["max_pending_updates"] == 0
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Update Gap"
+    ]
+
+
+def test_api_updates_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Update Site",
+            url="https://known-update-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/updates",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_updates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     for name, url in (

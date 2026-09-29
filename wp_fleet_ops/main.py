@@ -3149,15 +3149,30 @@ def _update_evidence_recommended_action(
 
 
 @app.get("/api/updates")
-def api_updates():
-    """Return update status only when paired monitoring evidence is current."""
+def api_updates(client: str | None = None):
+    """Return paired-evidence update status, optionally scoped by client."""
     now = datetime.now(timezone.utc)
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     care_checks_by_url = {
         check["url"]: check for check in store.latest_care_checks()
     }
     sites = []
-    for site in store.list_sites():
+    for site in tracked_sites:
         row = latest_by_url.get(site["url"])
         care_check = care_checks_by_url.get(site["url"])
         care_check_freshness, care_check_age_hours = (
@@ -3255,6 +3270,7 @@ def api_updates():
     ]
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": overall_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(sites),
