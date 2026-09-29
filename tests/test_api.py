@@ -4542,6 +4542,112 @@ def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     assert payload["sites"][2]["certificate_status"] == "healthy"
 
 
+def test_api_certificates_filters_status_by_client_and_unassigned(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Alpha Expiring Certificate",
+            url="https://alpha-certificate-filter.example",
+            client="Client Alpha",
+            ssl_days="5",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Beta Healthy Certificate",
+            url="https://beta-certificate-filter.example",
+            client="Client Beta",
+            ssl_days="90",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={
+            "name": "Unassigned Certificate Gap",
+            "url": "https://unassigned-certificate-filter.example",
+            "client": "",
+        },
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/certificates",
+        params={"client": "  Client Alpha  "},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Client Alpha"
+    assert payload["status"] == "red"
+    assert payload["site_count"] == 1
+    assert payload["current_snapshot_count"] == 1
+    assert payload["current_care_check_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["snapshot_gap_count"] == 0
+    assert payload["care_check_gap_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["critical_count"] == 1
+    assert payload["warning_count"] == 0
+    assert payload["healthy_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["certificate_evidence_percent"] == 100
+    assert payload["minimum_ssl_days"] == 5
+    assert [site["name"] for site in payload["sites"]] == [
+        "Alpha Expiring Certificate"
+    ]
+
+    unassigned = client.get(
+        "/api/certificates",
+        params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "yellow"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_snapshot_count"] == 0
+    assert unassigned["current_care_check_count"] == 0
+    assert unassigned["current_evidence_count"] == 0
+    assert unassigned["snapshot_gap_count"] == 1
+    assert unassigned["care_check_gap_count"] == 1
+    assert unassigned["monitoring_gap_count"] == 1
+    assert unassigned["critical_count"] == 0
+    assert unassigned["warning_count"] == 0
+    assert unassigned["healthy_count"] == 0
+    assert unassigned["unknown_count"] == 1
+    assert unassigned["certificate_evidence_percent"] == 0
+    assert unassigned["minimum_ssl_days"] is None
+    assert [site["name"] for site in unassigned["sites"]] == [
+        "Unassigned Certificate Gap"
+    ]
+
+
+def test_api_certificates_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Known Certificate Site",
+            url="https://known-certificate-filter.example",
+            client="Known Client",
+        ),
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/certificates",
+        params={"client": "Unknown Client"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_certificates_fails_closed_for_incomplete_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     for name, url in (
@@ -9249,6 +9355,7 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
         "/api/monitoring-coverage",
         "/api/security",
         "/api/performance",
+        "/api/certificates",
         "/api/stale-snapshots",
         "/api/stale-care-checks",
         "/api/snapshot-history",
