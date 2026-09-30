@@ -3009,10 +3009,24 @@ def _certificate_renewal_evidence_action(
 
 
 @app.get("/api/certificate-renewal-calendar")
-def api_certificate_renewal_calendar():
-    """Return current TLS renewals while failing closed on incomplete evidence."""
+def api_certificate_renewal_calendar(client: str | None = None):
+    """Return TLS renewals, optionally scoped by client, with paired evidence."""
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
     care_checks_by_url = {
         check["url"]: check for check in store.latest_care_checks()
@@ -3110,6 +3124,7 @@ def api_certificate_renewal_calendar():
     )
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": overall_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(tracked_sites),

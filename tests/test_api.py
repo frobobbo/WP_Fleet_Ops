@@ -4923,6 +4923,69 @@ def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path)
     assert payload["sites"][2]["recommended_action"] == "Schedule certificate renewal before the 7-day critical window."
 
 
+def test_api_certificate_renewal_calendar_filters_counts_and_evidence_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, ssl_days in (
+        ("Alpha Renewal", "https://alpha-renewal.example", "Client Alpha", "21"),
+        ("Beta Expired", "https://beta-expired.example", "Client Beta", "0"),
+        ("Unassigned Renewal", "https://unassigned-renewal.example", "", "5"),
+    ):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=account, ssl_days=ssl_days),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    client.post(
+        "/sites",
+        data={"name": "Alpha No Evidence", "url": "https://alpha-no-evidence.example", "client": "Client Alpha"},
+        follow_redirects=False,
+    )
+
+    alpha_response = client.get(
+        "/api/certificate-renewal-calendar", params={"client": "  Client Alpha  "},
+    )
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["status"] == "yellow"
+    assert alpha["site_count"] == 2
+    assert alpha["current_evidence_count"] == 1
+    assert alpha["renewal_count"] == 1
+    assert alpha["scheduled_count"] == 1
+    assert alpha["overdue_count"] == 0
+    assert alpha["unknown_count"] == 1
+    assert alpha["renewal_evidence_percent"] == 50
+    assert {site["name"] for site in alpha["sites"]} == {"Alpha Renewal", "Alpha No Evidence"}
+
+    unassigned = client.get(
+        "/api/certificate-renewal-calendar", params={"client": "unassigned"},
+    ).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["status"] == "red"
+    assert unassigned["site_count"] == 1
+    assert unassigned["immediate_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == ["Unassigned Renewal"]
+
+
+def test_api_certificate_renewal_calendar_rejects_unknown_client(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/sites",
+        data={"name": "Known Renewal", "url": "https://known-renewal.example", "client": "Known Client"},
+        follow_redirects=False,
+    )
+
+    response = client.get(
+        "/api/certificate-renewal-calendar", params={"client": "Unknown Client"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_certificate_renewal_calendar_fails_closed_for_incomplete_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
