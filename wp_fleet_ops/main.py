@@ -5425,14 +5425,29 @@ def _site_priority_score(row: dict) -> int:
 
 
 @app.get("/api/site-priorities")
-def api_site_priorities(limit: int = 10):
-    """Return current site priorities plus coverage needed to trust the queue."""
+def api_site_priorities(limit: int = 10, client: str | None = None):
+    """Return current site priorities and coverage, optionally for one client."""
     bounded_limit = max(1, min(limit, 50))
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     now = datetime.now(timezone.utc)
-    dashboard_rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
+    dashboard_rows = [
+        row for row in store.latest_dashboard() if row["url"] in tracked_urls
+    ]
+    care_checks = [
+        check for check in store.latest_care_checks() if check["url"] in tracked_urls
+    ]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
     current_care_urls = _current_care_check_urls(care_checks, now)
@@ -5478,6 +5493,7 @@ def api_site_priorities(limit: int = 10):
     selected = sites[:bounded_limit]
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client": normalized_client,
         "limit": bounded_limit,
         "site_count": len(tracked_sites),
         "monitored_site_count": len(dashboard_rows),

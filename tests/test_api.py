@@ -8064,6 +8064,63 @@ def test_api_site_priorities_surfaces_incomplete_monitoring_coverage(tmp_path):
     assert payload["sites"] == []
 
 
+def test_api_site_priorities_filters_queue_and_coverage_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, fields in (
+        ("Alpha Risk", "https://alpha-risk.example", "Alpha", {"wp_updates": "3"}),
+        ("Alpha Stale", "https://alpha-stale.example", "Alpha", {"uptime_ok": "false"}),
+        ("Beta Risk", "https://beta-risk.example", "Beta", {"uptime_ok": "false"}),
+        ("Unassigned Risk", "https://unassigned-risk.example", "", {"wp_updates": "1"}),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=account, **fields),
+            follow_redirects=False,
+        ).status_code == 303
+    assert client.post(
+        "/sites",
+        data={"name": "Alpha Missing", "url": "https://alpha-missing.example", "client": "Alpha"},
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update snapshots set captured_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://alpha-stale.example"),
+        )
+
+    fleet = client.get("/api/site-priorities").json()
+    assert fleet["client"] is None
+    assert fleet["site_count"] == 5
+
+    response = client.get("/api/site-priorities", params={"client": "  Alpha  "})
+    assert response.status_code == 200
+    alpha = response.json()
+    assert alpha["client"] == "Alpha"
+    assert alpha["site_count"] == 3
+    assert alpha["monitored_site_count"] == 2
+    assert alpha["current_snapshot_count"] == 1
+    assert alpha["current_care_check_count"] == 2
+    assert alpha["current_evidence_count"] == 1
+    assert alpha["missing_snapshot_count"] == 1
+    assert alpha["stale_snapshot_count"] == 1
+    assert alpha["care_check_gap_count"] == 1
+    assert alpha["monitoring_gap_count"] == 2
+    assert alpha["priority_evidence_percent"] == 33
+    assert alpha["priority_site_count"] == alpha["returned_site_count"] == 1
+    assert [site["name"] for site in alpha["sites"]] == ["Alpha Risk"]
+
+    unassigned = client.get("/api/site-priorities", params={"client": "unassigned"}).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert [site["name"] for site in unassigned["sites"]] == ["Unassigned Risk"]
+
+    unknown = client.get("/api/site-priorities", params={"client": "Absent"})
+    assert unknown.status_code == 404
+    assert unknown.json() == {"detail": "No tracked sites found for client 'Absent'."}
+    assert client.get("/api/site-priorities", params={"client": "  "}).status_code == 422
+
+
 def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
