@@ -5732,6 +5732,77 @@ def test_api_maintenance_calendar_groups_work_by_window(tmp_path):
     assert scheduled["recommended_action"].startswith("Plan a routine maintenance window")
 
 
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+def test_maintenance_views_scope_work_and_evidence_to_client(tmp_path, path):
+    client = make_test_client(tmp_path)
+    for name, url, account, updates, uptime in (
+        ("Alpha Routine", "https://alpha-maintenance-filter.example", "Client Alpha", "2", "true"),
+        ("Beta Emergency", "https://beta-maintenance-filter.example", "Client Beta", "0", "false"),
+        ("Unassigned Routine", "https://unassigned-maintenance-filter.example", "", "3", "true"),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=account, wp_updates=updates, uptime_ok=uptime),
+            follow_redirects=False,
+        ).status_code == 303
+    assert client.post(
+        "/sites",
+        data={"name": "Alpha Missing", "url": "https://alpha-missing-maintenance-filter.example", "client": "Client Alpha"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    unfiltered = client.get(path).json()
+    assert unfiltered["client"] is None
+    assert unfiltered["site_count"] == 4
+    assert unfiltered["window_count"] == (3 if path.endswith("windows") else 2)
+
+    alpha_response = client.get(path, params={"client": "  Client Alpha  "})
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["site_count"] == 2
+    assert alpha["monitored_site_count"] == 1
+    assert alpha["current_snapshot_count"] == 1
+    assert alpha["current_care_check_count"] == 1
+    assert alpha["current_evidence_count"] == 1
+    assert alpha["missing_snapshot_count"] == 1
+    assert alpha["monitoring_gap_count"] == 1
+    assert alpha["maintenance_evidence_percent"] == 50
+    assert alpha["status"] == "yellow"
+    assert alpha["window_count"] == 1
+    if path.endswith("windows"):
+        assert [site["name"] for site in alpha["sites"]] == ["Alpha Routine"]
+    else:
+        assert alpha["windows"][0]["window"] == "scheduled"
+        assert [site["name"] for site in alpha["windows"][0]["sites"]] == ["Alpha Routine"]
+
+    beta = client.get(path, params={"client": "Client Beta"}).json()
+    assert beta["site_count"] == 1
+    assert beta["status"] == "red"
+    assert beta["window_count"] == 1
+    assert beta["monitoring_gap_count"] == 0
+    unassigned = client.get(path, params={"client": "unassigned"}).json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert unassigned["window_count"] == 1
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+def test_maintenance_views_reject_unknown_client_instead_of_reporting_green(tmp_path, path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/sites",
+        data={"name": "Known", "url": "https://known-maintenance.example", "client": "Known Client"},
+        follow_redirects=False,
+    )
+    response = client.get(path, params={"client": "Unknown Client"})
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_maintenance_views_fail_closed_on_missing_or_stale_evidence(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -9660,6 +9731,8 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
         "/api/monitoring-coverage",
         "/api/security",
         "/api/risk-register",
+        "/api/maintenance-windows",
+        "/api/maintenance-calendar",
         "/api/performance",
         "/api/certificates",
         "/api/restore-drill-queue",

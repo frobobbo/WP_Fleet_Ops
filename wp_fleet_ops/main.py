@@ -3523,14 +3523,27 @@ def api_risk_register(client: str | None = None):
 
 
 @app.get("/api/maintenance-windows")
-def api_maintenance_windows():
-    """Return maintenance work only from current paired monitoring evidence."""
+def api_maintenance_windows(client: str | None = None):
+    """Return maintenance work from current paired evidence, optionally by client."""
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     tracked_site_count = len(tracked_sites)
     tracked_urls = {site["url"] for site in tracked_sites}
-    dashboard_rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
+    dashboard_rows = [row for row in store.latest_dashboard() if row["url"] in tracked_urls]
+    care_checks = [check for check in store.latest_care_checks() if check["url"] in tracked_urls]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
     current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
@@ -3571,6 +3584,7 @@ def api_maintenance_windows():
     status = "red" if immediate_count else ("yellow" if scheduled_count or unknown_count else "green")
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": tracked_site_count,
@@ -3668,14 +3682,27 @@ def _maintenance_calendar_windows(rows: list[dict]) -> list[dict]:
 
 
 @app.get("/api/maintenance-calendar")
-def api_maintenance_calendar():
-    """Return maintenance windows only from current paired monitoring evidence."""
+def api_maintenance_calendar(client: str | None = None):
+    """Return current paired-evidence maintenance calendar, optionally by client."""
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     tracked_site_count = len(tracked_sites)
     tracked_urls = {site["url"] for site in tracked_sites}
-    dashboard_rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
+    dashboard_rows = [row for row in store.latest_dashboard() if row["url"] in tracked_urls]
+    care_checks = [check for check in store.latest_care_checks() if check["url"] in tracked_urls]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
     current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
@@ -3697,6 +3724,7 @@ def api_maintenance_calendar():
     )
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": tracked_site_count,
