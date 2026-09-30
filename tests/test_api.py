@@ -5394,6 +5394,86 @@ def test_api_updates_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+def test_api_risk_register_filters_risks_and_evidence_by_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, updates in (
+        ("Alpha Update", "https://alpha-risk-filter.example", "Client Alpha", "2"),
+        ("Beta Outage", "https://beta-risk-filter.example", "Client Beta", "0"),
+        ("Unassigned Update", "https://unassigned-risk-filter.example", "", "3"),
+    ):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name,
+                url=url,
+                client=account,
+                wp_updates=updates,
+                uptime_ok="false" if name == "Beta Outage" else "true",
+            ),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    assert client.post(
+        "/sites",
+        data={
+            "name": "Alpha Missing",
+            "url": "https://alpha-missing-risk-filter.example",
+            "client": "Client Alpha",
+        },
+        follow_redirects=False,
+    ).status_code == 303
+
+    all_risks = client.get("/api/risk-register").json()
+    assert all_risks["site_count"] == 4
+    assert all_risks["status"] == "red"
+
+    alpha_response = client.get("/api/risk-register", params={"client": "  Client Alpha  "})
+    assert alpha_response.status_code == 200
+    alpha = alpha_response.json()
+    assert alpha["client"] == "Client Alpha"
+    assert alpha["status"] == "yellow"
+    assert alpha["site_count"] == 2
+    assert alpha["monitored_site_count"] == 1
+    assert alpha["current_snapshot_count"] == 1
+    assert alpha["current_care_check_count"] == 1
+    assert alpha["current_evidence_count"] == 1
+    assert alpha["monitoring_gap_count"] == 1
+    assert alpha["missing_snapshot_count"] == 1
+    assert alpha["risk_evidence_percent"] == 50
+    assert [entry["category"] for entry in alpha["entries"]] == ["updates"]
+    assert [site["name"] for site in alpha["entries"][0]["sites"]] == ["Alpha Update"]
+
+    beta = client.get("/api/risk-register", params={"client": "Client Beta"}).json()
+    assert beta["site_count"] == 1
+    assert beta["status"] == "red"
+    assert beta["category_count"] == 1
+    assert beta["entries"][0]["category"] == "availability"
+    assert beta["entries"][0]["sites"][0]["name"] == "Beta Outage"
+
+    unassigned_response = client.get("/api/risk-register", params={"client": "unassigned"})
+    assert unassigned_response.status_code == 200
+    unassigned = unassigned_response.json()
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == 1
+    assert unassigned["current_evidence_count"] == 1
+    assert [site["name"] for site in unassigned["entries"][0]["sites"]] == ["Unassigned Update"]
+
+
+def test_api_risk_register_rejects_unknown_client_instead_of_reporting_green(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/sites",
+        data={"name": "Known Site", "url": "https://known-risk-filter.example", "client": "Known Client"},
+        follow_redirects=False,
+    ).status_code == 303
+    response = client.get("/api/risk-register", params={"client": "Unknown Client"})
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_risk_register_groups_current_risks_by_category(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -9579,6 +9659,7 @@ def test_api_monitoring_coverage_rejects_unknown_client_instead_of_reporting_gre
         "/api/site-directory",
         "/api/monitoring-coverage",
         "/api/security",
+        "/api/risk-register",
         "/api/performance",
         "/api/certificates",
         "/api/restore-drill-queue",

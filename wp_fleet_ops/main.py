@@ -3445,14 +3445,32 @@ def _risk_register_entries(rows: list[dict]) -> list[dict]:
 
 
 @app.get("/api/risk-register")
-def api_risk_register():
-    """Return current operational risks only from current paired evidence."""
+def api_risk_register(client: str | None = None):
+    """Return current operational risks, optionally scoped by client."""
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": f"No tracked sites found for client '{normalized_client}'.",
+                "client": normalized_client,
+            },
+        )
     tracked_site_count = len(tracked_sites)
     tracked_urls = {site["url"] for site in tracked_sites}
-    dashboard_rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
+    dashboard_rows = [
+        row for row in store.latest_dashboard() if row["url"] in tracked_urls
+    ]
+    care_checks = [
+        check for check in store.latest_care_checks() if check["url"] in tracked_urls
+    ]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
     current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
@@ -3478,6 +3496,7 @@ def api_risk_register():
     )
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "status": status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": tracked_site_count,
