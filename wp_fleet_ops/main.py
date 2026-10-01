@@ -3751,12 +3751,25 @@ def api_maintenance_calendar(client: str | None = None):
 
 
 @app.get("/api/slo")
-def api_slo():
-    """Return fleet objectives backed by current paired monitoring evidence."""
+def api_slo(client: str | None = None):
+    """Return objectives backed by current paired evidence, optionally by client."""
     now = datetime.now(timezone.utc)
-    rows = store.latest_dashboard()
-    care_checks = store.latest_care_checks()
-    tracked_sites = store.list_sites()
+    normalized_client = _normalize_client_filter(client)
+    tracked_sites = [
+        site for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
+    rows = [row for row in store.latest_dashboard() if row["url"] in tracked_urls]
+    care_checks = [
+        check for check in store.latest_care_checks() if check["url"] in tracked_urls
+    ]
     current_snapshot_rows = _current_snapshot_rows(rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now)
     current_rows = _current_paired_snapshot_rows(rows, care_checks, now)
@@ -3788,6 +3801,7 @@ def api_slo():
     worst_objective = objectives[0] if objectives else None
     return {
         "generated_at": now.isoformat(),
+        "client": normalized_client,
         "site_count": tracked_total,
         "monitored_site_count": monitored_total,
         "current_snapshot_count": current_snapshot_count,

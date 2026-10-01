@@ -5992,6 +5992,58 @@ def test_api_slo_returns_service_objective_compliance(tmp_path):
     }
 
 
+def test_api_slo_client_filter_scopes_denominator_and_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Healthy Account", url="https://slo-healthy.example", client="Healthy Account"
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Other Account", url="https://slo-other.example", client="Other Account",
+            uptime_ok="false", ssl_days="3",
+        ),
+        follow_redirects=False,
+    )
+    client.post(
+        "/sites",
+        data={"name": "Unassigned SLO", "url": "https://slo-unassigned.example"},
+        follow_redirects=False,
+    )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set checked_at = ? where site_id = "
+            "(select id from sites where url = ?)",
+            ("2000-01-01 00:00:00", "https://slo-other.example"),
+        )
+
+    fleet = client.get("/api/slo").json()
+    healthy = client.get("/api/slo", params={"client": " Healthy Account "}).json()
+    other = client.get("/api/slo", params={"client": "Other Account"}).json()
+    unassigned = client.get("/api/slo", params={"client": "unassigned"}).json()
+
+    assert fleet["site_count"] == 3
+    assert fleet["client"] is None
+    assert healthy["client"] == "Healthy Account"
+    assert healthy["site_count"] == healthy["current_evidence_count"] == 1
+    assert healthy["at_risk_count"] == 0
+    assert all(row["met_count"] == 1 for row in healthy["objectives"])
+    assert other["site_count"] == other["monitored_site_count"] == 1
+    assert other["current_snapshot_count"] == 1
+    assert other["current_care_check_count"] == other["current_evidence_count"] == 0
+    assert other["monitoring_gap_count"] == 1
+    assert all(row["met_count"] == 0 for row in other["objectives"])
+    assert unassigned["client"] == "Unassigned"
+    assert unassigned["site_count"] == unassigned["monitoring_gap_count"] == 1
+    assert unassigned["current_evidence_count"] == 0
+    assert client.get("/api/slo", params={"client": " "}).status_code == 422
+    assert client.get("/api/slo", params={"client": "Missing Account"}).status_code == 404
+
+
 def test_api_slo_fails_closed_when_monitoring_evidence_is_missing_or_stale(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
