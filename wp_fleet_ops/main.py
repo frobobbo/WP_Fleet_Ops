@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -297,7 +298,7 @@ def _pagination_navigation(limit: int, offset: int, returned_count: int, total_c
 def _recommended_action(alert: dict) -> str:
     """Translate an alert into a concise operator next step."""
     message = (alert.get("message") or "").lower()
-    if "down" in message or "uptime" in message:
+    if re.search(r"\bdown\b", message) or "uptime" in message:
         return "Confirm site availability, hosting status, and recent deploys."
     if "ssl" in message or "certificate" in message:
         return "Renew or replace the TLS certificate before it expires."

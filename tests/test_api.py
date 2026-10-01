@@ -101,6 +101,18 @@ def test_dashboard_rows_require_current_paired_evidence_for_health_claims(tmp_pa
     assert '<span class="tag green">green</span>' not in response.text
 
 
+def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_path):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({"message": "Backup download failed."}) == (
+        "Run and verify a fresh backup, then confirm backup scheduling."
+    )
+    assert main._recommended_action({"message": "Site appears down or unreachable."}) == (
+        "Confirm site availability, hosting status, and recent deploys."
+    )
+
+
 def test_fetched_check_uses_detailed_security_header_score(
     tmp_path,
     monkeypatch,
