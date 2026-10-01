@@ -382,7 +382,8 @@ def _summary_payload(
     if critical_alerts or (average_score is not None and average_score < 65):
         overall_status = "red"
     elif (
-        missing_snapshot_count
+        not sites  # No monitored inventory is not evidence of a healthy fleet.
+        or missing_snapshot_count
         or stale_snapshot_count
         or invalid_snapshot_count
         or clock_skew_snapshot_count

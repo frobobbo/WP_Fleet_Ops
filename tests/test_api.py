@@ -723,6 +723,17 @@ def test_ready_returns_service_unavailable_when_database_probe_fails(tmp_path, m
     assert "sensitive database path" not in response.text
 
 
+def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
+    client = make_test_client(tmp_path)
+
+    summary = client.get("/api/summary").json()
+
+    assert summary["sites"] == 0
+    assert summary["current_evidence_count"] == 0
+    assert summary["average_score"] is None
+    assert summary["overall_status"] == "yellow"
+
+
 def test_api_summary_returns_dashboard_rollups(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
