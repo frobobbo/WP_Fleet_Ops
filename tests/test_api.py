@@ -2600,6 +2600,28 @@ def test_api_client_workload_groups_open_actions_by_account(tmp_path):
     assert commerce["latest_snapshot_at"]
 
 
+def test_api_client_workload_counts_distinct_urls_with_the_same_display_name(tmp_path):
+    client = make_test_client(tmp_path)
+    for url in ("https://north.example", "https://south.example"):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Shared Display Name",
+                url=url,
+                client="Shared Client",
+                wp_updates="2",
+            ),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    payload = client.get("/api/client-workload").json()
+    assert payload["client_count"] == 1
+    assert payload["open_action_count"] == 2
+    assert payload["clients"][0]["site_count"] == 2
+    assert payload["clients"][0]["open_action_count"] == 2
+
+
 def test_api_client_workload_surfaces_paired_monitoring_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -1482,7 +1482,7 @@ def _client_workload_rows() -> list[dict]:
             client_name,
             {
                 "client": client_name,
-                "site_names": set(),
+                "site_urls": set(),
                 "open_action_count": 0,
                 "critical_action_count": 0,
                 "warning_action_count": 0,
@@ -1492,7 +1492,7 @@ def _client_workload_rows() -> list[dict]:
                 "top_action": None,
             },
         )
-        summary["site_names"].add(action["site"])
+        summary["site_urls"].add(action["url"])
         summary["open_action_count"] += 1
         summary[f"{action['severity']}_action_count"] += 1
         summary["lowest_score"] = min(summary["lowest_score"], action["score"])
@@ -1510,8 +1510,8 @@ def _client_workload_rows() -> list[dict]:
     rows = []
     for summary in clients.values():
         top_action = summary.pop("top_action")
-        site_names = summary.pop("site_names")
-        summary["site_count"] = len(site_names)
+        site_urls = summary.pop("site_urls")
+        summary["site_count"] = len(site_urls)
         summary["top_site"] = top_action["site"]
         summary["top_severity"] = top_action["severity"]
         summary["top_message"] = top_action["message"]
