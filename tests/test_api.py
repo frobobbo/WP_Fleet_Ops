@@ -9768,12 +9768,13 @@ def test_api_monitoring_coverage_reports_paired_evidence_gaps(tmp_path):
     assert missing["recommended_action"] == "Capture an initial combined care check and fleet snapshot."
 
 
-def test_api_monitoring_coverage_is_green_for_an_empty_fleet(tmp_path):
+def test_api_monitoring_coverage_warns_for_an_empty_fleet(tmp_path):
     client = make_test_client(tmp_path)
 
     payload = client.get("/api/monitoring-coverage").json()
 
-    assert payload["status"] == "green"
+    # With no inventory, there is no evidence that monitoring is healthy.
+    assert payload["status"] == "yellow"
     assert payload["tracked_site_count"] == 0
     assert payload["current_evidence_count"] == 0
     assert payload["monitoring_gap_count"] == 0

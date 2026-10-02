@@ -793,7 +793,8 @@ def api_monitoring_coverage(client: str | None = None):
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
-        "status": "yellow" if monitoring_gap_count else "green",
+        # An empty inventory has no coverage evidence; do not claim success.
+        "status": "yellow" if not tracked_site_count or monitoring_gap_count else "green",
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "tracked_site_count": tracked_site_count,
         "current_evidence_count": current_evidence_count,
