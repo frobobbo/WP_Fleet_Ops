@@ -431,6 +431,51 @@ def test_care_score_rejects_ineffective_security_header_values(
     assert check.actions == expected_actions
 
 
+@pytest.mark.parametrize(
+    "ancestor_source",
+    ["https:", "http:", "https://*", "http://*", "HTTPS:", "https://*:443"],
+)
+def test_care_score_rejects_unrestricted_frame_ancestors(ancestor_source):
+    check = evaluate_site(
+        "Open Framing",
+        "https://open-framing.example",
+        200,
+        200,
+        90,
+        "6.6",
+        0,
+        12,
+        {
+            "strict-transport-security": "max-age=31536000",
+            "content-security-policy": f"frame-ancestors 'self' {ancestor_source}",
+        },
+    )
+
+    assert check.security_headers == {"strict-transport-security": "max-age=31536000"}
+    assert check.score == 96
+    assert "Add clickjacking protection header." in check.actions
+
+
+def test_care_score_accepts_restricted_frame_ancestors():
+    check = evaluate_site(
+        "Restricted Framing",
+        "https://restricted-framing.example",
+        200,
+        200,
+        90,
+        "6.6",
+        0,
+        12,
+        {"content-security-policy": "frame-ancestors 'self' https://partner.example"},
+    )
+
+    assert check.security_headers == {
+        "content-security-policy": "frame-ancestors 'self' https://partner.example"
+    }
+    assert check.score == 96  # Only HSTS is missing.
+    assert "Add clickjacking protection header." not in check.actions
+
+
 def test_care_score_rejects_hsts_evidence_from_plain_http():
     check = evaluate_site(
         "Plain HTTP",

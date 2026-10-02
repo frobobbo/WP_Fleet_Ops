@@ -302,12 +302,19 @@ def _security_header_is_effective(name: str, value: str) -> bool:
             # only the first frame-ancestors directive. Otherwise an ineffective
             # leading wildcard could be hidden by a stricter duplicate that the
             # browser never applies.
+            # Scheme sources (https:) and scheme-qualified wildcard hosts
+            # (https://*) permit arbitrary origins to frame the site, just as
+            # bare * does. Narrower sources beside them do not restore safety.
+            unrestricted_source = re.compile(
+                r"[a-z][a-z0-9+.-]*:(?://\*(?::(?:[0-9]+|\*))?)?",
+                re.IGNORECASE,
+            )
             return (
                 len(parts) > 1
-                # A wildcard permits arbitrary web origins to frame the site, so
-                # it does not provide the clickjacking restriction represented by
-                # this score. Mixing it with narrower sources remains ineffective.
-                and "*" not in {source.lower() for source in parts[1:]}
+                and all(
+                    source != "*" and unrestricted_source.fullmatch(source) is None
+                    for source in parts[1:]
+                )
             )
         return False
     return False
