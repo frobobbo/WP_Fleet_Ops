@@ -387,7 +387,9 @@ def evaluate_site(
     headers = _monitored_security_headers(security_headers or {}, header_response_url)
     score = 100
     actions: list[str] = []
-    if http_status < 200 or http_status >= 400:
+    # A 304 only makes sense as a response to a conditional request. The
+    # homepage probe is unconditional, so a bare 304 has no usable page body.
+    if http_status < 200 or http_status >= 400 or http_status == 304:
         score -= 45
         actions.append(f"Investigate uptime: HTTP status is {http_status}.")
     if latency_ms > 1200:

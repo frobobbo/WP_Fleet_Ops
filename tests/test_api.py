@@ -34,6 +34,20 @@ def valid_snapshot_payload(**overrides):
     return payload
 
 
+def test_manual_not_modified_response_marks_paired_uptime_down(tmp_path):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/care/manual-check",
+        data={"name": "Not Modified", "url": "https://not-modified.example", "http_status": "304"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    snapshot = client.get("/api/sites").json()["sites"][0]
+    assert snapshot["observed_score"] == 47
+    assert snapshot["observed_status"] == "red"
+    assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
+
+
 def test_health_and_report_endpoints(tmp_path):
     client = make_test_client(tmp_path)
     assert client.get("/health").json() == {

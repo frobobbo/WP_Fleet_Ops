@@ -532,6 +532,17 @@ def test_care_score_and_report_are_client_friendly():
     assert "Needs attention" in report
 
 
+def test_not_modified_without_conditional_request_is_not_a_healthy_homepage():
+    check = evaluate_site(
+        "Unusable Homepage", "https://unusable.example", 304, 200, 60,
+        "6.6", 0, 24,
+        {"strict-transport-security": "max-age=31536000", "x-frame-options": "DENY"},
+    )
+    assert check.score == 55
+    assert check.status == "red"
+    assert "Investigate uptime: HTTP status is 304." in check.actions
+
+
 def test_care_evaluation_rejects_oversized_wordpress_versions():
     with pytest.raises(
         ValueError,
