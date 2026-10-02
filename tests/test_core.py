@@ -818,6 +818,16 @@ def test_count_only_plain_http_snapshot_cannot_claim_hsts_coverage():
     ]
 
 
+def test_named_headers_cannot_claim_hsts_coverage_over_plain_http():
+    site = FleetSite("Plain HTTP", "http://plain-http.example", True, 90, 0, 24, 250, 3)
+
+    alerts = generate_alerts(site, {"strict-transport-security", "x-frame-options"})
+
+    assert [alert.message for alert in alerts] == [
+        "Security headers need review: missing HSTS."
+    ]
+
+
 def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     site_id = store.upsert_site("Church", "HTTPS://Church.Example/#overview", "Church Client")

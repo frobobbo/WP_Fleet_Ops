@@ -114,7 +114,12 @@ def generate_alerts(
     elif security_headers is not None:
         normalized_headers = {header.lower() for header in security_headers}
         missing_controls = []
-        if "strict-transport-security" not in normalized_headers:
+        if (
+            urlparse(site.url).scheme.lower() == "http"
+            or "strict-transport-security" not in normalized_headers
+        ):
+            # Even when the header name is present in stored evidence, browsers
+            # ignore HSTS delivered over plaintext HTTP.
             missing_controls.append("HSTS")
         if not {
             "x-frame-options",
