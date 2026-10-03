@@ -270,6 +270,11 @@ def status_from_score(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
 
+def homepage_response_usable(http_status: int) -> bool:
+    """Require a complete page response, not an empty, partial, or unfollowed redirect."""
+    return 200 <= http_status < 300 and http_status not in {204, 205, 206}
+
+
 def _security_header_is_effective(name: str, value: str) -> bool:
     """Return whether a monitored header contains an effective control value."""
     if not isinstance(value, str) or not value.strip():
@@ -387,9 +392,10 @@ def evaluate_site(
     headers = _monitored_security_headers(security_headers or {}, header_response_url)
     score = 100
     actions: list[str] = []
-    # A 304 only makes sense as a response to a conditional request. The
-    # homepage probe is unconditional, so a bare 304 has no usable page body.
-    if http_status < 200 or http_status >= 400 or http_status == 304:
+    # urllib follows ordinary redirects; an unresolved redirect has not proved
+    # that the homepage loaded. Empty, partial, and bare 304 responses likewise
+    # provide no complete homepage to a normal unconditional request.
+    if not homepage_response_usable(http_status):
         score -= 45
         actions.append(f"Investigate uptime: HTTP status is {http_status}.")
     if latency_ms > 1200:

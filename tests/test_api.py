@@ -47,6 +47,41 @@ def test_manual_not_modified_response_marks_paired_uptime_down(tmp_path):
     assert snapshot["observed_status"] == "red"
     assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
 
+@pytest.mark.parametrize("http_status", [204, 205, 206, 300, 302])
+def test_manual_non_page_response_marks_paired_uptime_down(tmp_path, http_status):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/care/manual-check",
+        data={"name": "No Homepage", "url": "https://no-homepage.example", "http_status": str(http_status)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    snapshot = client.get("/api/sites").json()["sites"][0]
+    assert snapshot["observed_score"] == 47
+    assert snapshot["observed_status"] == "red"
+    assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
+
+@pytest.mark.parametrize("http_status", [204, 302])
+def test_fetched_non_page_response_marks_paired_uptime_down(tmp_path, monkeypatch, http_status):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    check = main.evaluate_site(
+        "Unusable Fetch", "https://unusable-fetch.example", http_status, 200, 60,
+        "unknown", 0, 24, {},
+    )
+    monkeypatch.setattr(main, "fetch_basic_site_check", lambda *_args, **_kwargs: check)
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": "Unusable Fetch", "url": "https://unusable-fetch.example"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    snapshot = client.get("/api/sites").json()["sites"][0]
+    assert snapshot["observed_score"] == check.score == 47
+    assert snapshot["observed_status"] == "red"
+    assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
+
 
 def test_health_and_report_endpoints(tmp_path):
     client = make_test_client(tmp_path)

@@ -542,6 +542,17 @@ def test_not_modified_without_conditional_request_is_not_a_healthy_homepage():
     assert check.status == "red"
     assert "Investigate uptime: HTTP status is 304." in check.actions
 
+@pytest.mark.parametrize("http_status", [204, 205, 206, 300, 302, 304])
+def test_non_page_http_responses_are_not_healthy_homepages(http_status):
+    check = evaluate_site(
+        "No Homepage", "https://no-homepage.example", http_status, 200, 60,
+        "6.6", 0, 24,
+        {"strict-transport-security": "max-age=31536000", "x-frame-options": "DENY"},
+    )
+    assert check.score == 55
+    assert check.status == "red"
+    assert f"Investigate uptime: HTTP status is {http_status}." in check.actions
+
 
 def test_care_evaluation_rejects_oversized_wordpress_versions():
     with pytest.raises(

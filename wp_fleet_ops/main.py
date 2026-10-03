@@ -21,6 +21,7 @@ from .checks import (
     SiteCheck,
     evaluate_site,
     fetch_basic_site_check,
+    homepage_response_usable,
     normalize_client_name,
     normalize_site_name,
     normalize_site_url,
@@ -6471,7 +6472,7 @@ def manual_care_check(
         backup_age_hours,
         {},
     )
-    fleet_site = FleetSite(name, check.url, 200 <= http_status < 400 and http_status != 304, ssl_days_remaining, update_count, backup_age_hours, latency_ms, 0)
+    fleet_site = FleetSite(name, check.url, homepage_response_usable(http_status), ssl_days_remaining, update_count, backup_age_hours, latency_ms, 0)
     store.save_observation(
         name,
         url,
@@ -6509,7 +6510,7 @@ def fetch_care_check(
     fleet_site = FleetSite(
         check.name,
         check.url,
-        200 <= check.http_status < 400 and check.http_status != 304,
+        homepage_response_usable(check.http_status),
         check.ssl_days_remaining,
         check.update_count,
         check.backup_age_hours,
