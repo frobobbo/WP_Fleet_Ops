@@ -271,8 +271,8 @@ def status_from_score(score: int) -> str:
 
 
 def homepage_response_usable(http_status: int) -> bool:
-    """Require a complete page response, not an empty, partial, or unfollowed redirect."""
-    return 200 <= http_status < 300 and http_status not in {204, 205, 206}
+    """Require a completed page response, not pending, empty, or partial work."""
+    return 200 <= http_status < 300 and http_status not in {202, 204, 205, 206}
 
 
 def _security_header_is_effective(name: str, value: str) -> bool:

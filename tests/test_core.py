@@ -542,7 +542,7 @@ def test_not_modified_without_conditional_request_is_not_a_healthy_homepage():
     assert check.status == "red"
     assert "Investigate uptime: HTTP status is 304." in check.actions
 
-@pytest.mark.parametrize("http_status", [204, 205, 206, 300, 302, 304])
+@pytest.mark.parametrize("http_status", [202, 204, 205, 206, 300, 302, 304])
 def test_non_page_http_responses_are_not_healthy_homepages(http_status):
     check = evaluate_site(
         "No Homepage", "https://no-homepage.example", http_status, 200, 60,
