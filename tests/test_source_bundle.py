@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tarfile
 from pathlib import Path
+import pytest
 
 
 BUILDER = Path(__file__).parents[1] / "scripts" / "build_source_bundle.py"
@@ -72,6 +73,26 @@ def test_source_bundle_rejects_symlinks_in_runtime_tree(tmp_path):
 
     assert result.returncode != 0
     assert "symlink" in result.stderr
+
+
+@pytest.mark.parametrize("relative_path", ["templates/.env", "wp_fleet_ops/.private/key"])
+def test_source_bundle_rejects_hidden_runtime_files(tmp_path, relative_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    make_source_tree(root)
+    hidden = root / relative_path
+    hidden.parent.mkdir(parents=True, exist_ok=True)
+    hidden.write_text("should never enter the release archive\n")
+
+    result = subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root),
+         "--output", str(tmp_path / "source-bundle.tar.gz")],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0
+    assert "hidden" in result.stderr
+    assert not (tmp_path / "source-bundle.tar.gz").exists()
 
 
 def test_production_requirements_match_frozen_uv_lock(tmp_path):

@@ -148,7 +148,8 @@ helm upgrade --install wp-fleet-ops ./charts/wp-fleet-ops \
 ```
 
 The builder includes only `pyproject.toml`, `requirements.lock`, `uv.lock`,
-`wp_fleet_ops/`, and `templates/`; rejects symlinks; omits caches; and writes the
+`wp_fleet_ops/`, and `templates/`; rejects symlinks and hidden runtime paths
+(to avoid archiving misplaced private files); omits caches; and writes the
 archive atomically with mode `0600`. Both the fallback and container image install
 the exact hash-verified runtime dependency set exported from `uv.lock`. After an
 intentional lock update, regenerate that export with:

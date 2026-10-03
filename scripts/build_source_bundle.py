@@ -37,6 +37,11 @@ def _runtime_files(root: Path) -> list[Path]:
                 raise ValueError(f"source bundle refuses symlink: {relative.as_posix()}")
             if any(part in IGNORED_PARTS for part in relative.parts):
                 continue
+            # Runtime directories are allowlisted, but a hidden credential or
+            # private configuration dropped inside one must not join a release.
+            # Reject hidden directories too, including currently empty ones.
+            if any(part.startswith(".") for part in relative.parts):
+                raise ValueError(f"source bundle refuses hidden path: {relative.as_posix()}")
             if path.is_dir():
                 continue
             if not path.is_file():
