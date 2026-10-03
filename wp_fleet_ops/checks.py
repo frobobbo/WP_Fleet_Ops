@@ -271,8 +271,11 @@ def status_from_score(score: int) -> str:
 
 
 def homepage_response_usable(http_status: int) -> bool:
-    """Require a completed page response, not pending, empty, or partial work."""
-    return 200 <= http_status < 300 and http_status not in {202, 204, 205, 206}
+    """Accept ordinary complete GET pages, not creation or WebDAV responses."""
+    # 203 is a complete page whose representation was transformed by a proxy.
+    # Other 2xx codes may signal pending, empty, partial, or multistatus work;
+    # an unregistered 2xx code must not silently mark a homepage healthy.
+    return http_status in {200, 203}
 
 
 def _security_header_is_effective(name: str, value: str) -> bool:

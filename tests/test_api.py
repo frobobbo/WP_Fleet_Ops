@@ -47,7 +47,7 @@ def test_manual_not_modified_response_marks_paired_uptime_down(tmp_path):
     assert snapshot["observed_status"] == "red"
     assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
 
-@pytest.mark.parametrize("http_status", [204, 205, 206, 300, 302])
+@pytest.mark.parametrize("http_status", [201, 204, 205, 206, 207, 208, 226, 299, 300, 302])
 def test_manual_non_page_response_marks_paired_uptime_down(tmp_path, http_status):
     client = make_test_client(tmp_path)
     response = client.post(
@@ -61,7 +61,7 @@ def test_manual_non_page_response_marks_paired_uptime_down(tmp_path, http_status
     assert snapshot["observed_status"] == "red"
     assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
 
-@pytest.mark.parametrize("http_status", [204, 302])
+@pytest.mark.parametrize("http_status", [201, 204, 207, 208, 226, 299, 302])
 def test_fetched_non_page_response_marks_paired_uptime_down(tmp_path, monkeypatch, http_status):
     client = make_test_client(tmp_path)
     import wp_fleet_ops.main as main
