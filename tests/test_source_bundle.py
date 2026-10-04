@@ -51,6 +51,26 @@ def test_source_bundle_contains_only_runtime_files(tmp_path):
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
+def test_source_bundle_rejects_symlink_archive_destination(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    make_source_tree(root)
+    protected = tmp_path / "protected.txt"
+    protected.write_text("keep this content\n")
+    output = tmp_path / "source-bundle.tar.gz"
+    output.symlink_to(protected)
+
+    result = subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root), "--output", str(output)],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0
+    assert "symlink" in result.stderr
+    assert protected.read_text() == "keep this content\n"
+    assert output.is_symlink()
+
+
 def test_source_bundle_rejects_symlinks_in_runtime_tree(tmp_path):
     root = tmp_path / "project"
     root.mkdir()

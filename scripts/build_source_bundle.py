@@ -81,7 +81,12 @@ def build_source_bundle(
 ) -> int:
     """Create a private, atomic archive containing only runtime files."""
     root = root.resolve()
-    output = output.resolve()
+    # Path.resolve() follows an existing output symlink and would replace its
+    # target instead of the requested archive. Keep the destination pathname
+    # intact so os.replace never follows a swapped symlink either.
+    output = Path(os.path.abspath(output))
+    if output.is_symlink():
+        raise ValueError(f"source bundle refuses symlink destination: {output}")
     if max_bytes <= 0:
         raise ValueError("max_bytes must be positive")
 
