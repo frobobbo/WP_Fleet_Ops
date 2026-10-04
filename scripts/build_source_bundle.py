@@ -53,6 +53,11 @@ def _runtime_files(root: Path) -> list[Path]:
                 raise ValueError(f"source bundle refuses non-regular file: {relative.as_posix()}")
             if path.suffix in IGNORED_SUFFIXES:
                 continue
+            # Package data is not part of this application's runtime contract.
+            # Reject rather than publish a credential or stray local config
+            # placed beside Python modules in the otherwise allowlisted tree.
+            if relative_name == "wp_fleet_ops" and path.suffix != ".py":
+                raise ValueError(f"source bundle refuses unexpected package file: {relative.as_posix()}")
             files.append(path)
 
     return sorted(files, key=lambda path: path.relative_to(root).as_posix())
