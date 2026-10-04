@@ -87,6 +87,15 @@ def build_source_bundle(
     output = Path(os.path.abspath(output))
     if output.is_symlink():
         raise ValueError(f"source bundle refuses symlink destination: {output}")
+    # The archive can live at the project root, but writing it over a required
+    # input (or anywhere in a runtime tree) would corrupt the checkout. Resolve
+    # parent-directory symlinks for this comparison without changing the path
+    # passed to os.replace, which must never follow the output symlink itself.
+    resolved_output = output.resolve(strict=False)
+    if resolved_output in (root / name for name in RUNTIME_FILES) or any(
+        resolved_output.is_relative_to(root / tree) for tree in RUNTIME_TREES
+    ):
+        raise ValueError(f"source bundle refuses runtime input destination: {output}")
     if max_bytes <= 0:
         raise ValueError("max_bytes must be positive")
 
