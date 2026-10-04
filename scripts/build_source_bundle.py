@@ -42,6 +42,11 @@ def _runtime_files(root: Path) -> list[Path]:
             # Reject hidden directories too, including currently empty ones.
             if any(part.startswith(".") for part in relative.parts):
                 raise ValueError(f"source bundle refuses hidden path: {relative.as_posix()}")
+            # The only runtime template is the dashboard. An unexpected file
+            # (including a non-hidden credential or editor backup) must not
+            # silently become part of a release archive.
+            if relative_name == "templates" and relative.as_posix() != "templates/index.html":
+                raise ValueError(f"source bundle refuses unexpected template: {relative.as_posix()}")
             if path.is_dir():
                 continue
             if not path.is_file():

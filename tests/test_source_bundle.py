@@ -95,6 +95,25 @@ def test_source_bundle_rejects_hidden_runtime_files(tmp_path, relative_path):
     assert not (tmp_path / "source-bundle.tar.gz").exists()
 
 
+@pytest.mark.parametrize("relative_path", ["templates/credentials.json", "templates/index.html.bak"])
+def test_source_bundle_rejects_unexpected_template_files(tmp_path, relative_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    make_source_tree(root)
+    unexpected = root / relative_path
+    unexpected.write_text("not a published page\n")
+
+    output = tmp_path / "source-bundle.tar.gz"
+    result = subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root), "--output", str(output)],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0
+    assert "unexpected template" in result.stderr
+    assert not output.exists()
+
+
 def test_production_requirements_match_frozen_uv_lock(tmp_path):
     project_root = Path(__file__).parents[1]
     exported = tmp_path / "requirements.lock"
