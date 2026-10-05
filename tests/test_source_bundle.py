@@ -91,6 +91,25 @@ def test_source_bundle_does_not_overwrite_runtime_inputs(tmp_path, relative_path
     assert (output.read_bytes() if output.exists() else None) == original
 
 
+@pytest.mark.parametrize("relative_path", [".git/config", ".git/objects/archive.tar.gz"])
+def test_source_bundle_does_not_overwrite_git_metadata(tmp_path, relative_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    make_source_tree(root)
+    output = root / relative_path
+    output.parent.mkdir(parents=True, exist_ok=True)
+    original = output.read_bytes() if output.exists() else None
+
+    result = subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root), "--output", str(output)],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0
+    assert "git metadata" in result.stderr
+    assert (output.read_bytes() if output.exists() else None) == original
+
+
 def test_source_bundle_rejects_symlinks_in_runtime_tree(tmp_path):
     root = tmp_path / "project"
     root.mkdir()

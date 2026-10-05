@@ -92,6 +92,8 @@ def build_source_bundle(
     # parent-directory symlinks for this comparison without changing the path
     # passed to os.replace, which must never follow the output symlink itself.
     resolved_output = output.resolve(strict=False)
+    if resolved_output.is_relative_to(root / ".git"):
+        raise ValueError(f"source bundle refuses git metadata destination: {output}")
     if resolved_output in (root / name for name in RUNTIME_FILES) or any(
         resolved_output.is_relative_to(root / tree) for tree in RUNTIME_TREES
     ):
