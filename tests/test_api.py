@@ -1241,6 +1241,28 @@ def test_api_sites_marks_old_snapshots_stale(tmp_path):
     assert site["snapshot_age_hours"] > 168
 
 
+@pytest.mark.parametrize("timestamp", ["date", "minute"])
+@pytest.mark.parametrize("table, column", [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+def test_api_sites_rejects_incomplete_evidence_timestamps(tmp_path, timestamp, table, column):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Incomplete Time", url="https://incomplete-time.example"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    now = datetime.now(timezone.utc)
+    incomplete = now.date().isoformat() if timestamp == "date" else now.strftime("%Y-%m-%dT%H:%M")
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(f"update {table} set {column} = ?", (incomplete,))
+
+    site = client.get("/api/sites").json()["sites"][0]
+    assert site["snapshot_freshness" if table == "snapshots" else "care_check_freshness"] == "invalid"
+    assert site["evidence_status"] == "incomplete"
+    assert site["status"] == "unknown"
+    assert site["score"] is None
+
+
 @pytest.mark.parametrize(
     ("care_timestamp", "expected_freshness", "expected_latest_at"),
     [

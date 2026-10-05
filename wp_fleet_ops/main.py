@@ -140,6 +140,11 @@ def _parse_captured_at(value: str | None) -> datetime | None:
     """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
     if not value:
         return None
+    # fromisoformat accepts date-only and minute-precision values, inventing
+    # midnight or second zero. Incomplete observation times cannot prove that a
+    # care check or snapshot is current; require the full stored second first.
+    if re.match(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?=$|[.,Z+-])", value) is None:
+        return None
     normalized = value.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalized)
