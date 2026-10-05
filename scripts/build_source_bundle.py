@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 
 RUNTIME_FILES = ("pyproject.toml", "requirements.lock", "uv.lock")
+REQUIRED_TREE_FILES = ("wp_fleet_ops/main.py", "templates/index.html")
 RUNTIME_TREES = ("wp_fleet_ops", "templates")
 IGNORED_PARTS = {"__pycache__"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
@@ -26,6 +27,13 @@ def _runtime_files(root: Path) -> list[Path]:
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"required runtime file is missing or unsafe: {relative_name}")
         files.append(path)
+
+    # A structurally valid tree is not enough: without these entrypoints the
+    # archive builds successfully but the fallback Pod cannot serve the app.
+    for relative_name in REQUIRED_TREE_FILES:
+        path = root / relative_name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"required runtime file is missing or unsafe: {relative_name}")
 
     for relative_name in RUNTIME_TREES:
         tree = root / relative_name

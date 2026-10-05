@@ -51,6 +51,24 @@ def test_source_bundle_contains_only_runtime_files(tmp_path):
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
 
+@pytest.mark.parametrize("relative_path", ["wp_fleet_ops/main.py", "templates/index.html"])
+def test_source_bundle_requires_app_entrypoint_and_dashboard(tmp_path, relative_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    make_source_tree(root)
+    (root / relative_path).unlink()
+    output = tmp_path / "source-bundle.tar.gz"
+
+    result = subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root), "--output", str(output)],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode != 0
+    assert "required runtime file" in result.stderr
+    assert not output.exists()
+
+
 def test_source_bundle_rejects_symlink_archive_destination(tmp_path):
     root = tmp_path / "project"
     root.mkdir()
