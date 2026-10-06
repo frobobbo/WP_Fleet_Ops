@@ -120,6 +120,28 @@ def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
     assert "WP \\*\\*Approved\\*\\* \\<fake\\>" in client.get("/api/report").json()["report"]
 
 
+def test_report_renders_tildes_in_operator_labels_as_literal_markdown(tmp_path):
+    client = make_test_client(tmp_path)
+    site_name = "~~Retired~~ WP"
+    client_name = "~~Former~~ Client"
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name=site_name, url="https://retired.example", client=client_name),
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        "/sites",
+        data={"name": "Pending Coverage", "url": "https://pending-retired.example", "client": client_name},
+        follow_redirects=False,
+    ).status_code == 303
+
+    for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
+        assert r"\~\~Retired\~\~ WP" in report
+        assert r"\~\~Former\~\~ Client" in report
+        assert "## ~~Retired~~ WP" not in report
+        assert "~~Former~~ Client" not in report
+
+
 def test_report_renders_valid_url_punctuation_as_literal_markdown(tmp_path):
     client = make_test_client(tmp_path)
     url = "https://reports.example/path*not-italic*/read_me?tag=release!"
