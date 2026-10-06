@@ -1649,7 +1649,7 @@ def api_incidents(client: str | None = None):
         "tracked_site_count": coverage["tracked_site_count"],
         "current_evidence_count": coverage["current_evidence_count"],
         "incident_count": len(incidents),
-        "affected_site_count": len({incident["site"] for incident in incidents}),
+        "affected_site_count": len({incident["url"] for incident in incidents}),
         "affected_client_count": len({incident["client"] for incident in incidents}),
         "monitoring_gap_count": coverage["monitoring_gap_count"],
         "snapshot_gap_count": coverage["snapshot_gap_count"],

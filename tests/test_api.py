@@ -834,6 +834,25 @@ def test_ready_returns_service_unavailable_when_database_probe_fails(tmp_path, m
     assert "sensitive database path" not in response.text
 
 
+def test_incidents_count_distinct_site_urls_when_display_names_match(tmp_path):
+    client = make_test_client(tmp_path)
+    for url in ("https://first-incident.example", "https://second-incident.example"):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name="Shared Display Name", url=url, uptime_ok="false"),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    incidents = client.get("/api/incidents").json()
+    assert incidents["incident_count"] == 2
+    assert incidents["affected_site_count"] == 2
+    assert {incident["url"] for incident in incidents["incidents"]} == {
+        "https://first-incident.example",
+        "https://second-incident.example",
+    }
+
+
 def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
     client = make_test_client(tmp_path)
 
