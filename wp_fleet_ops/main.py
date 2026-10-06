@@ -22,6 +22,7 @@ from .checks import (
     evaluate_site,
     fetch_basic_site_check,
     homepage_response_usable,
+    markdown_literal,
     normalize_client_name,
     normalize_site_name,
     normalize_site_url,
@@ -6700,7 +6701,7 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         ]
         for gap in evidence_gaps:
             gap_lines.append(
-                f"- {gap['name']} ({gap['client']}): "
+                f"- {markdown_literal(gap['name'])} ({markdown_literal(gap['client'])}): "
                 f"fleet snapshot {gap['snapshot_freshness']}; "
                 f"care check {gap['care_check_freshness']}. "
                 "Capture a fresh combined check before publishing site health."

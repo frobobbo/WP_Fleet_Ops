@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from .checks import markdown_literal
+
 
 @dataclass(frozen=True)
 class FleetSite:
@@ -147,8 +149,11 @@ def generate_maintenance_report(sites: list[FleetSite]) -> str:
     ]
     for site, score, alerts in scored:
         state = "Healthy" if score >= 85 else ("Watch" if score >= 65 else "Needs attention")
-        lines += [f"## {site.name} — {state}", "", f"Score: {score}/100", f"URL: {site.url}", ""]
+        lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {site.url}", ""]
         lines += ["Recommended actions:"]
-        lines += [f"- [{a.severity}] {a.message}" for a in alerts] if alerts else ["- Continue normal maintenance cadence."]
+        lines += [
+            f"- [{a.severity}] {a.message.replace(site.name, markdown_literal(site.name))}"
+            for a in alerts
+        ] if alerts else ["- Continue normal maintenance cadence."]
         lines.append("")
     return "\n".join(lines).strip() + "\n"

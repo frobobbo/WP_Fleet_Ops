@@ -97,6 +97,29 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
+    client = make_test_client(tmp_path)
+    site_name = "WP **Approved** <fake>"
+    client_name = "Client [approved](https://example.com)"
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name=site_name, url="https://approved.example", client=client_name),
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        "/sites",
+        data={"name": site_name, "url": "https://unmonitored.example", "client": client_name},
+        follow_redirects=False,
+    ).status_code == 303
+
+    report = client.get("/report").text
+    assert "WP \\*\\*Approved\\*\\* \\<fake\\>" in report
+    assert "Client \\[approved\\]\\(https://example\\.com\\)" in report
+    assert "## WP **Approved** <fake>" not in report
+    assert "- WP **Approved** <fake>" not in report
+    assert "WP \\*\\*Approved\\*\\* \\<fake\\>" in client.get("/api/report").json()["report"]
+
+
 def test_dashboard_displays_running_revision_safely(tmp_path):
     client = make_test_client(tmp_path, revision='sha-123<unsafe>')
 

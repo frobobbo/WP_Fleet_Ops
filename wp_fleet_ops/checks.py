@@ -26,6 +26,11 @@ PERCENT_DECODE_SAFE = frozenset(
 )
 
 
+def markdown_literal(value: str) -> str:
+    """Render an operator-provided label as text in a Markdown report."""
+    return re.sub(r"([\\`*_{}\[\]<>()#+\-.!|])", r"\\\1", value)
+
+
 def normalize_site_name(name: str) -> str:
     """Return a canonical non-empty site label for persisted operational data."""
     normalized = name.strip()
@@ -553,7 +558,14 @@ def summarize_care_report(checks: list[SiteCheck]) -> str:
     ]
     for c in checks:
         heading = "Healthy" if c.status == "green" else ("Maintenance scheduled" if c.status == "yellow" else "Needs attention")
-        lines += [f"## {c.name} — {heading}", "", f"Score: {c.score}/100", f"URL: {c.url}", c.summary, ""]
+        lines += [
+            f"## {markdown_literal(c.name)} — {heading}",
+            "",
+            f"Score: {c.score}/100",
+            f"URL: {c.url}",
+            c.summary.replace(c.name, markdown_literal(c.name)),
+            "",
+        ]
         if c.actions:
             lines.append("Recommended actions:")
             lines += [f"- {a}" for a in c.actions]
