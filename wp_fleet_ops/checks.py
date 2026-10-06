@@ -562,7 +562,7 @@ def summarize_care_report(checks: list[SiteCheck]) -> str:
             f"## {markdown_literal(c.name)} — {heading}",
             "",
             f"Score: {c.score}/100",
-            f"URL: {c.url}",
+            f"URL: {markdown_literal(c.url)}",
             c.summary.replace(c.name, markdown_literal(c.name)),
             "",
         ]

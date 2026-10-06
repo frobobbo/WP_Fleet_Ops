@@ -120,6 +120,23 @@ def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
     assert "WP \\*\\*Approved\\*\\* \\<fake\\>" in client.get("/api/report").json()["report"]
 
 
+def test_report_renders_valid_url_punctuation_as_literal_markdown(tmp_path):
+    client = make_test_client(tmp_path)
+    url = "https://reports.example/path*not-italic*/read_me?tag=release!"
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="URL Report", url=url),
+        follow_redirects=False,
+    ).status_code == 303
+
+    plain = client.get("/report").text
+    structured = client.get("/api/report").json()["report"]
+    expected = r"URL: https://reports\.example/path\*not\-italic\*/read\_me?tag=release\!"
+    assert plain.count(expected) == 2
+    assert structured.count(expected) == 2
+    assert f"URL: {url}" not in plain
+
+
 def test_dashboard_displays_running_revision_safely(tmp_path):
     client = make_test_client(tmp_path, revision='sha-123<unsafe>')
 
