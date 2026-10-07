@@ -1798,7 +1798,8 @@ def api_availability(client: str | None = None):
     available_count = sum(1 for site in sites if site["availability_status"] == "available")
     down_count = sum(1 for site in sites if site["availability_status"] == "down")
     unknown_count = len(sites) - current_evidence_count
-    status = "red" if down_count else ("yellow" if unknown_count else "green")
+    # No tracked sites provide no evidence that the fleet is available.
+    status = "red" if down_count else ("yellow" if not sites or unknown_count else "green")
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,

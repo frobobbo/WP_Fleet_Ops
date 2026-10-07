@@ -853,6 +853,17 @@ def test_incidents_count_distinct_site_urls_when_display_names_match(tmp_path):
     }
 
 
+def test_api_availability_does_not_call_an_empty_inventory_available(tmp_path):
+    client = make_test_client(tmp_path)
+
+    availability = client.get("/api/availability").json()
+
+    assert availability["site_count"] == 0
+    assert availability["available_count"] == 0
+    assert availability["current_evidence_count"] == 0
+    assert availability["status"] == "yellow"
+
+
 def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
     client = make_test_client(tmp_path)
 
