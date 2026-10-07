@@ -1815,7 +1815,8 @@ def api_availability(client: str | None = None):
         "available_count": available_count,
         "down_count": down_count,
         "unknown_count": unknown_count,
-        "availability_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        # An empty inventory is unverified, not fully covered.
+        "availability_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "sites": sites,
     }
 

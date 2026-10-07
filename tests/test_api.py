@@ -862,6 +862,7 @@ def test_api_availability_does_not_call_an_empty_inventory_available(tmp_path):
     assert availability["available_count"] == 0
     assert availability["current_evidence_count"] == 0
     assert availability["status"] == "yellow"
+    assert availability["availability_evidence_percent"] == 0
 
 
 def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
