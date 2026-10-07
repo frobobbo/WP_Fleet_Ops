@@ -6606,7 +6606,10 @@ def _combined_report_status(
         for row in fleet_rows
     ):
         return "red"
-    if monitoring_gap_count or any(check.status == "yellow" for check in care_checks) or any(
+    # An empty inventory has no evidence of health, just like the summary API.
+    if (not care_checks and not fleet_rows) or monitoring_gap_count or any(
+        check.status == "yellow" for check in care_checks
+    ) or any(
         _dashboard_status(row["score"]) == "yellow"
         or any(alert.get("severity") == "warning" for alert in row["alerts"])
         for row in fleet_rows

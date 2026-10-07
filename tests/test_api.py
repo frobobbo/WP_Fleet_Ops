@@ -686,6 +686,21 @@ def test_api_report_returns_structured_report_export(tmp_path):
     assert payload["status"] == "green"
 
 
+def test_api_report_does_not_mark_empty_inventory_healthy(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/report")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tracked_site_count"] == 0
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == "yellow"
+    assert client.get("/api/summary").json()["overall_status"] == "yellow"
+
+
 def test_api_report_status_reflects_current_site_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
