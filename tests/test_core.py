@@ -12,6 +12,22 @@ from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alert
 from wp_fleet_ops.storage import FleetOpsStore
 
 
+@pytest.mark.parametrize("invalid_source", ["'unsafe-inline'", "'nonce-fake'"])
+def test_invalid_frame_ancestor_keywords_do_not_claim_clickjacking_protection(invalid_source):
+    check = evaluate_site(
+        "Invalid CSP", "https://invalid-csp.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {
+            "strict-transport-security": "max-age=31536000",
+            "content-security-policy": f"frame-ancestors {invalid_source}",
+        },
+    )
+
+    assert check.security_headers == {"strict-transport-security": "max-age=31536000"}
+    assert check.score == 96
+    assert "Add clickjacking protection header." in check.actions
+
+
 def test_container_healthcheck_requires_database_readiness():
     dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
     healthcheck = next(

@@ -323,11 +323,18 @@ def _security_header_is_effective(name: str, value: str) -> bool:
                 r"[a-z][a-z0-9+.-]*:(?://\*(?::(?:[0-9]+|\*))?)?",
                 re.IGNORECASE,
             )
+            # frame-ancestors accepts host/scheme sources, 'self', or 'none'
+            # alone. Script-only quoted keywords (including nonces) do not
+            # restrict framing and must not count as clickjacking protection.
+            sources = parts[1:]
             return (
-                len(parts) > 1
+                bool(sources)
+                and ("'none'" not in sources or sources == ["'none'"])
                 and all(
-                    source != "*" and unrestricted_source.fullmatch(source) is None
-                    for source in parts[1:]
+                    source != "*"
+                    and (not source.startswith("'") or source == "'self'" or source == "'none'")
+                    and unrestricted_source.fullmatch(source) is None
+                    for source in sources
                 )
             )
         return False
