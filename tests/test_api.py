@@ -1482,6 +1482,20 @@ def test_api_sites_rejects_unknown_client(tmp_path):
     }
 
 
+def test_api_site_directory_empty_inventory_has_no_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/site-directory")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):
     client = make_test_client(tmp_path)
     client.post("/sites", data={"name": "Needs First Snapshot", "url": "https://needs-first.example", "client": "Client Missing"}, follow_redirects=False)

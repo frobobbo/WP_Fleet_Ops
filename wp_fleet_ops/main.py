@@ -692,8 +692,9 @@ def api_site_directory(client: str | None = None):
         ),
         "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": len(sites) - current_evidence_count,
+        # An empty directory contains no evidence of full monitoring coverage.
         "paired_coverage_percent": (
-            round((current_evidence_count / len(sites)) * 100) if sites else 100
+            round((current_evidence_count / len(sites)) * 100) if sites else 0
         ),
         "sites": sites,
     }
