@@ -9957,8 +9957,18 @@ def test_api_monitoring_coverage_warns_for_an_empty_fleet(tmp_path):
     assert payload["tracked_site_count"] == 0
     assert payload["current_evidence_count"] == 0
     assert payload["monitoring_gap_count"] == 0
-    assert payload["combined_coverage_percent"] == 100
+    assert payload["combined_coverage_percent"] == 0
     assert payload["sites"] == []
+
+    # Account workload consumes this rollup: it must not advertise full
+    # coverage when no account or site has ever been registered.
+    workload = client.get("/api/client-workload").json()
+    assert workload["status"] == "yellow"
+    assert workload["tracked_client_count"] == 0
+    assert workload["paired_coverage_percent"] == 0
+    matrix = client.get("/api/action-matrix").json()
+    assert matrix["status"] == "yellow"
+    assert matrix["paired_coverage_percent"] == 0
 
 
 def test_api_monitoring_coverage_filters_by_client_and_unassigned(tmp_path):

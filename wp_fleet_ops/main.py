@@ -811,7 +811,7 @@ def api_monitoring_coverage(client: str | None = None):
         "care_check_current_count": care_check_current_count,
         "care_check_gap_count": tracked_site_count - care_check_current_count,
         "combined_coverage_percent": (
-            round((current_evidence_count / tracked_site_count) * 100) if tracked_site_count else 100
+            round((current_evidence_count / tracked_site_count) * 100) if tracked_site_count else 0
         ),
         "sites": sites,
     }
@@ -1602,7 +1602,7 @@ def api_client_workload():
     open_action_count = sum(client["open_action_count"] for client in clients)
     monitoring_gap_count = coverage["monitoring_gap_count"]
     status = "red" if critical_action_count else (
-        "yellow" if open_action_count or monitoring_gap_count else "green"
+        "yellow" if not coverage["tracked_site_count"] or open_action_count or monitoring_gap_count else "green"
     )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -5417,7 +5417,7 @@ def api_action_matrix():
     open_action_count = sum(client["open_action_count"] for client in clients)
     monitoring_gap_count = coverage["monitoring_gap_count"]
     status = "red" if critical_action_count else (
-        "yellow" if open_action_count or monitoring_gap_count else "green"
+        "yellow" if not coverage["tracked_site_count"] or open_action_count or monitoring_gap_count else "green"
     )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
