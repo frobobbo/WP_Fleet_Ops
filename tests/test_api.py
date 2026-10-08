@@ -889,6 +889,13 @@ def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
     assert summary["current_evidence_count"] == 0
     assert summary["average_score"] is None
     assert summary["overall_status"] == "yellow"
+    for field in (
+        "monitoring_coverage_percent",
+        "snapshot_freshness_percent",
+        "care_check_freshness_percent",
+        "paired_coverage_percent",
+    ):
+        assert summary[field] == 0, field
 
 
 def test_api_summary_returns_dashboard_rollups(tmp_path):

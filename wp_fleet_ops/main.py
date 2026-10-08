@@ -351,12 +351,12 @@ def _summary_payload(
     monitored_urls = {row["url"] for row in fleet_rows}
     monitored_site_count = sum(1 for site in sites if site["url"] in monitored_urls)
     missing_snapshot_count = len(sites) - monitored_site_count
-    monitoring_coverage_percent = round((monitored_site_count / len(sites)) * 100) if sites else 100
+    monitoring_coverage_percent = round((monitored_site_count / len(sites)) * 100) if sites else 0
     current_snapshot_count = snapshot_freshness_counts["current"]
     stale_snapshot_count = snapshot_freshness_counts["stale"]
     invalid_snapshot_count = snapshot_freshness_counts["invalid"]
     clock_skew_snapshot_count = snapshot_freshness_counts["clock_skew"]
-    snapshot_freshness_percent = round((current_snapshot_count / len(sites)) * 100) if sites else 100
+    snapshot_freshness_percent = round((current_snapshot_count / len(sites)) * 100) if sites else 0
     care_check_urls = {check["url"] for check in care_checks}
     monitored_care_check_count = sum(1 for site in sites if site["url"] in care_check_urls)
     missing_care_check_count = len(sites) - monitored_care_check_count
@@ -364,13 +364,13 @@ def _summary_payload(
     stale_care_check_count = care_check_freshness_counts["stale"]
     invalid_care_check_count = care_check_freshness_counts["invalid"]
     clock_skew_care_check_count = care_check_freshness_counts["clock_skew"]
-    care_check_freshness_percent = round((current_care_check_count / len(sites)) * 100) if sites else 100
+    care_check_freshness_percent = round((current_care_check_count / len(sites)) * 100) if sites else 0
     current_evidence_count = sum(
         1 for site in sites if site["url"] in current_evidence_urls
     )
     monitoring_gap_count = len(sites) - current_evidence_count
     paired_coverage_percent = (
-        round((current_evidence_count / len(sites)) * 100) if sites else 100
+        round((current_evidence_count / len(sites)) * 100) if sites else 0
     )
     score_total = sum(row["score"] or 0 for row in current_rows)
     observed_score_total = sum(row["score"] or 0 for row in fleet_rows)
