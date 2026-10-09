@@ -330,13 +330,17 @@ def _security_header_is_effective(name: str, value: str) -> bool:
                 re.IGNORECASE,
             )
             sources = parts[1:]
+            # CSP keyword sources use ASCII case-insensitive matching. Preserve
+            # the original header for evidence, but compare the keywords in one
+            # canonical spelling (including the solitary 'none' requirement).
+            normalized_sources = [source.lower() for source in sources]
             return (
                 bool(sources)
-                and ("'none'" not in sources or sources == ["'none'"])
+                and ("'none'" not in normalized_sources or normalized_sources == ["'none'"])
                 and all(
                     source in {"'self'", "'none'"}
                     or host_source.fullmatch(source) is not None
-                    for source in sources
+                    for source in normalized_sources
                 )
             )
         return False

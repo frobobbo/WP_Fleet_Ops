@@ -58,6 +58,29 @@ def test_valid_frame_ancestor_wildcard_subdomain_remains_protected():
     assert "Add clickjacking protection header." not in check.actions
 
 
+@pytest.mark.parametrize("keyword", ["'SELF'", "'None'", "'SeLf'"])
+def test_frame_ancestor_keywords_are_case_insensitive(keyword):
+    check = evaluate_site(
+        "Case-insensitive CSP", "https://case-sensitive.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"content-security-policy": f"frame-ancestors {keyword}"},
+    )
+
+    assert check.security_headers == {"content-security-policy": f"frame-ancestors {keyword}"}
+    assert "Add clickjacking protection header." not in check.actions
+
+
+def test_mixed_none_and_host_does_not_claim_protection():
+    check = evaluate_site(
+        "Ambiguous CSP", "https://ambiguous.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"content-security-policy": "frame-ancestors 'NoNe' https://partner.example"},
+    )
+
+    assert "content-security-policy" not in check.security_headers
+    assert "Add clickjacking protection header." in check.actions
+
+
 @pytest.mark.parametrize("csp", ["frame-ancestors *", "default-src 'self'; frame-ancestors https:"])
 def test_broad_frame_ancestors_overrides_restrictive_x_frame_options(csp):
     check = evaluate_site(
