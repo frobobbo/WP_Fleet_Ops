@@ -28,6 +28,36 @@ def test_invalid_frame_ancestor_keywords_do_not_claim_clickjacking_protection(in
     assert "Add clickjacking protection header." in check.actions
 
 
+@pytest.mark.parametrize(
+    "invalid_source",
+    ["invalid_host", "https://*.", "https://example.com:invalid", "https://example.com/path?query"],
+)
+def test_invalid_frame_ancestor_hosts_do_not_claim_clickjacking_protection(invalid_source):
+    check = evaluate_site(
+        "Invalid CSP Host", "https://invalid-csp-host.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {
+            "strict-transport-security": "max-age=31536000",
+            "content-security-policy": f"frame-ancestors {invalid_source}",
+        },
+    )
+
+    assert check.security_headers == {"strict-transport-security": "max-age=31536000"}
+    assert check.score == 96
+    assert "Add clickjacking protection header." in check.actions
+
+
+def test_valid_frame_ancestor_wildcard_subdomain_remains_protected():
+    check = evaluate_site(
+        "Partner Framing", "https://partner-framing.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"content-security-policy": "frame-ancestors 'self' https://*.partner.example:443"},
+    )
+
+    assert "content-security-policy" in check.security_headers
+    assert "Add clickjacking protection header." not in check.actions
+
+
 def test_container_healthcheck_requires_database_readiness():
     dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
     healthcheck = next(

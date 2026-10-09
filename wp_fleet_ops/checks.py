@@ -316,24 +316,26 @@ def _security_header_is_effective(name: str, value: str) -> bool:
             # only the first frame-ancestors directive. Otherwise an ineffective
             # leading wildcard could be hidden by a stricter duplicate that the
             # browser never applies.
-            # Scheme sources (https:) and scheme-qualified wildcard hosts
-            # (https://*) permit arbitrary origins to frame the site, just as
-            # bare * does. Narrower sources beside them do not restore safety.
-            unrestricted_source = re.compile(
-                r"[a-z][a-z0-9+.-]*:(?://\*(?::(?:[0-9]+|\*))?)?",
+            # CSP frame-ancestors permits 'self', 'none' alone, and host or
+            # scheme sources. A scheme source (https:) or a bare wildcard host
+            # allows arbitrary origins, so only recognize restricted host
+            # sources. Validate the entire token: an invalid host/port/path is
+            # not evidence of clickjacking protection. Exclude path delimiters
+            # that this semicolon-splitting parser cannot disambiguate safely.
+            host_source = re.compile(
+                r"(?:[a-z][a-z0-9+.-]*://)?"
+                r"(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?"
+                r"(?::(?:[0-9]+|\*))?"
+                r"(?:/(?:[a-z0-9._~!$&'()*+=:@/-]|%[0-9a-f]{2})*)?",
                 re.IGNORECASE,
             )
-            # frame-ancestors accepts host/scheme sources, 'self', or 'none'
-            # alone. Script-only quoted keywords (including nonces) do not
-            # restrict framing and must not count as clickjacking protection.
             sources = parts[1:]
             return (
                 bool(sources)
                 and ("'none'" not in sources or sources == ["'none'"])
                 and all(
-                    source != "*"
-                    and (not source.startswith("'") or source == "'self'" or source == "'none'")
-                    and unrestricted_source.fullmatch(source) is None
+                    source in {"'self'", "'none'"}
+                    or host_source.fullmatch(source) is not None
                     for source in sources
                 )
             )
