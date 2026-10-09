@@ -261,7 +261,8 @@ def test_fetched_check_uses_detailed_security_header_score(
     care_check = client.get("/api/care-check-history").json()["care_checks"][0]
     snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
     assert care_check["score"] == 96
-    assert snapshot["security_header_count"] == 2
+    # CSP frame-ancestors supersedes XFO; only one of those controls is active.
+    assert snapshot["security_header_count"] == 1
     assert snapshot["score"] == care_check["score"]
     assert any(
         alert["severity"] == "info" and "HSTS" in alert["message"]

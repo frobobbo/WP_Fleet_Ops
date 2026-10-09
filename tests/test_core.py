@@ -58,6 +58,45 @@ def test_valid_frame_ancestor_wildcard_subdomain_remains_protected():
     assert "Add clickjacking protection header." not in check.actions
 
 
+@pytest.mark.parametrize("csp", ["frame-ancestors *", "default-src 'self'; frame-ancestors https:"])
+def test_broad_frame_ancestors_overrides_restrictive_x_frame_options(csp):
+    check = evaluate_site(
+        "Conflicting Framing", "https://conflicting-framing.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {
+            "strict-transport-security": "max-age=31536000",
+            "x-frame-options": "DENY",
+            "content-security-policy": csp,
+        },
+    )
+
+    assert check.security_headers == {"strict-transport-security": "max-age=31536000"}
+    assert check.score == 96
+    assert "Add clickjacking protection header." in check.actions
+
+
+def test_x_frame_options_remains_effective_without_frame_ancestors_override():
+    check = evaluate_site(
+        "Legacy Framing", "https://legacy-framing.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"x-frame-options": "DENY", "content-security-policy": "default-src *"},
+    )
+
+    assert check.security_headers == {"x-frame-options": "DENY"}
+    assert "Add clickjacking protection header." not in check.actions
+
+
+def test_restrictive_frame_ancestors_takes_precedence_over_x_frame_options():
+    check = evaluate_site(
+        "Restricted Framing", "https://restricted.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"x-frame-options": "DENY", "content-security-policy": "frame-ancestors 'self'"},
+    )
+
+    assert check.security_headers == {"content-security-policy": "frame-ancestors 'self'"}
+    assert "Add clickjacking protection header." not in check.actions
+
+
 def test_container_healthcheck_requires_database_readiness():
     dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
     healthcheck = next(
@@ -1562,7 +1601,6 @@ def test_fetch_basic_site_check_retains_only_effective_monitored_security_header
     )
 
     assert check.security_headers == {
-        "x-frame-options": "SAMEORIGIN",
         "content-security-policy": "frame-ancestors 'self'",
     }
     assert "Add or verify HSTS security header." in check.actions

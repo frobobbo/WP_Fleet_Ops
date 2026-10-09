@@ -348,10 +348,20 @@ def _effective_security_headers(headers) -> dict[str, str]:
     effective_headers: dict[str, str] = {}
     hsts_seen = False
     x_frame_options_seen = False
+    frame_ancestors_seen = False
     for name, value in headers.items():
         normalized_name = name.lower()
         if normalized_name not in MONITORED_SECURITY_HEADERS:
             continue
+        if normalized_name == "content-security-policy" and isinstance(value, str):
+            # An enforced frame-ancestors directive takes precedence over XFO,
+            # including when it allows unrestricted framing. Keep track of its
+            # presence even when its value does not earn CSP protection points.
+            frame_ancestors_seen |= any(
+                parts and parts[0].lower() == "frame-ancestors"
+                for directive in value.split(";")
+                if (parts := directive.split())
+            )
         if normalized_name == "strict-transport-security":
             # RFC 6797 requires user agents to process only the first STS field.
             # Mark it seen before validation so a disabled or malformed first
@@ -369,6 +379,8 @@ def _effective_security_headers(headers) -> dict[str, str]:
             x_frame_options_seen = True
         if _security_header_is_effective(name, value):
             effective_headers[normalized_name] = value
+    if frame_ancestors_seen:
+        effective_headers.pop("x-frame-options", None)
     return effective_headers
 
 
