@@ -152,7 +152,11 @@ def generate_maintenance_report(sites: list[FleetSite]) -> str:
         lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}", ""]
         lines += ["Recommended actions:"]
         lines += [
-            f"- [{a.severity}] {a.message.replace(site.name, markdown_literal(site.name))}"
+            f"- [{a.severity}] " + (
+                markdown_literal(site.name) + a.message[len(site.name):]
+                if a.message.startswith(f"{site.name} ")
+                else a.message
+            )
             for a in alerts
         ] if alerts else ["- Continue normal maintenance cadence."]
         lines.append("")

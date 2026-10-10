@@ -648,6 +648,23 @@ def test_care_score_and_report_are_client_friendly():
     assert "Needs attention" in report
 
 
+def test_report_escapes_site_label_without_rewriting_narrative_punctuation():
+    site = evaluate_site(".", "https://report.example", 200, 200, 90, "6.6", 0, 12, {})
+    care_report = summarize_care_report([site])
+
+    assert "## \\. — Healthy" in care_report
+    assert "\\. looks healthy. Minor recommendations can be handled during normal maintenance." in care_report
+    assert "normal maintenance\\." not in care_report
+
+    fleet_site = FleetSite(".", site.url, False, 25, 0, 12, 200, 3)
+    fleet_report = generate_maintenance_report([fleet_site])
+
+    assert "## \\. — Needs attention" in fleet_report
+    assert "\\. appears down or unreachable." in fleet_report
+    assert "unreachable\\." not in fleet_report
+    assert "SSL expires in 25 day(s)." in fleet_report
+
+
 def test_not_modified_without_conditional_request_is_not_a_healthy_homepage():
     check = evaluate_site(
         "Unusable Homepage", "https://unusable.example", 304, 200, 60,

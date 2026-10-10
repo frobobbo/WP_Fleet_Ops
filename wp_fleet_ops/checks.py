@@ -592,7 +592,9 @@ def summarize_care_report(checks: list[SiteCheck]) -> str:
             "",
             f"Score: {c.score}/100",
             f"URL: {markdown_literal(c.url)}",
-            c.summary.replace(c.name, markdown_literal(c.name)),
+            # The summary starts with the site name. Escape that label once,
+            # without also escaping matching punctuation in the prose.
+            c.summary.replace(c.name, markdown_literal(c.name), 1),
             "",
         ]
         if c.actions:
