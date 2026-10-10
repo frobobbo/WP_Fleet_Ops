@@ -66,6 +66,19 @@ def test_valid_frame_ancestor_wildcard_subdomain_remains_protected():
     assert "Add clickjacking protection header." not in check.actions
 
 
+@pytest.mark.parametrize("source", ["*.com", "https://*.com", "https://*.org.:443"])
+def test_top_level_domain_wildcard_does_not_claim_clickjacking_protection(source):
+    # A wildcard over an entire top-level domain permits unrelated origins.
+    check = evaluate_site(
+        "Broad Framing", "https://broad-framing.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"content-security-policy": f"frame-ancestors {source}"},
+    )
+
+    assert "content-security-policy" not in check.security_headers
+    assert "Add clickjacking protection header." in check.actions
+
+
 @pytest.mark.parametrize("keyword", ["'SELF'", "'None'", "'SeLf'"])
 def test_frame_ancestor_keywords_are_case_insensitive(keyword):
     check = evaluate_site(

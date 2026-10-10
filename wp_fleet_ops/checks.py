@@ -334,6 +334,13 @@ def _security_header_is_effective(name: str, value: str) -> bool:
                 r"(?:/(?:[a-z0-9._~!$&'()*+=:@/-]|%[0-9a-f]{2})*)?",
                 re.IGNORECASE,
             )
+            # A wildcard for an entire top-level domain (for example *.com)
+            # permits unrelated sites to embed the page. It is not meaningful
+            # clickjacking protection even though it is a valid CSP host source.
+            top_level_wildcard = re.compile(
+                r"(?:[a-z][a-z0-9+.-]*://)?\*\.[a-z0-9-]+\.?(?::(?:[0-9]+|\*))?(?:/.*)?",
+                re.IGNORECASE,
+            )
             sources = parts[1:]
             # CSP keyword sources use ASCII case-insensitive matching. Preserve
             # the original header for evidence, but compare the keywords in one
@@ -344,7 +351,10 @@ def _security_header_is_effective(name: str, value: str) -> bool:
                 and ("'none'" not in normalized_sources or normalized_sources == ["'none'"])
                 and all(
                     source in {"'self'", "'none'"}
-                    or host_source.fullmatch(source) is not None
+                    or (
+                        host_source.fullmatch(source) is not None
+                        and top_level_wildcard.fullmatch(source) is None
+                    )
                     for source in normalized_sources
                 )
             )
