@@ -28,7 +28,9 @@ PERCENT_DECODE_SAFE = frozenset(
 
 def markdown_literal(value: str) -> str:
     """Render an operator-provided label as text in a Markdown report."""
-    return re.sub(r"([\\`*_{}\[\]<>()#+\-.!|~])", r"\\\1", value)
+    # Escape ampersands too: Markdown otherwise interprets ``&copy;`` and
+    # numeric entities, changing an operator-supplied site label or query URL.
+    return re.sub(r"([\\`*_{}\[\]<>()#+\-.!|~&])", r"\\\1", value)
 
 
 def normalize_site_name(name: str) -> str:

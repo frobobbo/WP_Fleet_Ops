@@ -665,6 +665,23 @@ def test_report_escapes_site_label_without_rewriting_narrative_punctuation():
     assert "SSL expires in 25 day(s)." in fleet_report
 
 
+def test_reports_preserve_entity_like_site_labels_and_query_urls():
+    name = "Church &copy; &#35;"
+    url = "https://entity.example/?ref=team&copy;"
+    check = evaluate_site(name, url, 200, 200, 90, "6.6", 0, 12, {})
+    care_report = summarize_care_report([check])
+    fleet_report = generate_maintenance_report([
+        FleetSite(name, check.url, False, 90, 0, 12, 200, 0)
+    ])
+
+    for report in (care_report, fleet_report):
+        assert "## Church \\&copy; \\&\\#35;" in report
+        assert "URL: https://entity\\.example?ref=team\\&copy;" in report
+        assert "## Church &copy; &#35;" not in report
+    assert "Church \\&copy; \\&\\#35; looks healthy." in care_report
+    assert "Church \\&copy; \\&\\#35; appears down or unreachable." in fleet_report
+
+
 def test_not_modified_without_conditional_request_is_not_a_healthy_homepage():
     check = evaluate_site(
         "Unusable Homepage", "https://unusable.example", 304, 200, 60,
