@@ -30,7 +30,15 @@ def test_invalid_frame_ancestor_keywords_do_not_claim_clickjacking_protection(in
 
 @pytest.mark.parametrize(
     "invalid_source",
-    ["invalid_host", "https://*.", "https://example.com:invalid", "https://example.com/path?query"],
+    [
+        "invalid_host",
+        "https://*.",
+        "https://example.com:invalid",
+        "https://example.com/path?query",
+        "https://-partner.example",
+        "https://partner-.example",
+        "https://a.-partner.example",
+    ],
 )
 def test_invalid_frame_ancestor_hosts_do_not_claim_clickjacking_protection(invalid_source):
     check = evaluate_site(

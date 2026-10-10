@@ -320,11 +320,14 @@ def _security_header_is_effective(name: str, value: str) -> bool:
             # scheme sources. A scheme source (https:) or a bare wildcard host
             # allows arbitrary origins, so only recognize restricted host
             # sources. Validate the entire token: an invalid host/port/path is
-            # not evidence of clickjacking protection. Exclude path delimiters
-            # that this semicolon-splitting parser cannot disambiguate safely.
+            # not evidence of clickjacking protection. Host labels must not
+            # start or end with a hyphen; such spellings cannot identify a
+            # normal DNS origin even though the loose source grammar matches.
+            # Exclude path delimiters this parser cannot disambiguate safely.
+            dns_label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
             host_source = re.compile(
                 r"(?:[a-z][a-z0-9+.-]*://)?"
-                r"(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.?"
+                rf"(?:\*\.)?{dns_label}(?:\.{dns_label})*\.?"
                 r"(?::(?:[0-9]+|\*))?"
                 r"(?:/(?:[a-z0-9._~!$&'()*+=:@/-]|%[0-9a-f]{2})*)?",
                 re.IGNORECASE,
