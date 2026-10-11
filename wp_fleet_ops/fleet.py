@@ -148,7 +148,12 @@ def generate_maintenance_report(sites: list[FleetSite]) -> str:
         "",
     ]
     for site, score, alerts in scored:
-        state = "Healthy" if score >= 85 else ("Watch" if score >= 65 else "Needs attention")
+        if score < 65 or any(alert.severity == "critical" for alert in alerts):
+            state = "Needs attention"
+        elif score < 85 or any(alert.severity == "warning" for alert in alerts):
+            state = "Watch"
+        else:
+            state = "Healthy"
         lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}", ""]
         lines += ["Recommended actions:"]
         lines += [

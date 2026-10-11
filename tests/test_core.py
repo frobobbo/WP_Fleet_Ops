@@ -877,6 +877,20 @@ def test_fleet_alerts_and_report_group_operational_risk():
     assert "WP FleetOps Maintenance Report" in generate_maintenance_report([site])
 
 
+def test_fleet_report_headings_respect_alert_severity_even_when_score_is_healthy():
+    critical = FleetSite("Critical Updates", "https://critical.example", True, 90, 5, 12, 200, 3)
+    warning = FleetSite("Renewal Due", "https://renewal.example", True, 30, 0, 12, 200, 3)
+    healthy = FleetSite("No Alerts", "https://healthy.example", True, 90, 0, 12, 200, 3)
+
+    assert calculate_health_score(critical) == 85
+    assert calculate_health_score(warning) == 90
+    report = generate_maintenance_report([critical, warning, healthy])
+    assert "## Critical Updates — Needs attention" in report
+    assert "## Renewal Due — Watch" in report
+    assert "## No Alerts — Healthy" in report
+    assert "Critical sites: 1" in report
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
