@@ -936,6 +936,30 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("care_score", "care_status"),
+    [(40, "red"), (75, "yellow")],
+)
+def test_api_summary_does_not_hide_a_current_risky_care_check(tmp_path, care_score, care_status):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Conflicting Evidence", url="https://conflict.example"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    # A corrected care finding can disagree with the latest fleet snapshot.
+    # Paired, current risk evidence must not be masked by a green snapshot.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = ?, status = ?", (care_score, care_status))
+
+    summary = client.get("/api/summary").json()
+    assert summary["current_evidence_count"] == 1
+    assert summary["average_score"] == 100
+    assert summary["client_risks"] == (1 if care_status == "red" else 0)
+    assert summary["overall_status"] == care_status
+
+
+@pytest.mark.parametrize(
     ("overrides", "expected_status"),
     [
         (
