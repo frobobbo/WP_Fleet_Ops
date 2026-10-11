@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -139,9 +139,20 @@ def generate_alerts(
     return alerts
 
 
-def generate_maintenance_report(sites: list[FleetSite]) -> str:
+def generate_maintenance_report(
+    sites: list[FleetSite],
+    *,
+    saved_evidence: Mapping[str, tuple[int, list[Alert]]] | None = None,
+) -> str:
     lines = ["# WP FleetOps Maintenance Report", "", f"Generated: {datetime.now(timezone.utc).isoformat()}", ""]
-    scored = [(s, calculate_health_score(s), generate_alerts(s)) for s in sites]
+    # Persisted fetches retain which header is missing. Recomputing alerts from
+    # FleetSite's header count discards that evidence in exported reports.
+    scored = [
+        (s, *saved_evidence[s.url])
+        if saved_evidence is not None
+        else (s, calculate_health_score(s), generate_alerts(s))
+        for s in sites
+    ]
     lines += [
         f"Sites monitored: {len(sites)}",
         f"Critical sites: {sum(1 for _, _, a in scored if any(x.severity == 'critical' for x in a))}",

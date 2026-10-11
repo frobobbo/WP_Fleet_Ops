@@ -9722,6 +9722,39 @@ def test_report_preserves_fetched_security_header_coverage(tmp_path, monkeypatch
     assert "Add clickjacking protection header." not in report
 
 
+def test_report_preserves_saved_fleet_alert_for_missing_hsts(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+
+    def fake_fetch(name, url, **_kwargs):
+        from wp_fleet_ops.checks import evaluate_site
+
+        return evaluate_site(
+            name, url, 200, 180, 60, "6.6.2", 0, 12,
+            {
+                "X-Frame-Options": "SAMEORIGIN",
+                "Content-Security-Policy": "default-src 'self'",
+            },
+        )
+
+    import wp_fleet_ops.main as main
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fake_fetch)
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": "No HSTS", "url": "https://no-hsts.example"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    snapshot = main.store.latest_dashboard()[0]
+    assert snapshot["score"] == 96
+    assert any("HSTS" in alert["message"] for alert in snapshot["alerts"])
+
+    report = client.get("/report").text
+    assert report.count("Score: 96/100") == 2
+    assert "Score: 100/100" not in report
+    assert "Security headers need review: missing HSTS." in report
+
+
 def test_manual_check_and_snapshot_share_canonical_url_handling(tmp_path):
     client = make_test_client(tmp_path)
 

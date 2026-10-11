@@ -28,7 +28,7 @@ from .checks import (
     normalize_site_url,
     summarize_care_report,
 )
-from .fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
+from .fleet import Alert, FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from .storage import FleetOpsStore
 
 BASE = Path(__file__).resolve().parent.parent
@@ -6703,7 +6703,16 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         for r in latest_snapshots
         if r["url"] in current_urls
     ]
-    report_text = summarize_care_report(care_checks) + "\n---\n\n" + generate_maintenance_report(fleet_sites)
+    current_fleet_rows = [row for row in latest_snapshots if row["url"] in current_urls]
+    saved_evidence = {
+        row["url"]: (row["score"], [Alert(**alert) for alert in row["alerts"]])
+        for row in current_fleet_rows
+    }
+    report_text = (
+        summarize_care_report(care_checks)
+        + "\n---\n\n"
+        + generate_maintenance_report(fleet_sites, saved_evidence=saved_evidence)
+    )
     if evidence_gaps:
         evidence_gaps.sort(key=lambda row: (row["client"].lower(), row["name"].lower()))
         gap_lines = [
@@ -6720,7 +6729,6 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
                 "Capture a fresh combined check before publishing site health."
             )
         report_text += "\n---\n\n" + "\n".join(gap_lines) + "\n"
-    current_fleet_rows = [row for row in latest_snapshots if row["url"] in current_urls]
     report_status = _combined_report_status(care_checks, current_fleet_rows, len(evidence_gaps))
     return (
         report_text,
