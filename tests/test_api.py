@@ -935,6 +935,46 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
     assert summary["critical_alerts"] >= 1
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected_status"),
+    [
+        (
+            {"ssl_days": "20", "wp_updates": "4", "backup_age_hours": "48",
+             "response_ms": "1600", "security_header_count": "0"},
+            "red",
+        ),
+        ({"ssl_days": "20", "backup_age_hours": "48", "response_ms": "1300"}, "yellow"),
+    ],
+)
+def test_api_summary_does_not_hide_a_current_risky_site_in_a_healthy_average(
+    tmp_path, overrides, expected_status
+):
+    client = make_test_client(tmp_path)
+    for index in range(4):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"Healthy {index}", url=f"https://healthy-{index}.example"
+            ),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Risk without critical alerts", url="https://risk.example", **overrides
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    summary = client.get("/api/summary").json()
+    assert summary["current_evidence_count"] == 5
+    assert summary["average_score"] >= 85
+    assert summary["critical_alerts"] == 0
+    assert summary["overall_status"] == expected_status
+
+
 def test_api_summary_filters_rollups_by_client_and_unassigned(tmp_path):
     client = make_test_client(tmp_path)
     for name, url, client_name, overrides in (

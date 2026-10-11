@@ -386,7 +386,10 @@ def _summary_payload(
     observed_average_score = (
         round(observed_score_total / len(fleet_rows)) if fleet_rows else None
     )
-    if critical_alerts or (average_score is not None and average_score < 65):
+    # A healthy fleet average must not mask a current site needing attention.
+    # Use only paired, fresh evidence; stale or unpaired historical scores must
+    # not escalate the live status (their coverage gaps remain yellow below).
+    if critical_alerts or any(row["score"] < 65 for row in current_rows):
         overall_status = "red"
     elif (
         not sites  # No monitored inventory is not evidence of a healthy fleet.
@@ -398,6 +401,7 @@ def _summary_payload(
         or stale_care_check_count
         or invalid_care_check_count
         or clock_skew_care_check_count
+        or any(row["score"] < 85 for row in current_rows)
         or (average_score is not None and average_score < 85)
     ):
         overall_status = "yellow"
