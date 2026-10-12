@@ -1835,6 +1835,30 @@ def test_api_clients_does_not_hide_a_risky_site_in_a_healthy_account_average(
     assert account["status"] == fleet["overall_status"] == expected_status
 
 
+@pytest.mark.parametrize("care_status", ["red", "yellow"])
+def test_api_clients_reflects_current_risky_care_check(tmp_path, care_status):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Conflicting Client Evidence",
+            url="https://client-conflict.example",
+            client="Conflicting Client",
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    # Care findings can be corrected after a snapshot; a green snapshot must
+    # not mask a current red/yellow care finding at the account level.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set status = ?", (care_status,))
+
+    account = client.get("/api/clients").json()["clients"][0]
+    assert account["current_evidence_count"] == 1
+    assert account["average_score"] == 100
+    assert account["status"] == care_status
+    assert client.get("/api/summary").json()["overall_status"] == care_status
+
+
 def test_api_clients_warns_about_account_monitoring_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

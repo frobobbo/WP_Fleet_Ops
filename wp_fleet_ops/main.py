@@ -850,6 +850,8 @@ def api_clients():
                 "current_evidence_count": 0,
                 "score_total": 0,
                 "lowest_score": None,
+                "_red_care_checks": 0,
+                "_yellow_care_checks": 0,
                 "observed_score_total": 0,
                 "observed_score_count": 0,
                 "healthy_sites": 0,
@@ -918,7 +920,10 @@ def api_clients():
         if not snapshot_is_current or not care_check_is_current:
             continue
         assert row is not None
+        assert care_check is not None
         summary["current_evidence_count"] += 1
+        summary["_red_care_checks"] += care_check["status"] == "red"
+        summary["_yellow_care_checks"] += care_check["status"] == "yellow"
         summary["score_total"] += row["score"] or 0
         summary["lowest_score"] = min(
             summary["lowest_score"] if summary["lowest_score"] is not None else row["score"],
@@ -951,6 +956,8 @@ def api_clients():
         summary.pop("_latest_snapshot_dt")
         summary.pop("_latest_care_check_dt")
         lowest_score = summary.pop("lowest_score")
+        red_care_checks = summary.pop("_red_care_checks")
+        yellow_care_checks = summary.pop("_yellow_care_checks")
         summary["average_score"] = average_score
         summary["observed_average_score"] = observed_average_score
         summary["monitoring_coverage_percent"] = round(
@@ -975,11 +982,11 @@ def api_clients():
         summary["paired_coverage_percent"] = round(
             (current_evidence_count / summary["site_count"]) * 100
         ) if summary["site_count"] else 100
-        if summary["critical_alerts"] or (
+        if summary["critical_alerts"] or red_care_checks or (
             lowest_score is not None and lowest_score < 65
         ):
             summary["status"] = "red"
-        elif summary["monitoring_gap_count"] or (
+        elif summary["monitoring_gap_count"] or yellow_care_checks or (
             lowest_score is not None and lowest_score < 85
         ):
             summary["status"] = "yellow"
