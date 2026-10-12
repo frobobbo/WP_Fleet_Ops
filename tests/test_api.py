@@ -7426,6 +7426,22 @@ def test_api_fleet_brief_returns_operator_summary(tmp_path):
     assert payload["top_actions"][0]["site"] == "Critical Brief Site"
 
 
+def test_empty_fleet_brief_and_handoff_do_not_claim_healthy_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+
+    brief = client.get("/api/fleet-brief").json()
+    handoff = client.get("/api/operator-handoff").json()
+
+    for payload in (brief, handoff):
+        assert payload["site_count"] == 0
+        assert payload["status"] == "yellow"
+        assert payload["current_evidence_count"] == 0
+        assert payload["paired_coverage_percent"] == 0
+        assert payload["top_actions"] == []
+    assert handoff["headline"] == "Yellow: no sites are tracked; register a site to begin monitoring."
+    assert handoff["handoff_notes"] == ["Register a site and capture an initial combined care check and fleet snapshot."]
+
+
 def test_api_site_scorecards_returns_compact_per_site_status_cards(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

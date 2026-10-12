@@ -4587,6 +4587,7 @@ def api_executive_risks():
 
 
 def _fleet_brief_status(
+    site_count: int,
     critical_clients: int,
     immediate_actions: int,
     open_actions: int,
@@ -4595,7 +4596,7 @@ def _fleet_brief_status(
     """Return a single operating status for the current fleet brief."""
     if critical_clients or immediate_actions:
         return "red"
-    if open_actions or monitoring_gap_count:
+    if not site_count or open_actions or monitoring_gap_count:
         return "yellow"
     return "green"
 
@@ -4615,7 +4616,7 @@ def api_fleet_brief():
     care_check_gap_count = sum(client["care_check_gap_count"] for client in client_risks)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "status": _fleet_brief_status(critical_clients, immediate_actions, len(actions), monitoring_gap_count),
+        "status": _fleet_brief_status(fleet_summary["sites"], critical_clients, immediate_actions, len(actions), monitoring_gap_count),
         "site_count": fleet_summary["sites"],
         "client_count": len(client_risks),
         "critical_client_count": critical_clients,
@@ -4630,7 +4631,7 @@ def api_fleet_brief():
         "paired_coverage_percent": (
             round((current_evidence_count / fleet_summary["sites"]) * 100)
             if fleet_summary["sites"]
-            else 100
+            else 0
         ),
         "at_risk_objective_count": slo["at_risk_count"],
         "worst_objective": slo["worst_objective"],
@@ -4641,12 +4642,15 @@ def api_fleet_brief():
 
 def _operator_handoff_headline(
     status: str,
+    site_count: int,
     critical_clients: int,
     immediate_actions: int,
     monitoring_gap_count: int = 0,
     open_actions: int = 0,
 ) -> str:
     """Return a concise human-readable summary for shift handoff."""
+    if not site_count:
+        return "Yellow: no sites are tracked; register a site to begin monitoring."
     if status == "red":
         client_label = "client" if critical_clients == 1 else "clients"
         action_label = "action" if immediate_actions == 1 else "actions"
@@ -4679,11 +4683,13 @@ def api_operator_handoff():
     monitoring_gap_count = sum(client["monitoring_gap_count"] for client in client_risks)
     snapshot_gap_count = sum(client["snapshot_gap_count"] for client in client_risks)
     care_check_gap_count = sum(client["care_check_gap_count"] for client in client_risks)
-    status = _fleet_brief_status(critical_clients, immediate_actions, len(actions), monitoring_gap_count)
+    status = _fleet_brief_status(fleet_summary["sites"], critical_clients, immediate_actions, len(actions), monitoring_gap_count)
     top_clients = client_risks[:3]
     priority_clients = [client for client in client_risks if client["risk_level"] != "stable"]
     top_actions = actions[:5]
-    if priority_clients:
+    if not fleet_summary["sites"]:
+        handoff_notes = ["Register a site and capture an initial combined care check and fleet snapshot."]
+    elif priority_clients:
         top_client = priority_clients[0]
         if top_client["monitoring_gap_count"] and not top_client["open_action_count"]:
             snapshot_gaps = top_client["snapshot_gap_count"]
@@ -4717,6 +4723,7 @@ def api_operator_handoff():
         "status": status,
         "headline": _operator_handoff_headline(
             status,
+            fleet_summary["sites"],
             critical_clients,
             immediate_actions,
             monitoring_gap_count,
@@ -4736,7 +4743,7 @@ def api_operator_handoff():
         "paired_coverage_percent": (
             round((current_evidence_count / fleet_summary["sites"]) * 100)
             if fleet_summary["sites"]
-            else 100
+            else 0
         ),
         "at_risk_objective_count": slo["at_risk_count"],
         "worst_objective": slo["worst_objective"],
