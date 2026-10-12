@@ -5664,13 +5664,15 @@ def _operations_kpi_status(
     immediate_actions: int,
     scheduled_actions: int,
     average_score: int | None,
-    monitoring_gap_count: int = 0,
+    monitoring_gap_count: int,
+    site_count: int,
 ) -> str:
     """Return a fleet KPI status for management dashboards."""
     if immediate_actions:
         return "red"
     if (
-        scheduled_actions
+        not site_count
+        or scheduled_actions
         or monitoring_gap_count
         or (average_score is not None and average_score < 85)
     ):
@@ -5715,8 +5717,11 @@ def api_operations_kpis():
         len(scheduled_actions),
         average_score,
         monitoring_gap_count,
+        fleet_summary["sites"],
     )
-    if immediate_actions:
+    if not fleet_summary["sites"]:
+        recommended_focus = "Register a site and capture its first paired care check and fleet snapshot."
+    elif immediate_actions:
         recommended_focus = immediate_actions[0]["recommended_action"]
     elif scheduled_actions:
         recommended_focus = scheduled_actions[0]["recommended_action"]

@@ -8722,6 +8722,22 @@ def test_priority_apis_require_current_paired_care_evidence(tmp_path):
     assert client_priorities["clients"] == []
 
 
+def test_api_operations_kpis_warns_when_no_sites_are_registered(tmp_path):
+    client = make_test_client(tmp_path)
+
+    summary = client.get("/api/summary").json()
+    kpis = client.get("/api/operations-kpis").json()
+
+    assert summary["overall_status"] == "yellow"
+    assert kpis["status"] == "yellow"
+    assert kpis["site_count"] == 0
+    assert kpis["current_evidence_count"] == 0
+    assert kpis["average_score"] is None
+    assert kpis["recommended_focus"] == (
+        "Register a site and capture its first paired care check and fleet snapshot."
+    )
+
+
 def test_api_operations_kpis_returns_management_rollup(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
