@@ -849,6 +849,7 @@ def api_clients():
                 "stale_care_check_count": 0,
                 "current_evidence_count": 0,
                 "score_total": 0,
+                "lowest_score": None,
                 "observed_score_total": 0,
                 "observed_score_count": 0,
                 "healthy_sites": 0,
@@ -919,6 +920,10 @@ def api_clients():
         assert row is not None
         summary["current_evidence_count"] += 1
         summary["score_total"] += row["score"] or 0
+        summary["lowest_score"] = min(
+            summary["lowest_score"] if summary["lowest_score"] is not None else row["score"],
+            row["score"],
+        )
         summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
         summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
         summary["critical_alerts"] += sum(
@@ -945,6 +950,7 @@ def api_clients():
         )
         summary.pop("_latest_snapshot_dt")
         summary.pop("_latest_care_check_dt")
+        lowest_score = summary.pop("lowest_score")
         summary["average_score"] = average_score
         summary["observed_average_score"] = observed_average_score
         summary["monitoring_coverage_percent"] = round(
@@ -970,11 +976,11 @@ def api_clients():
             (current_evidence_count / summary["site_count"]) * 100
         ) if summary["site_count"] else 100
         if summary["critical_alerts"] or (
-            average_score is not None and average_score < 65
+            lowest_score is not None and lowest_score < 65
         ):
             summary["status"] = "red"
         elif summary["monitoring_gap_count"] or (
-            average_score is not None and average_score < 85
+            lowest_score is not None and lowest_score < 85
         ):
             summary["status"] = "yellow"
         else:

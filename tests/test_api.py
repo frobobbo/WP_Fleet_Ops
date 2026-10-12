@@ -1787,6 +1787,54 @@ def test_api_clients_rolls_up_account_health(tmp_path):
     assert clients[1]["site_count"] == 1
 
 
+@pytest.mark.parametrize(
+    ("risky_overrides", "expected_status"),
+    [
+        (
+            {"ssl_days": "20", "wp_updates": "4", "backup_age_hours": "48",
+             "response_ms": "1600", "security_header_count": "0"},
+            "red",
+        ),
+        (
+            {"ssl_days": "20", "wp_updates": "2", "backup_age_hours": "48",
+             "response_ms": "1300"},
+            "yellow",
+        ),
+    ],
+)
+def test_api_clients_does_not_hide_a_risky_site_in_a_healthy_account_average(
+    tmp_path, risky_overrides, expected_status
+):
+    client = make_test_client(tmp_path)
+    for index in range(4):
+        response = client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"Stable {index}", url=f"https://stable-account-{index}.example",
+                client="Mixed Account",
+            ),
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Risky Account Site", url="https://risky-account.example",
+            client="Mixed Account", **risky_overrides,
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    account = client.get("/api/clients").json()["clients"][0]
+    fleet = client.get("/api/summary").json()
+    assert account["site_count"] == 5
+    assert account["current_evidence_count"] == 5
+    assert account["average_score"] >= 85
+    assert account["critical_alerts"] == 0
+    assert account["status"] == fleet["overall_status"] == expected_status
+
+
 def test_api_clients_warns_about_account_monitoring_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
