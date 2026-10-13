@@ -3659,7 +3659,8 @@ def _slo_status(met: int, total: int) -> str:
 
 
 def _slo_row(name: str, label: str, total: int, met: int, threshold: str) -> dict:
-    compliance_percent = round((met / total) * 100, 1) if total else 100.0
+    # No tracked sites means no denominator, not perfect compliance.
+    compliance_percent = round((met / total) * 100, 1) if total else None
     return {
         "name": name,
         "label": label,
@@ -3833,8 +3834,11 @@ def api_slo(client: str | None = None):
             f"paired snapshot and care check <= {SNAPSHOT_FRESHNESS_HOURS} hours old",
         ),
     ]
-    objectives.sort(key=lambda objective: (objective["compliance_percent"], objective["name"]))
-    worst_objective = objectives[0] if objectives else None
+    objectives.sort(key=lambda objective: (
+        objective["compliance_percent"] if objective["compliance_percent"] is not None else 0,
+        objective["name"],
+    ))
+    worst_objective = objectives[0] if tracked_total else None
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
@@ -3849,7 +3853,7 @@ def api_slo(client: str | None = None):
         "paired_coverage_percent": (
             round((current_evidence_count / tracked_total) * 100)
             if tracked_total
-            else 100
+            else 0
         ),
         "objective_count": len(objectives),
         "at_risk_count": sum(1 for objective in objectives if objective["status"] == "at_risk"),

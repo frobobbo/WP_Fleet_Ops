@@ -6303,6 +6303,26 @@ def test_maintenance_views_require_current_paired_care_evidence(tmp_path):
     assert calendar["windows"] == []
 
 
+def test_api_slo_empty_inventory_does_not_claim_full_compliance(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/slo")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 0
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["objective_count"] == 6
+    assert payload["at_risk_count"] == 0
+    assert payload["worst_objective"] is None
+    assert all(
+        objective["met_count"] == objective["miss_count"] == 0
+        and objective["compliance_percent"] is None
+        and objective["status"] == "unknown"
+        for objective in payload["objectives"]
+    )
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
