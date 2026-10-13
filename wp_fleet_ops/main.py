@@ -1362,7 +1362,10 @@ def api_actions(client: str | None = None):
     monitoring_gap_count = len(tracked_sites) - current_evidence_count
     actions = _current_actions(dashboard_rows, now, care_checks)
     critical_action_count = sum(1 for action in actions if action["severity"] == "critical")
-    status = "red" if critical_action_count else ("yellow" if actions or monitoring_gap_count else "green")
+    # No tracked inventory is not evidence that the action queue is clear.
+    status = "red" if critical_action_count else (
+        "yellow" if not tracked_sites or actions or monitoring_gap_count else "green"
+    )
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
@@ -1378,7 +1381,7 @@ def api_actions(client: str | None = None):
         "paired_coverage_percent": (
             round((current_evidence_count / len(tracked_sites)) * 100)
             if tracked_sites
-            else 100
+            else 0
         ),
         "action_count": len(actions),
         "actions": actions,

@@ -899,6 +899,19 @@ def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
         assert summary[field] == 0, field
 
 
+def test_api_actions_does_not_call_an_empty_fleet_clear_or_fully_covered(tmp_path):
+    client = make_test_client(tmp_path)
+
+    payload = client.get("/api/actions").json()
+
+    assert payload["tracked_site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["action_count"] == 0
+    assert payload["actions"] == []
+    assert payload["status"] == "yellow"
+    assert payload["paired_coverage_percent"] == 0
+
+
 def test_api_summary_returns_dashboard_rollups(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
