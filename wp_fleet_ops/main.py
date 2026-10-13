@@ -6200,7 +6200,6 @@ def api_dispatch_summary():
     priority_payload = api_site_priorities(limit=50)
     priority_sites = priority_payload["sites"][:5]
     client_workload = _client_workload_rows()
-    top_client = client_workload[0] if client_workload else None
     top_action = actions[0] if actions else None
     monitoring_payload = api_monitoring_coverage()
     # An unfiltered coverage read always returns a payload; only an unknown
@@ -6230,17 +6229,25 @@ def api_dispatch_summary():
         if site["care_check_freshness"] not in {"current", "missing"}
     )
     if top_action:
-        dispatch_top_client = top_client["client"] if top_client else top_action.get("client")
-        dispatch_top_site = priority_sites[0]["name"] if priority_sites else top_action["site"]
+        # Workload and site-priority rankings can disagree with action order.
+        # Keep all top routing fields tied to the action actually recommended.
+        dispatch_top_client = top_action.get("client") or "Unassigned"
+        dispatch_top_site = top_action["site"]
         dispatch_top_action = top_action["recommended_action"]
+        top_client = next(
+            (row for row in client_workload if row["client"] == dispatch_top_client),
+            None,
+        )
     elif top_monitoring_site:
         dispatch_top_client = top_monitoring_site["client"]
         dispatch_top_site = top_monitoring_site["name"]
         dispatch_top_action = top_monitoring_site["recommended_action"]
+        top_client = None
     else:
         dispatch_top_client = None
         dispatch_top_site = None
         dispatch_top_action = "Continue normal monitoring cadence."
+        top_client = None
 
     if immediate_actions:
         next_queue = "immediate"

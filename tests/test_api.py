@@ -9520,6 +9520,41 @@ def test_api_dispatch_summary_returns_queue_level_operator_routing(tmp_path):
     assert [site["name"] for site in payload["priority_sites"]] == ["Dispatch Critical Store", "Dispatch Warning Blog"]
 
 
+def test_dispatch_top_routing_fields_identify_the_same_action(tmp_path):
+    client = make_test_client(tmp_path)
+    # The first action is the lower-scoring outage, but the other account has
+    # more critical actions and a higher site-priority score.
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Outage Store", url="https://outage-route.example",
+            client="Outage Client", uptime_ok="false",
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Maintenance Store", url="https://maintenance-route.example",
+            client="Maintenance Client", ssl_days="5", wp_updates="5",
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+
+    actions = client.get("/api/actions").json()["actions"]
+    assert actions[0]["site"] == "Outage Store"
+    assert client.get("/api/client-workload").json()["clients"][0]["client"] == "Maintenance Client"
+    dispatch = client.get("/api/dispatch-summary").json()
+    assert dispatch["top_client"] == actions[0]["client"] == "Outage Client"
+    assert dispatch["top_site"] == actions[0]["site"] == "Outage Store"
+    assert dispatch["top_action"] == actions[0]["recommended_action"]
+    assert dispatch["top_client_open_action_count"] == 1
+    brief = client.get("/api/daily-ops-brief").json()
+    assert brief["top_client"] == dispatch["top_client"]
+    assert brief["top_site"] == dispatch["top_site"]
+    assert brief["recommended_focus"] == dispatch["top_action"]
+
+
 def test_dispatch_and_daily_brief_route_monitoring_gaps_to_operators(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
