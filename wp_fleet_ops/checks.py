@@ -597,6 +597,12 @@ def summarize_care_report(checks: list[SiteCheck]) -> str:
         f"Healthy: {green} | Maintenance: {yellow} | Needs attention: {red}",
         "",
     ]
+    if not checks:
+        lines += [
+            "Health unverified: no sites are registered for this report.",
+            "Register a site and capture a care check before reporting health.",
+            "",
+        ]
     for c in checks:
         heading = "Healthy" if c.status == "green" else ("Maintenance scheduled" if c.status == "yellow" else "Needs attention")
         lines += [

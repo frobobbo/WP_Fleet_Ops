@@ -877,6 +877,25 @@ def test_fleet_alerts_and_report_group_operational_risk():
     assert "WP FleetOps Maintenance Report" in generate_maintenance_report([site])
 
 
+def test_empty_exported_reports_warn_that_health_is_unverified():
+    care_report = summarize_care_report([])
+    fleet_report = generate_maintenance_report([])
+
+    assert "Sites reviewed: 0" in care_report
+    assert "Sites monitored: 0" in fleet_report
+    for report in (care_report, fleet_report):
+        assert "Health unverified: no sites are registered" in report
+        assert "Register a site" in report
+
+
+def test_nonempty_exported_reports_do_not_show_empty_fleet_warning():
+    check = evaluate_site("Example", "https://example.com", 200, 200, 90, "6.6", 0, 12)
+    site = FleetSite("Example", check.url, True, 90, 0, 12, 200, 0)
+
+    assert "Health unverified: no sites are registered" not in summarize_care_report([check])
+    assert "Health unverified: no sites are registered" not in generate_maintenance_report([site])
+
+
 def test_fleet_report_headings_respect_alert_severity_even_when_score_is_healthy():
     critical = FleetSite("Critical Updates", "https://critical.example", True, 90, 5, 12, 200, 3)
     warning = FleetSite("Renewal Due", "https://renewal.example", True, 30, 0, 12, 200, 3)
