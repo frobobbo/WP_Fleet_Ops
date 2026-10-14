@@ -4974,7 +4974,7 @@ def api_site_scorecards(client: str | None = None):
         "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": len(sites) - current_evidence_count,
         "scorecard_evidence_percent": (
-            round((current_evidence_count / len(sites)) * 100) if sites else 100
+            round((current_evidence_count / len(sites)) * 100) if sites else 0
         ),
         "critical_count": sum(1 for site in sites if site["status"] == "critical"),
         "warning_count": sum(1 for site in sites if site["status"] == "warning"),

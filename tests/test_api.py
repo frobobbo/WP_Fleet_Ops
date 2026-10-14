@@ -7499,6 +7499,19 @@ def test_empty_fleet_brief_and_handoff_do_not_claim_healthy_coverage(tmp_path):
     assert handoff["handoff_notes"] == ["Register a site and capture an initial combined care check and fleet snapshot."]
 
 
+def test_api_site_scorecards_empty_inventory_has_no_verified_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/site-scorecards")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["scorecard_evidence_percent"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_site_scorecards_returns_compact_per_site_status_cards(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
