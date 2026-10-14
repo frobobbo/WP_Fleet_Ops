@@ -1663,8 +1663,9 @@ def api_incidents(client: str | None = None):
     monitoring_sites = [
         site for site in coverage["sites"] if site["coverage_status"] == "gap"
     ]
+    # An empty tracked inventory cannot prove there are no critical incidents.
     status = "red" if incidents else (
-        "yellow" if coverage["monitoring_gap_count"] else "green"
+        "yellow" if not coverage["tracked_site_count"] or coverage["monitoring_gap_count"] else "green"
     )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),

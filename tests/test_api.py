@@ -850,6 +850,18 @@ def test_ready_returns_service_unavailable_when_database_probe_fails(tmp_path, m
     assert "sensitive database path" not in response.text
 
 
+def test_incidents_empty_inventory_is_unverified_not_clear(tmp_path):
+    client = make_test_client(tmp_path)
+
+    payload = client.get("/api/incidents").json()
+
+    assert payload["tracked_site_count"] == 0
+    assert payload["incident_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["status"] == "yellow"
+    assert payload["paired_coverage_percent"] == 0
+
+
 def test_incidents_count_distinct_site_urls_when_display_names_match(tmp_path):
     client = make_test_client(tmp_path)
     for url in ("https://first-incident.example", "https://second-incident.example"):
