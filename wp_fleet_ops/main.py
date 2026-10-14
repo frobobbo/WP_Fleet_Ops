@@ -5347,7 +5347,8 @@ def api_site_trends(limit: int = 100, client: str | None = None):
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "client": normalized_client,
-        "status": "red" if regressing_count else ("yellow" if unknown_count else "green"),
+        # No tracked sites means no trend evidence, not a healthy fleet.
+        "status": "red" if regressing_count else ("yellow" if not trends or unknown_count else "green"),
         "snapshot_limit": bounded_limit,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "site_count": len(trends),
@@ -5359,7 +5360,7 @@ def api_site_trends(limit: int = 100, client: str | None = None):
         "care_check_gap_count": len(trends) - current_care_check_count,
         "monitoring_gap_count": monitoring_gap_count,
         "unknown_count": unknown_count,
-        "trend_evidence_percent": round((current_evidence_count / len(trends)) * 100) if trends else 100,
+        "trend_evidence_percent": round((current_evidence_count / len(trends)) * 100) if trends else 0,
         "regressing_count": regressing_count,
         "improving_count": sum(1 for trend in trends if trend["trend_status"] == "improving"),
         "new_count": sum(1 for trend in trends if trend["trend_status"] == "new"),

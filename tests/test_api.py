@@ -7994,6 +7994,19 @@ def test_api_snapshot_history_filters_and_paginates_by_client(tmp_path):
     assert all(snapshot["client"] == payload["client"] for snapshot in payload["snapshots"])
 
 
+def test_api_site_trends_empty_inventory_is_unverified(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/site-trends")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == 0
+    assert payload["status"] == "yellow"
+    assert payload["trend_evidence_percent"] == 0
+    assert payload["trends"] == []
+
+
 def test_api_site_trends_compares_latest_snapshot_to_previous(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
