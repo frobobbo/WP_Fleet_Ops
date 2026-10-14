@@ -3515,6 +3515,18 @@ def test_api_availability_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+def test_api_backups_empty_inventory_is_unverified(tmp_path):
+    client = make_test_client(tmp_path)
+
+    payload = client.get("/api/backups").json()
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["fresh_count"] == 0
+    assert payload["status"] == "yellow"
+    assert payload["backup_evidence_percent"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_backups_highlights_stale_backup_queue(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

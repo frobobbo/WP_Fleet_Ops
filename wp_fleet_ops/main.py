@@ -1998,7 +1998,9 @@ def api_backups(client: str | None = None):
     warning_count = sum(1 for site in sites if site["backup_status"] == "warning")
     critical_count = sum(1 for site in sites if site["backup_status"] == "critical")
     unknown_count = len(sites) - current_evidence_count
-    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    overall_status = "red" if critical_count else (
+        "yellow" if not sites or warning_count or unknown_count else "green"
+    )
     current_backup_ages = [
         site["backup_age_hours"]
         for site in sites
@@ -2021,7 +2023,7 @@ def api_backups(client: str | None = None):
         "critical_count": critical_count,
         "stale_count": warning_count + critical_count,
         "unknown_count": unknown_count,
-        "backup_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "backup_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "oldest_backup_age_hours": max(current_backup_ages, default=0),
         "sites": sites,
     }
