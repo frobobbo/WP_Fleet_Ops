@@ -34,6 +34,9 @@ def test_invalid_frame_ancestor_keywords_do_not_claim_clickjacking_protection(in
         "invalid_host",
         "https://*.",
         "https://example.com:invalid",
+        "https://example.com:0",
+        "https://example.com:65536",
+        "https://example.com:999999999999999999999999999999999999999999",
         "https://example.com/path?query",
         "https://-partner.example",
         "https://partner-.example",
@@ -60,6 +63,18 @@ def test_valid_frame_ancestor_wildcard_subdomain_remains_protected():
         "Partner Framing", "https://partner-framing.example", 200, 200, 60,
         "unknown", 0, 24,
         {"content-security-policy": "frame-ancestors 'self' https://*.partner.example:443"},
+    )
+
+    assert "content-security-policy" in check.security_headers
+    assert "Add clickjacking protection header." not in check.actions
+
+
+@pytest.mark.parametrize("port", ["443", "65535", "000443", "*"])
+def test_valid_frame_ancestor_host_ports_remain_protected(port):
+    check = evaluate_site(
+        "Partner Framing Port", "https://partner-port.example", 200, 200, 60,
+        "unknown", 0, 24,
+        {"content-security-policy": f"frame-ancestors https://partner.example:{port}"},
     )
 
     assert "content-security-policy" in check.security_headers

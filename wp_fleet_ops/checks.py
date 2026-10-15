@@ -330,7 +330,7 @@ def _security_header_is_effective(name: str, value: str) -> bool:
             host_source = re.compile(
                 r"(?:[a-z][a-z0-9+.-]*://)?"
                 rf"(?:\*\.)?{dns_label}(?:\.{dns_label})*\.?"
-                r"(?::(?:[0-9]+|\*))?"
+                r"(?::(?P<port>[0-9]+|\*))?"
                 r"(?:/(?:[a-z0-9._~!$&'()*+=:@/-]|%[0-9a-f]{2})*)?",
                 re.IGNORECASE,
             )
@@ -341,6 +341,23 @@ def _security_header_is_effective(name: str, value: str) -> bool:
                 r"(?:[a-z][a-z0-9+.-]*://)?\*\.[a-z0-9-]+\.?(?::(?:[0-9]+|\*))?(?:/.*)?",
                 re.IGNORECASE,
             )
+
+            def restricted_source(source: str) -> bool:
+                if source in {"'self'", "'none'"}:
+                    return True
+                match = host_source.fullmatch(source)
+                if match is None or top_level_wildcard.fullmatch(source):
+                    return False
+                port = match.group("port")
+                if port is None or port == "*":
+                    return True
+                # CSP ports must identify a usable TCP port. Avoid int() on
+                # untrusted arbitrarily long strings; leading zeros are valid.
+                digits = port.lstrip("0")
+                return bool(digits) and (
+                    len(digits) < 5 or (len(digits) == 5 and digits <= "65535")
+                )
+
             sources = parts[1:]
             # CSP keyword sources use ASCII case-insensitive matching. Preserve
             # the original header for evidence, but compare the keywords in one
@@ -349,14 +366,7 @@ def _security_header_is_effective(name: str, value: str) -> bool:
             return (
                 bool(sources)
                 and ("'none'" not in normalized_sources or normalized_sources == ["'none'"])
-                and all(
-                    source in {"'self'", "'none'"}
-                    or (
-                        host_source.fullmatch(source) is not None
-                        and top_level_wildcard.fullmatch(source) is None
-                    )
-                    for source in normalized_sources
-                )
+                and all(restricted_source(source) for source in normalized_sources)
             )
         return False
     return False
