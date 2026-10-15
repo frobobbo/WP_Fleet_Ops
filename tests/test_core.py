@@ -1087,6 +1087,19 @@ def test_store_combines_sites_care_checks_and_snapshots(tmp_path):
     assert store.latest_dashboard()[0]["name"] == "Church"
 
 
+def test_store_lists_same_named_sites_in_url_order(tmp_path):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+    store.upsert_site("Same Name", "https://z.example")
+    store.upsert_site("Same Name", "https://a.example")
+    store.upsert_site("Earlier Name", "https://middle.example")
+
+    assert [(site["name"], site["url"]) for site in store.list_sites()] == [
+        ("Earlier Name", "https://middle.example"),
+        ("Same Name", "https://a.example"),
+        ("Same Name", "https://z.example"),
+    ]
+
+
 def test_store_rolls_back_entire_paired_observation_when_care_insert_fails(tmp_path):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     fleet_site = FleetSite(

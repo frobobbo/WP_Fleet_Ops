@@ -130,7 +130,9 @@ class FleetOpsStore:
 
     def list_sites(self) -> list[dict]:
         with self._connect() as con:
-            return [dict(r) for r in con.execute("select * from sites order by name")]
+            # A display name is not unique. Use the canonical URL to keep
+            # directories and exports stable regardless of insertion order.
+            return [dict(r) for r in con.execute("select * from sites order by name, url")]
 
     def health_counts(self) -> dict[str, int]:
         """Return persistence counters after proving the database is writable.
