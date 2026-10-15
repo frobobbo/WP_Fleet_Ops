@@ -137,9 +137,11 @@ def _score_sort_value(score: int | None) -> int:
     return score if score is not None else 101
 
 
-def _parse_captured_at(value: str | None) -> datetime | None:
+def _parse_captured_at(value: object) -> datetime | None:
     """Parse SQLite or ISO timestamps into timezone-aware UTC datetimes."""
-    if not value:
+    # Imported or damaged observation rows can contain non-text values. Treat
+    # these as invalid evidence rather than crashing dashboard/report requests.
+    if not isinstance(value, str) or not value:
         return None
     # fromisoformat accepts date-only and minute-precision values, inventing
     # midnight or second zero. Incomplete observation times cannot prove that a

@@ -34,6 +34,18 @@ def valid_snapshot_payload(**overrides):
     return payload
 
 
+@pytest.mark.parametrize("bad_timestamp", [0, 1.5, b"2026-01-01 00:00:00", True])
+def test_non_text_observation_timestamp_is_invalid_not_a_server_error(tmp_path, bad_timestamp):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    now = datetime.now(timezone.utc)
+    assert main._snapshot_freshness(bad_timestamp, now, 168) == ("invalid", None)
+    assert main._latest_trusted_timestamp(
+        [{"captured_at": bad_timestamp}], "captured_at", now,
+    ) is None
+
+
 def test_manual_not_modified_response_marks_paired_uptime_down(tmp_path):
     client = make_test_client(tmp_path)
     response = client.post(
