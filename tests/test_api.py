@@ -2715,6 +2715,21 @@ def test_stale_critical_snapshot_does_not_pollute_current_priority_views(tmp_pat
     assert kpis["recommended_focus"] == "Refresh stale fleet snapshots before the next operations review."
 
 
+def test_api_site_watchlist_empty_inventory_is_unverified(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/site-watchlist")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tracked_site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["watchlist_count"] == 0
+    assert payload["status"] == "yellow"
+    assert payload["paired_coverage_percent"] == 0
+
+
 def test_api_site_watchlist_surfaces_missing_snapshot_evidence(tmp_path):
     client = make_test_client(tmp_path)
     response = client.post(

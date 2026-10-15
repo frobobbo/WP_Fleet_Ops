@@ -1480,7 +1480,9 @@ def api_site_watchlist(client: str | None = None):
     monitoring_gap_count = len(tracked_sites) - current_evidence_count
     sites = _site_watchlist_rows(dashboard_rows, now, care_checks)
     critical_watch_count = sum(1 for site in sites if site["watch_status"] == "critical")
-    status = "red" if critical_watch_count else ("yellow" if sites or monitoring_gap_count else "green")
+    status = "red" if critical_watch_count else (
+        "yellow" if not tracked_sites or sites or monitoring_gap_count else "green"
+    )
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
@@ -1498,7 +1500,7 @@ def api_site_watchlist(client: str | None = None):
         "paired_coverage_percent": (
             round((current_evidence_count / len(tracked_sites)) * 100)
             if tracked_sites
-            else 100
+            else 0
         ),
         "watchlist_count": len(sites),
         "critical_watch_count": critical_watch_count,
