@@ -202,7 +202,7 @@ class FleetOpsStore:
         select s.name, s.url, s.client, c.* from care_checks c
         join sites s on s.id=c.site_id
         where c.id in (select max(id) from care_checks group by site_id)
-        order by s.name
+        order by s.name, s.url
         """
         with self._connect() as con:
             rows = []
@@ -342,7 +342,7 @@ class FleetOpsStore:
         select s.name,s.url,s.client, sn.* from snapshots sn
         join sites s on s.id=sn.site_id
         where sn.id in (select max(id) from snapshots group by site_id)
-        order by sn.score asc, s.name
+        order by sn.score asc, s.name, s.url
         """
         with self._connect() as con:
             rows = []
