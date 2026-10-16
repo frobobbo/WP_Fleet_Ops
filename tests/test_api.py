@@ -714,6 +714,27 @@ def test_api_report_does_not_mark_empty_inventory_healthy(tmp_path):
     assert client.get("/api/summary").json()["overall_status"] == "yellow"
 
 
+def test_api_report_distinguishes_unmonitored_sites_from_empty_inventory(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/sites",
+        data={"name": "Awaiting Check", "url": "https://awaiting-check.example"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    payload = client.get("/api/report").json()
+    assert payload["tracked_site_count"] == 1
+    assert payload["site_count"] == payload["care_check_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["status"] == "yellow"
+    assert "Health unverified: tracked sites have no current paired observations." in payload["report"]
+    assert "Health unverified: no sites are registered" not in payload["report"]
+    assert "Awaiting Check (Unassigned): fleet snapshot missing; care check missing." in payload["report"]
+    assert client.get("/report").text.count(
+        "Health unverified: tracked sites have no current paired observations."
+    ) == 2
+
+
 def test_api_report_status_reflects_current_site_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

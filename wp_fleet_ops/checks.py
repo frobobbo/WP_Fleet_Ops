@@ -595,7 +595,7 @@ def fetch_basic_site_check(
     )
 
 
-def summarize_care_report(checks: list[SiteCheck]) -> str:
+def summarize_care_report(checks: list[SiteCheck], *, tracked_site_count: int = 0) -> str:
     total = len(checks)
     green = sum(1 for c in checks if c.status == "green")
     yellow = sum(1 for c in checks if c.status == "yellow")
@@ -608,11 +608,18 @@ def summarize_care_report(checks: list[SiteCheck]) -> str:
         "",
     ]
     if not checks:
-        lines += [
-            "Health unverified: no sites are registered for this report.",
-            "Register a site and capture a care check before reporting health.",
-            "",
-        ]
+        if tracked_site_count:
+            lines += [
+                "Health unverified: tracked sites have no current paired observations.",
+                "Capture a fresh combined check before reporting health.",
+                "",
+            ]
+        else:
+            lines += [
+                "Health unverified: no sites are registered for this report.",
+                "Register a site and capture a care check before reporting health.",
+                "",
+            ]
     for c in checks:
         heading = "Healthy" if c.status == "green" else ("Maintenance scheduled" if c.status == "yellow" else "Needs attention")
         lines += [

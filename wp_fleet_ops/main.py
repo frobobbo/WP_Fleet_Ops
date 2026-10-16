@@ -6759,9 +6759,13 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         for row in current_fleet_rows
     }
     report_text = (
-        summarize_care_report(care_checks)
+        summarize_care_report(care_checks, tracked_site_count=len(tracked_sites))
         + "\n---\n\n"
-        + generate_maintenance_report(fleet_sites, saved_evidence=saved_evidence)
+        + generate_maintenance_report(
+            fleet_sites,
+            saved_evidence=saved_evidence,
+            tracked_site_count=len(tracked_sites),
+        )
     )
     if evidence_gaps:
         evidence_gaps.sort(key=lambda row: (row["client"].lower(), row["name"].lower()))

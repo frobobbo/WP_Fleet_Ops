@@ -143,6 +143,7 @@ def generate_maintenance_report(
     sites: list[FleetSite],
     *,
     saved_evidence: Mapping[str, tuple[int, list[Alert]]] | None = None,
+    tracked_site_count: int = 0,
 ) -> str:
     lines = ["# WP FleetOps Maintenance Report", "", f"Generated: {datetime.now(timezone.utc).isoformat()}", ""]
     # Persisted fetches retain which header is missing. Recomputing alerts from
@@ -159,11 +160,18 @@ def generate_maintenance_report(
         "",
     ]
     if not sites:
-        lines += [
-            "Health unverified: no sites are registered for this report.",
-            "Register a site and capture a fleet snapshot before reporting health.",
-            "",
-        ]
+        if tracked_site_count:
+            lines += [
+                "Health unverified: tracked sites have no current paired observations.",
+                "Capture a fresh combined check before reporting health.",
+                "",
+            ]
+        else:
+            lines += [
+                "Health unverified: no sites are registered for this report.",
+                "Register a site and capture a fleet snapshot before reporting health.",
+                "",
+            ]
     for site, score, alerts in scored:
         if score < 65 or any(alert.severity == "critical" for alert in alerts):
             state = "Needs attention"
