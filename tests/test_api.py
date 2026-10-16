@@ -735,6 +735,31 @@ def test_api_report_distinguishes_unmonitored_sites_from_empty_inventory(tmp_pat
     ) == 2
 
 
+def test_report_gaps_identify_same_named_sites_by_url_in_stable_order(tmp_path):
+    from wp_fleet_ops.checks import markdown_literal
+
+    client = make_test_client(tmp_path)
+    urls = ["https://z-gap.example", "https://a-gap.example/path*review*"]
+    for url in urls:
+        assert client.post(
+            "/sites",
+            data={"name": "Twin Gap", "url": url, "client": "Shared Client"},
+            follow_redirects=False,
+        ).status_code == 303
+
+    structured = client.get("/api/report").json()
+    assert structured["monitoring_gap_count"] == 2
+    assert structured["status"] == "yellow"
+    gap_lines = [
+        line for line in structured["report"].splitlines()
+        if line.startswith("- Twin Gap (Shared Client):")
+    ]
+    assert len(gap_lines) == 2
+    for url, line in zip(sorted(urls), gap_lines):
+        assert f"Site URL: {markdown_literal(url)}." in line
+    assert client.get("/report").text.splitlines()[-len(gap_lines):] == gap_lines
+
+
 def test_api_report_status_reflects_current_site_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

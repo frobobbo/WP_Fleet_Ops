@@ -6713,6 +6713,7 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         evidence_gaps.append(
             {
                 "name": site["name"],
+                "url": site["url"],
                 "client": site.get("client") or "Unassigned",
                 "snapshot_freshness": snapshot_freshness,
                 "care_check_freshness": care_check_freshness,
@@ -6768,7 +6769,7 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         )
     )
     if evidence_gaps:
-        evidence_gaps.sort(key=lambda row: (row["client"].lower(), row["name"].lower()))
+        evidence_gaps.sort(key=lambda row: (row["client"].lower(), row["name"].lower(), row["url"]))
         gap_lines = [
             "# Monitoring Evidence Gaps",
             "",
@@ -6780,6 +6781,7 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
                 f"- {markdown_literal(gap['name'])} ({markdown_literal(gap['client'])}): "
                 f"fleet snapshot {gap['snapshot_freshness']}; "
                 f"care check {gap['care_check_freshness']}. "
+                f"Site URL: {markdown_literal(gap['url'])}. "
                 "Capture a fresh combined check before publishing site health."
             )
         report_text += "\n---\n\n" + "\n".join(gap_lines) + "\n"
