@@ -1258,7 +1258,10 @@ def api_sla_breaches(client: str | None = None):
         for site in sites
         if site["sla_status"] == "breached" and site["highest_severity"] == "warning"
     )
-    status = "red" if critical_breach_count else ("yellow" if warning_breach_count or unknown_count else "green")
+    # With no tracked sites, an empty breach list cannot prove SLA compliance.
+    status = "red" if critical_breach_count else (
+        "yellow" if not site_count or warning_breach_count or unknown_count else "green"
+    )
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
@@ -1272,7 +1275,7 @@ def api_sla_breaches(client: str | None = None):
         "care_check_gap_count": site_count - current_care_check_count,
         "monitoring_gap_count": unknown_count,
         "unknown_count": unknown_count,
-        "sla_evidence_percent": round((current_evidence_count / site_count) * 100) if site_count else 100,
+        "sla_evidence_percent": round((current_evidence_count / site_count) * 100) if site_count else 0,
         "breach_count": breach_count,
         "critical_breach_count": critical_breach_count,
         "warning_breach_count": warning_breach_count,

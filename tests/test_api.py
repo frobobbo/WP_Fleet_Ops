@@ -2132,6 +2132,20 @@ def test_api_operator_handoff_does_not_escalate_healthy_clients(tmp_path):
     assert payload["handoff_notes"] == ["No client-level risks require handoff at this time."]
 
 
+def test_api_sla_breaches_empty_inventory_is_unverified(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/sla-breaches")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["sla_evidence_percent"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
