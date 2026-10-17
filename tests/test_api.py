@@ -1828,6 +1828,18 @@ def test_api_site_directory_rejects_unknown_client(tmp_path):
     }
 
 
+def test_api_clients_empty_inventory_does_not_claim_full_coverage(tmp_path):
+    client = make_test_client(tmp_path)
+
+    payload = client.get("/api/clients").json()
+
+    assert payload["client_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["paired_coverage_percent"] == 0
+    assert payload["clients"] == []
+
+
 def test_api_clients_rolls_up_account_health(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

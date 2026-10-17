@@ -1018,8 +1018,9 @@ def api_clients():
         "care_check_gap_count": sum(client["care_check_gap_count"] for client in clients),
         "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": site_count - current_evidence_count,
+        # No registered clients means coverage is unverified, not complete.
         "paired_coverage_percent": (
-            round((current_evidence_count / site_count) * 100) if site_count else 100
+            round((current_evidence_count / site_count) * 100) if site_count else 0
         ),
         "clients": clients,
     }
