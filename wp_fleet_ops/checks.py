@@ -627,6 +627,7 @@ def summarize_care_report(checks: list[SiteCheck], *, tracked_site_count: int = 
             "",
             f"Score: {c.score}/100",
             f"URL: {markdown_literal(c.url)}",
+            f"WordPress version: {markdown_literal(c.wordpress_version)}",
             # The summary starts with the site name. Escape that label once,
             # without also escaping matching punctuation in the prose.
             c.summary.replace(c.name, markdown_literal(c.name), 1),

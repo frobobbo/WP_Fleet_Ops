@@ -109,6 +109,21 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_care_report_includes_wordpress_version_as_literal_markdown(tmp_path):
+    client = make_test_client(tmp_path)
+    version = "6.8 [preview](https://example.com)"
+    assert client.post(
+        "/care/manual-check",
+        data={"name": "Versioned Site", "url": "https://versioned.example", "wordpress_version": version},
+        follow_redirects=False,
+    ).status_code == 303
+
+    expected = r"WordPress version: 6\.8 \[preview\]\(https://example\.com\)"
+    assert expected in client.get("/report").text
+    assert expected in client.get("/api/report").json()["report"]
+    assert f"WordPress version: {version}" not in client.get("/report").text
+
+
 def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
     client = make_test_client(tmp_path)
     site_name = "WP **Approved** <fake>"
