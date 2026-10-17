@@ -40,3 +40,7 @@ spec:
           printf '%s' "${health_response}" | grep -Fq "\"revision\":\"${expected_revision}\""
           wget -qO- "${base_url}/" | grep -q 'WP FleetOps'
           wget -qO- "${base_url}/report" | grep -q 'WP FleetOps Maintenance Report'
+          api_report="$(wget -qO- "${base_url}/api/report")"
+          printf '%s' "${api_report}" | grep -Fq 'WP FleetOps Maintenance Report'
+          printf '%s' "${api_report}" | grep -Eq '"tracked_site_count":[0-9]+'
+          printf '%s' "${api_report}" | grep -Eq '"monitoring_gap_count":[0-9]+'
