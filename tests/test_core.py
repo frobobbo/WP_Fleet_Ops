@@ -230,13 +230,14 @@ def test_helm_connection_test_checks_required_app_surfaces():
     assert 'grep -Fq "\\\"revision\\\":\\\"${expected_revision}\\\""' in helm_test
     assert "grep -Fq '\"revision\":\"${expected_revision}\"'" not in helm_test
     assert '"${base_url}/ready"' in helm_test
+    assert '"${base_url}/health"' in helm_test
+    assert '"status":"ok"' in helm_test
     assert '"${base_url}/"' in helm_test
     assert '"${base_url}/report"' in helm_test
     assert "WP FleetOps Maintenance Report" in helm_test
     assert '"helm.sh/hook-delete-policy": before-hook-creation' in helm_test
     assert "hook-succeeded" not in helm_test
     assert "activeDeadlineSeconds: 120" in helm_test
-    assert "/health" not in helm_test
 
 
 def test_helm_connection_test_uses_restricted_security_context():
