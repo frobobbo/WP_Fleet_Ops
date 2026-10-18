@@ -1659,6 +1659,27 @@ def test_api_site_directory_empty_inventory_has_no_coverage(tmp_path):
     assert payload["sites"] == []
 
 
+def test_api_site_directory_orders_same_named_sites_by_url(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    for url in ("https://z-directory.example", "https://a-directory.example"):
+        assert client.post(
+            "/sites",
+            data={"name": "Shared Directory Name", "url": url, "client": "Same Client"},
+            follow_redirects=False,
+        ).status_code == 303
+
+    # A datastore or import can return ties in any order. The public directory
+    # should preserve a stable ordering independently of that internal order.
+    import wp_fleet_ops.main as main
+    unordered = sorted(main.store.list_sites(), key=lambda site: site["url"], reverse=True)
+    monkeypatch.setattr(main.store, "list_sites", lambda: unordered)
+
+    sites = client.get("/api/site-directory").json()["sites"]
+    assert [site["url"] for site in sites] == [
+        "https://a-directory.example", "https://z-directory.example",
+    ]
+
+
 def test_api_site_directory_includes_sites_missing_initial_snapshots(tmp_path):
     client = make_test_client(tmp_path)
     client.post("/sites", data={"name": "Needs First Snapshot", "url": "https://needs-first.example", "client": "Client Missing"}, follow_redirects=False)

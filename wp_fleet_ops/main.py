@@ -673,7 +673,11 @@ def api_site_directory(client: str | None = None):
                     ),
                 }
             )
-    sites.sort(key=lambda row: (row["monitoring_status"] != "missing_snapshot", row["client"], row["name"]))
+    # A URL disambiguates same-named sites even if the store changes row order.
+    sites.sort(key=lambda row: (
+        row["monitoring_status"] != "missing_snapshot",
+        row["client"], row["name"], row["url"],
+    ))
     current_evidence_count = sum(
         1 for site in sites if site["evidence_status"] == "current"
     )
