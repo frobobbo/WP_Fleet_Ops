@@ -10461,6 +10461,26 @@ def test_api_monitoring_coverage_warns_for_an_empty_fleet(tmp_path):
     assert matrix["paired_coverage_percent"] == 0
 
 
+def test_monitoring_gaps_order_same_named_sites_by_url(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    for url in ("https://a-coverage-gap.example", "https://z-coverage-gap.example"):
+        assert client.post(
+            "/sites",
+            data={"name": "Shared Gap", "url": url, "client": "Same Client"},
+            follow_redirects=False,
+        ).status_code == 303
+
+    import wp_fleet_ops.main as main
+    reversed_sites = sorted(main.store.list_sites(), key=lambda site: site["url"], reverse=True)
+    monkeypatch.setattr(main.store, "list_sites", lambda: reversed_sites)
+
+    expected = ["https://a-coverage-gap.example", "https://z-coverage-gap.example"]
+    coverage = client.get("/api/monitoring-coverage").json()
+    assert [site["url"] for site in coverage["sites"]] == expected
+    workload = client.get("/api/client-workload").json()
+    assert [site["url"] for site in workload["monitoring_clients"][0]["sites"]] == expected
+
+
 def test_api_monitoring_coverage_filters_by_client_and_unassigned(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

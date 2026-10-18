@@ -804,6 +804,7 @@ def api_monitoring_coverage(client: str | None = None):
             site["coverage_status"] == "current",
             site["client"].lower(),
             site["name"].lower(),
+            site["url"],
         )
     )
     current_evidence_count = sum(1 for site in sites if site["coverage_status"] == "current")
@@ -1613,7 +1614,7 @@ def _client_monitoring_gap_rows(coverage_sites: list[dict]) -> list[dict]:
 
     rows = list(clients.values())
     for row in rows:
-        row["sites"].sort(key=lambda site: site["name"].lower())
+        row["sites"].sort(key=lambda site: (site["name"].lower(), site["url"]))
     rows.sort(
         key=lambda row: (
             -row["monitoring_gap_count"],
