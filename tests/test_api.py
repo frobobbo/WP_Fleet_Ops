@@ -124,6 +124,20 @@ def test_care_report_includes_wordpress_version_as_literal_markdown(tmp_path):
     assert f"WordPress version: {version}" not in client.get("/report").text
 
 
+def test_care_report_identifies_when_each_site_was_checked(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/care/manual-check",
+        data={"name": "Checked Site", "url": "https://checked.example"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    checked_at = client.get("/api/care-check-history").json()["care_checks"][0]["checked_at"]
+    assert checked_at.endswith("+00:00")
+    for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
+        assert f"Checked at: {checked_at}" in report
+
+
 def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
     client = make_test_client(tmp_path)
     site_name = "WP **Approved** <fake>"
