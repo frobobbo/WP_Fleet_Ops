@@ -274,6 +274,28 @@ def test_dashboard_rows_require_current_paired_evidence_for_health_claims(tmp_pa
     assert '<span class="tag green">green</span>' not in response.text
 
 
+def test_actions_order_equal_priority_same_named_sites_by_url(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    for url in ("https://z-actions.example", "https://a-actions.example"):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name="Shared Action Name", url=url, client="Same Client", ssl_days="20",
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+
+    import wp_fleet_ops.main as main
+    reverse_rows = sorted(main.store.latest_dashboard(), key=lambda row: row["url"], reverse=True)
+    monkeypatch.setattr(main.store, "latest_dashboard", lambda: reverse_rows)
+
+    actions = client.get("/api/actions").json()["actions"]
+    assert [action["url"] for action in actions] == [
+        "https://a-actions.example", "https://z-actions.example",
+    ]
+    assert all(action["severity"] == "warning" for action in actions)
+
+
 def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_path):
     make_test_client(tmp_path)
     import wp_fleet_ops.main as main

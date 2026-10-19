@@ -1322,6 +1322,7 @@ def _current_actions(
             action["score"],
             action["client"].lower(),
             action["site"].lower(),
+            action["url"],
         )
     )
     return actions
