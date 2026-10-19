@@ -109,6 +109,27 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+def test_text_report_counts_monitoring_evidence_gaps(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Covered", url="https://covered.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        "/sites",
+        data={"name": "Needs Check", "url": "https://needs-check.example"},
+        follow_redirects=False,
+    ).status_code == 303
+
+    structured = client.get("/api/report").json()
+    assert structured["monitoring_gap_count"] == 1
+    assert structured["site_count"] == 1
+    assert "Monitoring gaps: 1" in structured["report"]
+    assert "Monitoring gaps: 1" in client.get("/report").text
+    assert "Needs Check" in structured["report"]
+
+
 def test_care_report_includes_wordpress_version_as_literal_markdown(tmp_path):
     client = make_test_client(tmp_path)
     version = "6.8 [preview](https://example.com)"

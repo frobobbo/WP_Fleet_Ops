@@ -6779,6 +6779,8 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         gap_lines = [
             "# Monitoring Evidence Gaps",
             "",
+            f"Monitoring gaps: {len(evidence_gaps)}",
+            "",
             "The following sites are excluded from current health claims until both monitoring sources are refreshed:",
             "",
         ]
