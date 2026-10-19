@@ -929,6 +929,18 @@ def test_fleet_report_headings_respect_alert_severity_even_when_score_is_healthy
     assert "Critical sites: 1" in report
 
 
+def test_fleet_report_counts_red_score_without_critical_alert_as_critical_site():
+    # Several warning-level issues can push the combined score into red even
+    # when no individual alert is critical. The summary must match the heading.
+    site = FleetSite("Compounded Risk", "https://compounded.example", True, 10, 4, 24, 1500, 0)
+    assert calculate_health_score(site) < 65
+    assert all(alert.severity != "critical" for alert in generate_alerts(site))
+
+    report = generate_maintenance_report([site])
+    assert "## Compounded Risk — Needs attention" in report
+    assert "Critical sites: 1" in report
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

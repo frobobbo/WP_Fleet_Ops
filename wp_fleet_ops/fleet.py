@@ -156,7 +156,7 @@ def generate_maintenance_report(
     ]
     lines += [
         f"Sites monitored: {len(sites)}",
-        f"Critical sites: {sum(1 for _, _, a in scored if any(x.severity == 'critical' for x in a))}",
+        f"Critical sites: {sum(1 for _, score, alerts in scored if score < 65 or any(alert.severity == 'critical' for alert in alerts))}",
         "",
     ]
     if not sites:
