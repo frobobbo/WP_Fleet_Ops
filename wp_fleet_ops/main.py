@@ -6772,6 +6772,7 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         + generate_maintenance_report(
             fleet_sites,
             saved_evidence=saved_evidence,
+            captured_at_by_url={row["url"]: row["captured_at"] for row in current_fleet_rows},
             tracked_site_count=len(tracked_sites),
         )
     )

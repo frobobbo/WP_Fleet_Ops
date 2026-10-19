@@ -158,6 +158,20 @@ def test_care_report_identifies_when_each_site_was_checked(tmp_path):
     for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
         assert f"Checked at: {checked_at}" in report
 
+def test_fleet_report_identifies_when_each_snapshot_was_captured(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Captured Site", url="https://captured.example"),
+        follow_redirects=False,
+    ).status_code == 303
+
+    captured_at = client.get("/api/snapshot-history").json()["snapshots"][0]["captured_at"]
+    # SQLite CURRENT_TIMESTAMP is UTC without a timezone suffix.
+    for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
+        fleet_report = report.split("# WP FleetOps Maintenance Report", 1)[1]
+        assert f"Captured at: {captured_at} UTC" in fleet_report
+
 
 def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
     client = make_test_client(tmp_path)

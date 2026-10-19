@@ -143,6 +143,7 @@ def generate_maintenance_report(
     sites: list[FleetSite],
     *,
     saved_evidence: Mapping[str, tuple[int, list[Alert]]] | None = None,
+    captured_at_by_url: Mapping[str, str] | None = None,
     tracked_site_count: int = 0,
 ) -> str:
     lines = ["# WP FleetOps Maintenance Report", "", f"Generated: {datetime.now(timezone.utc).isoformat()}", ""]
@@ -179,7 +180,12 @@ def generate_maintenance_report(
             state = "Watch"
         else:
             state = "Healthy"
-        lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}", ""]
+        lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}"]
+        if captured_at_by_url is not None:
+            # Snapshot timestamps are stored by SQLite CURRENT_TIMESTAMP in UTC
+            # without an offset; label the timezone explicitly in exports.
+            lines.append(f"Captured at: {captured_at_by_url[site.url]} UTC")
+        lines.append("")
         lines += ["Recommended actions:"]
         lines += [
             f"- [{a.severity}] " + (
