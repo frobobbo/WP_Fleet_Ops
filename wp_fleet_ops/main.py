@@ -132,6 +132,13 @@ def _dashboard_status(score: int) -> str:
     return "green" if score >= 85 else ("yellow" if score >= 65 else "red")
 
 
+def _alert_aware_status(score: int, alerts: list[dict]) -> str:
+    """A critical finding overrides a healthy numerical snapshot score."""
+    if any(alert.get("severity") == "critical" for alert in alerts):
+        return "red"
+    return _dashboard_status(score)
+
+
 def _score_sort_value(score: int | None) -> int:
     """Keep unknown current scores sortable without presenting them as healthy."""
     return score if score is not None else 101
@@ -437,8 +444,8 @@ def _summary_payload(
         "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": monitoring_gap_count,
         "paired_coverage_percent": paired_coverage_percent,
-        "healthy_sites": sum(1 for row in current_rows if row["score"] >= 85),
-        "needs_attention": sum(1 for row in current_rows if _dashboard_status(row["score"]) == "red"),
+        "healthy_sites": sum(1 for row in current_rows if _alert_aware_status(row["score"], row["alerts"]) == "green"),
+        "needs_attention": sum(1 for row in current_rows if _alert_aware_status(row["score"], row["alerts"]) == "red"),
         "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,
@@ -532,7 +539,7 @@ def api_sites(client: str | None = None):
         evidence_is_current = (
             freshness == "current" and care_check_freshness == "current"
         )
-        observed_status = _dashboard_status(row["score"])
+        observed_status = _alert_aware_status(row["score"], row["alerts"])
         observed_critical_alerts = sum(
             1 for alert in row["alerts"] if alert.get("severity") == "critical"
         )
@@ -936,8 +943,9 @@ def api_clients():
             summary["lowest_score"] if summary["lowest_score"] is not None else row["score"],
             row["score"],
         )
-        summary["healthy_sites"] += 1 if row["score"] >= 85 else 0
-        summary["needs_attention"] += 1 if _dashboard_status(row["score"]) == "red" else 0
+        site_status = _alert_aware_status(row["score"], row["alerts"])
+        summary["healthy_sites"] += site_status == "green"
+        summary["needs_attention"] += site_status == "red"
         summary["critical_alerts"] += sum(
             1 for alert in row["alerts"] if alert.get("severity") == "critical"
         )

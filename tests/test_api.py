@@ -1251,6 +1251,37 @@ def test_api_summary_rejects_unknown_client(tmp_path):
     }
 
 
+def test_critical_update_alert_is_not_counted_as_a_healthy_site(tmp_path):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Pending Updates",
+            url="https://pending-updates.example",
+            client="Maintenance Client",
+            wp_updates="5",
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    summary = client.get("/api/summary").json()
+    scoped = client.get("/api/summary", params={"client": "Maintenance Client"}).json()
+    site = client.get("/api/sites").json()["sites"][0]
+    account = client.get("/api/clients").json()["clients"][0]
+
+    assert summary["average_score"] == 85
+    for rollup in (summary, scoped, account):
+        assert rollup["healthy_sites"] == 0
+        assert rollup["needs_attention"] == 1
+        assert rollup["critical_alerts"] == 1
+    assert summary["overall_status"] == scoped["overall_status"] == "red"
+    assert account["status"] == site["status"] == "red"
+    assert site["score"] == 85
+    assert site["critical_alerts"] == 1
+    assert "Pending Updates — Needs attention" in client.get("/report").text
+
+
 def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
