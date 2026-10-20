@@ -395,6 +395,20 @@ def _summary_payload(
     observed_average_score = (
         round(observed_score_total / len(fleet_rows)) if fleet_rows else None
     )
+    # Snapshot score and care status may disagree after a corrected check.
+    # Keep average_score as the measured fleet score, but count site health
+    # using both current halves of the paired evidence.
+    care_status_by_url = {check["url"]: check["status"] for check in current_care_checks}
+    site_statuses = []
+    for row in current_rows:
+        fleet_status = _alert_aware_status(row["score"], row["alerts"])
+        care_status = care_status_by_url[row["url"]]
+        if "red" in (fleet_status, care_status):
+            site_statuses.append("red")
+        elif "yellow" in (fleet_status, care_status):
+            site_statuses.append("yellow")
+        else:
+            site_statuses.append("green")
     # A healthy fleet average or snapshot must not mask a current care finding.
     # Use only paired, fresh evidence; stale or unpaired historical scores must
     # not escalate the live status (their coverage gaps remain yellow below).
@@ -444,8 +458,8 @@ def _summary_payload(
         "current_evidence_count": current_evidence_count,
         "monitoring_gap_count": monitoring_gap_count,
         "paired_coverage_percent": paired_coverage_percent,
-        "healthy_sites": sum(1 for row in current_rows if _alert_aware_status(row["score"], row["alerts"]) == "green"),
-        "needs_attention": sum(1 for row in current_rows if _alert_aware_status(row["score"], row["alerts"]) == "red"),
+        "healthy_sites": site_statuses.count("green"),
+        "needs_attention": site_statuses.count("red"),
         "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,

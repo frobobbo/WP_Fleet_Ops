@@ -1126,6 +1126,11 @@ def test_api_summary_does_not_hide_a_current_risky_care_check(tmp_path, care_sco
     assert summary["average_score"] == 100
     assert summary["client_risks"] == (1 if care_status == "red" else 0)
     assert summary["overall_status"] == care_status
+    # A current care finding must also remove a site from the healthy count;
+    # red care evidence counts as a site needing attention even if the fleet
+    # snapshot score remains 100.
+    assert summary["healthy_sites"] == 0
+    assert summary["needs_attention"] == (1 if care_status == "red" else 0)
 
 
 @pytest.mark.parametrize(
