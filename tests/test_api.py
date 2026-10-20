@@ -1133,6 +1133,28 @@ def test_api_summary_does_not_hide_a_current_risky_care_check(tmp_path, care_sco
     assert summary["needs_attention"] == (1 if care_status == "red" else 0)
 
 
+@pytest.mark.parametrize("care_status", ["red", "yellow"])
+def test_site_apis_reflect_current_care_risk_without_changing_snapshot_score(tmp_path, care_status):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Conflicting Site", url="https://site-conflict.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set status = ?", (care_status,))
+
+    assert client.get("/api/summary").json()["overall_status"] == care_status
+    for path in ("/api/sites", "/api/site-directory"):
+        site = client.get(path).json()["sites"][0]
+        assert site["evidence_status"] == "current"
+        assert site["status"] == care_status
+        assert site["score"] == 100
+        assert site["observed_status"] == "green"
+    directory_site = client.get("/api/site-directory").json()["sites"][0]
+    assert directory_site["recommended_action"] != "Continue normal monitoring cadence."
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_status"),
     [
