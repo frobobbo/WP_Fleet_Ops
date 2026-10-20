@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from ipaddress import AddressValueError, IPv4Address, IPv6Address
@@ -595,11 +596,22 @@ def fetch_basic_site_check(
     )
 
 
-def summarize_care_report(checks: list[SiteCheck], *, tracked_site_count: int = 0) -> str:
+def summarize_care_report(
+    checks: list[SiteCheck],
+    *,
+    tracked_site_count: int = 0,
+    paired_fleet_status_by_url: Mapping[str, str] | None = None,
+) -> str:
     total = len(checks)
-    green = sum(1 for c in checks if c.status == "green")
-    yellow = sum(1 for c in checks if c.status == "yellow")
-    red = sum(1 for c in checks if c.status == "red")
+    severity = {"green": 0, "yellow": 1, "red": 2}
+    paired_fleet_status_by_url = paired_fleet_status_by_url or {}
+    statuses = [
+        max((c.status, paired_fleet_status_by_url.get(c.url, "green")), key=severity.__getitem__)
+        for c in checks
+    ]
+    green = statuses.count("green")
+    yellow = statuses.count("yellow")
+    red = statuses.count("red")
     lines = [
         "# Monthly WordPress Care Report",
         "",
@@ -620,8 +632,13 @@ def summarize_care_report(checks: list[SiteCheck], *, tracked_site_count: int = 
                 "Register a site and capture a care check before reporting health.",
                 "",
             ]
-    for c in checks:
-        heading = "Healthy" if c.status == "green" else ("Maintenance scheduled" if c.status == "yellow" else "Needs attention")
+    for c, status in zip(checks, statuses):
+        heading = "Healthy" if status == "green" else ("Maintenance scheduled" if status == "yellow" else "Needs attention")
+        summary = (
+            c.summary.replace(c.name, markdown_literal(c.name), 1)
+            if status == c.status
+            else "Paired fleet risk escalates this care status; review the fleet findings below."
+        )
         lines += [
             f"## {markdown_literal(c.name)} — {heading}",
             "",
@@ -631,9 +648,9 @@ def summarize_care_report(checks: list[SiteCheck], *, tracked_site_count: int = 
             # Preserve the recorded ISO offset rather than labeling all stored
             # observations UTC (older or imported records may use another zone).
             f"Checked at: {c.checked_at}",
-            # The summary starts with the site name. Escape that label once,
-            # without also escaping matching punctuation in the prose.
-            c.summary.replace(c.name, markdown_literal(c.name), 1),
+            # The persisted care summary can call a good-scoring site healthy;
+            # never repeat that claim after current paired fleet evidence escalates it.
+            summary,
             "",
         ]
         if c.actions:

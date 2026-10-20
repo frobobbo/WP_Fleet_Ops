@@ -1286,6 +1286,35 @@ def test_critical_update_alert_is_not_counted_as_a_healthy_site(tmp_path):
     assert site["critical_alerts"] == 1
     assert "Pending Updates — Needs attention" in client.get("/report").text
 
+@pytest.mark.parametrize(
+    ("updates", "expected_summary", "expected_heading", "expected_status"),
+    [
+        ("2", "Healthy: 0 | Maintenance: 1 | Needs attention: 0", "Maintenance scheduled", "yellow"),
+        ("5", "Healthy: 0 | Maintenance: 0 | Needs attention: 1", "Needs attention", "red"),
+    ],
+)
+def test_care_report_does_not_call_fleet_update_alert_healthy(
+    tmp_path, updates, expected_summary, expected_heading, expected_status,
+):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Update Escalation", url="https://update-escalation.example", wp_updates=updates,
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    payload = client.get("/api/report").json()
+    report = payload["report"]
+    care_section = report.split("\n---\n", 1)[0]
+    assert expected_summary in care_section
+    assert f"## Update Escalation — {expected_heading}" in care_section
+    assert "Update Escalation looks healthy" not in care_section
+    assert "Paired fleet risk escalates this care status" in care_section
+    assert payload["status"] == expected_status
+
 
 def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow(tmp_path):
     client = make_test_client(tmp_path)

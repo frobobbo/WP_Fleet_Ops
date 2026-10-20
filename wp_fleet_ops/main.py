@@ -6789,7 +6789,16 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
         for row in current_fleet_rows
     }
     report_text = (
-        summarize_care_report(care_checks, tracked_site_count=len(tracked_sites))
+        summarize_care_report(
+            care_checks,
+            tracked_site_count=len(tracked_sites),
+            paired_fleet_status_by_url={
+                # Use the report's existing risk rules: even a warning alert
+                # escalates an otherwise green numerical score to yellow.
+                row["url"]: _combined_report_status([], [row], 0)
+                for row in current_fleet_rows
+            },
+        )
         + "\n---\n\n"
         + generate_maintenance_report(
             fleet_sites,
