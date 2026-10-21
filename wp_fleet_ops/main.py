@@ -1451,14 +1451,25 @@ def _site_watchlist_rows(
     observed_at = now or datetime.now(timezone.utc)
     rows = snapshot_rows if snapshot_rows is not None else store.latest_dashboard()
     paired_care_checks = care_checks if care_checks is not None else store.latest_care_checks()
+    care_by_url = {
+        check["url"]: check for check in paired_care_checks
+        if _snapshot_is_current(check.get("checked_at"), observed_at, SNAPSHOT_FRESHNESS_HOURS)
+    }
     for row in _current_paired_snapshot_rows(rows, paired_care_checks, observed_at):
         alerts = row["alerts"]
-        if row["score"] >= 85 and not alerts:
+        care_check = care_by_url[row["url"]]
+        care_status = care_check["status"]
+        fleet_status = _alert_aware_status(row["score"], alerts)
+        paired_status = _paired_site_status(fleet_status, care_status)
+        if paired_status == "green" and not alerts:
             continue
         top_alert = min(alerts, key=lambda alert: severity_rank.get(alert.get("severity", "info"), 99)) if alerts else None
-        watch_status = "critical" if _dashboard_status(row["score"]) == "red" else "warning"
-        if top_alert and top_alert.get("severity") == "critical":
-            watch_status = "critical"
+        watch_status = "critical" if paired_status == "red" else "warning"
+        # A clean fleet snapshot cannot hide a more severe current care finding.
+        # Prefer its own next step only when care drives the watchlist priority.
+        care_drives_priority = {"green": 0, "yellow": 1, "red": 2}[care_status] > {
+            "green": 0, "yellow": 1, "red": 2
+        }[fleet_status]
         sites.append(
             {
                 "name": row["name"],
@@ -1467,9 +1478,18 @@ def _site_watchlist_rows(
                 "score": row["score"],
                 "watch_status": watch_status,
                 "alert_count": len(alerts),
-                "top_alert": top_alert.get("message") if top_alert else "Score is below target.",
-                "top_alert_severity": top_alert.get("severity") if top_alert else watch_status,
-                "recommended_action": _recommended_action(top_alert or {}),
+                "care_status": care_status,
+                "top_alert": (
+                    "Care check needs attention." if care_drives_priority else
+                    top_alert.get("message") if top_alert else "Score is below target."
+                ),
+                "top_alert_severity": watch_status if care_drives_priority else (
+                    top_alert.get("severity") if top_alert else watch_status
+                ),
+                "recommended_action": (
+                    (care_check.get("actions") or ["Review the latest care check and resolve reported risks."])[0]
+                    if care_drives_priority else _recommended_action(top_alert or {})
+                ),
                 "latest_snapshot_at": row["captured_at"],
             }
         )

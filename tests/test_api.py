@@ -3242,6 +3242,57 @@ def test_api_site_watchlist_returns_only_attention_sites(tmp_path):
     assert payload["sites"][0]["recommended_action"]
     assert payload["sites"][1]["watch_status"] == "warning"
 
+@pytest.mark.parametrize(
+    ("care_status", "expected_watch_status"),
+    [("red", "critical"), ("yellow", "warning")],
+)
+def test_site_watchlist_includes_current_care_only_risk(
+    tmp_path, care_status, expected_watch_status,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Care Risk", url="https://care-risk.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set status = ?, actions_json = ?",
+            (care_status, '["Review the care check finding."]'),
+        )
+
+    payload = client.get("/api/site-watchlist").json()
+    assert payload["watchlist_count"] == 1
+    assert payload["critical_watch_count"] == (care_status == "red")
+    assert payload["status"] == care_status
+    assert payload["sites"][0]["score"] == 100
+    assert payload["sites"][0]["watch_status"] == expected_watch_status
+    assert payload["sites"][0]["recommended_action"] == "Review the care check finding."
+    assert payload["sites"][0]["top_alert"] == "Care check needs attention."
+
+def test_site_watchlist_prioritizes_red_care_over_fleet_warning(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Mixed Risk", url="https://mixed-risk.example", wp_updates="1",
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set status = 'red', actions_json = ?",
+            ('["Investigate the care finding first."]',),
+        )
+
+    payload = client.get("/api/site-watchlist").json()
+    assert payload["status"] == "red"
+    assert payload["critical_watch_count"] == 1
+    assert payload["sites"][0]["alert_count"] == 1
+    assert payload["sites"][0]["watch_status"] == "critical"
+    assert payload["sites"][0]["top_alert_severity"] == "critical"
+    assert payload["sites"][0]["recommended_action"] == "Investigate the care finding first."
+
 
 def test_api_client_workload_groups_open_actions_by_account(tmp_path):
     client = make_test_client(tmp_path)
