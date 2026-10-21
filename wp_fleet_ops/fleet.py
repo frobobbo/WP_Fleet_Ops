@@ -182,9 +182,12 @@ def generate_maintenance_report(
             state = "Healthy"
         lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}"]
         if captured_at_by_url is not None:
-            # Snapshot timestamps are stored by SQLite CURRENT_TIMESTAMP in UTC
-            # without an offset; label the timezone explicitly in exports.
-            lines.append(f"Captured at: {captured_at_by_url[site.url]} UTC")
+            captured_at = captured_at_by_url[site.url]
+            # SQLite CURRENT_TIMESTAMP is UTC but has no offset. Imported ISO
+            # timestamps can have their own offset; do not mislabel those UTC.
+            parsed = datetime.fromisoformat(captured_at)
+            timestamp_label = captured_at if parsed.tzinfo else f"{captured_at} UTC"
+            lines.append(f"Captured at: {timestamp_label}")
         lines.append("")
         lines += ["Recommended actions:"]
         lines += [

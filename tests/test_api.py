@@ -173,6 +173,25 @@ def test_fleet_report_identifies_when_each_snapshot_was_captured(tmp_path):
         assert f"Captured at: {captured_at} UTC" in fleet_report
 
 
+def test_fleet_report_does_not_mislabel_offset_aware_snapshot_as_utc(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Offset Snapshot", url="https://offset.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    observed_at = (datetime.now(timezone.utc) - timedelta(hours=1)).astimezone(
+        timezone(timedelta(hours=-4))
+    ).isoformat(timespec="seconds")
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set captured_at = ?", (observed_at,))
+
+    for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
+        fleet_report = report.split("# WP FleetOps Maintenance Report", 1)[1]
+        assert f"Captured at: {observed_at}" in fleet_report
+        assert f"Captured at: {observed_at} UTC" not in fleet_report
+
+
 def test_report_renders_operator_labels_as_literal_markdown(tmp_path):
     client = make_test_client(tmp_path)
     site_name = "WP **Approved** <fake>"
