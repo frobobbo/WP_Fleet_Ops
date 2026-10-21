@@ -2145,6 +2145,11 @@ def test_api_clients_reflects_current_risky_care_check(tmp_path, care_status):
     assert account["current_evidence_count"] == 1
     assert account["average_score"] == 100
     assert account["status"] == care_status
+    assert account["healthy_sites"] == 0
+    assert account["needs_attention"] == (1 if care_status == "red" else 0)
+    scoped = client.get("/api/summary", params={"client": "Conflicting Client"}).json()
+    assert account["healthy_sites"] == scoped["healthy_sites"]
+    assert account["needs_attention"] == scoped["needs_attention"]
     assert client.get("/api/summary").json()["overall_status"] == care_status
 
 

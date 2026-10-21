@@ -971,7 +971,11 @@ def api_clients():
             summary["lowest_score"] if summary["lowest_score"] is not None else row["score"],
             row["score"],
         )
-        site_status = _alert_aware_status(row["score"], row["alerts"])
+        # Account site counts must reflect both halves of the same current
+        # observation, just as the client status and scoped fleet summary do.
+        site_status = _paired_site_status(
+            _alert_aware_status(row["score"], row["alerts"]), care_check["status"]
+        )
         summary["healthy_sites"] += site_status == "green"
         summary["needs_attention"] += site_status == "red"
         summary["critical_alerts"] += sum(
