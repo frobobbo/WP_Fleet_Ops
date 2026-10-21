@@ -4667,6 +4667,21 @@ def test_api_restore_drill_queue_requires_current_paired_care_evidence(tmp_path)
     )
 
 
+def test_api_security_does_not_claim_coverage_for_empty_inventory(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/security")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["security_evidence_percent"] == 0
+    assert payload["covered_count"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_security_highlights_header_coverage_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

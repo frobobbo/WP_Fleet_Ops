@@ -2667,7 +2667,9 @@ def api_security(client: str | None = None):
     warning_count = sum(1 for site in sites if site["security_status"] == "warning")
     critical_count = sum(1 for site in sites if site["security_status"] == "critical")
     unknown_count = len(sites) - current_evidence_count
-    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    # An empty inventory has no evidence of security coverage; do not report
+    # green just because there are no tracked sites with a known gap.
+    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count or not sites else "green")
     current_header_counts = [
         site["security_header_count"]
         for site in sites
@@ -2690,7 +2692,7 @@ def api_security(client: str | None = None):
         "critical_count": critical_count,
         "gap_count": warning_count + critical_count,
         "unknown_count": unknown_count,
-        "security_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "security_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "average_security_header_count": round(
             sum(current_header_counts) / len(current_header_counts), 1
         )
