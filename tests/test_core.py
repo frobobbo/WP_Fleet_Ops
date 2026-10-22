@@ -941,6 +941,18 @@ def test_fleet_report_counts_red_score_without_critical_alert_as_critical_site()
     assert "Critical sites: 1" in report
 
 
+@pytest.mark.parametrize("captured_at", ["not-a-date", "2026-10-22", None])
+def test_fleet_report_does_not_claim_invalid_snapshot_timestamp_is_utc(captured_at):
+    site = FleetSite("Bad Clock", "https://bad-clock.example", True, 90, 0, 12, 200, 3)
+
+    report = generate_maintenance_report(
+        [site], captured_at_by_url={site.url: captured_at}
+    )
+
+    assert "Captured at: invalid timestamp (unverified)" in report
+    assert "Captured at: not-a-date UTC" not in report
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

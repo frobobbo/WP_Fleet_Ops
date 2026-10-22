@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import re
 from urllib.parse import urlparse
 
 from .checks import markdown_literal
@@ -143,7 +144,7 @@ def generate_maintenance_report(
     sites: list[FleetSite],
     *,
     saved_evidence: Mapping[str, tuple[int, list[Alert]]] | None = None,
-    captured_at_by_url: Mapping[str, str] | None = None,
+    captured_at_by_url: Mapping[str, str | None] | None = None,
     paired_care_status_by_url: Mapping[str, str] | None = None,
     tracked_site_count: int = 0,
 ) -> str:
@@ -190,11 +191,24 @@ def generate_maintenance_report(
         state = {"red": "Needs attention", "yellow": "Watch", "green": "Healthy"}[status]
         lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}"]
         if captured_at_by_url is not None:
-            captured_at = captured_at_by_url[site.url]
+            captured_at = captured_at_by_url.get(site.url)
             # SQLite CURRENT_TIMESTAMP is UTC but has no offset. Imported ISO
             # timestamps can have their own offset; do not mislabel those UTC.
-            parsed = datetime.fromisoformat(captured_at)
-            timestamp_label = captured_at if parsed.tzinfo else f"{captured_at} UTC"
+            # A damaged or partial observation time cannot substantiate an
+            # exact capture instant. Never let one bad row break an export or
+            # manufacture a UTC timestamp from a date-only value.
+            parsed = None
+            if isinstance(captured_at, str) and re.match(
+                r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?=$|[.,Z+-])",
+                captured_at,
+            ):
+                try:
+                    parsed = datetime.fromisoformat(captured_at)
+                except ValueError:
+                    pass
+            timestamp_label = (
+                captured_at if parsed.tzinfo else f"{captured_at} UTC"
+            ) if parsed is not None else "invalid timestamp (unverified)"
             lines.append(f"Captured at: {timestamp_label}")
         lines.append("")
         if escalated_by_care:
