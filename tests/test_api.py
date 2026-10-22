@@ -1357,6 +1357,32 @@ def test_care_report_does_not_call_fleet_update_alert_healthy(
     assert payload["status"] == expected_status
 
 
+@pytest.mark.parametrize(
+    ("care_status", "heading", "critical_sites"),
+    [("red", "Needs attention", 1), ("yellow", "Watch", 0)],
+)
+def test_fleet_report_does_not_call_current_care_risk_healthy(
+    tmp_path, care_status, heading, critical_sites,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Paired Risk", url="https://paired-risk.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set status = ?", (care_status,))
+
+    for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
+        fleet_section = report.split("# WP FleetOps Maintenance Report", 1)[1]
+        assert f"Critical sites: {critical_sites}" in fleet_section
+        assert f"## Paired Risk — {heading}" in fleet_section
+        assert "## Paired Risk — Healthy" not in fleet_section
+        assert "Paired care finding escalates" in fleet_section
+        assert "Continue normal maintenance cadence." not in fleet_section
+        assert "Score: 100/100" in fleet_section
+
+
 def test_api_summary_marks_critical_alerts_red_even_when_average_score_is_yellow(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

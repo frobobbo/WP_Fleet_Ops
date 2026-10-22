@@ -144,6 +144,7 @@ def generate_maintenance_report(
     *,
     saved_evidence: Mapping[str, tuple[int, list[Alert]]] | None = None,
     captured_at_by_url: Mapping[str, str] | None = None,
+    paired_care_status_by_url: Mapping[str, str] | None = None,
     tracked_site_count: int = 0,
 ) -> str:
     lines = ["# WP FleetOps Maintenance Report", "", f"Generated: {datetime.now(timezone.utc).isoformat()}", ""]
@@ -155,9 +156,20 @@ def generate_maintenance_report(
         else (s, calculate_health_score(s), generate_alerts(s))
         for s in sites
     ]
+    def state_for(site: FleetSite, score: int, alerts: list[Alert]) -> tuple[str, bool]:
+        fleet_status = (
+            "red" if score < 65 or any(a.severity == "critical" for a in alerts)
+            else "yellow" if score < 85 or any(a.severity == "warning" for a in alerts)
+            else "green"
+        )
+        care_status = (paired_care_status_by_url or {}).get(site.url, "green")
+        rank = {"green": 0, "yellow": 1, "red": 2}
+        status = max((fleet_status, care_status), key=rank.__getitem__)
+        return status, rank[care_status] > rank[fleet_status]
+
     lines += [
         f"Sites monitored: {len(sites)}",
-        f"Critical sites: {sum(1 for _, score, alerts in scored if score < 65 or any(alert.severity == 'critical' for alert in alerts))}",
+        f"Critical sites: {sum(1 for site, score, alerts in scored if state_for(site, score, alerts)[0] == 'red')}",
         "",
     ]
     if not sites:
@@ -174,12 +186,8 @@ def generate_maintenance_report(
                 "",
             ]
     for site, score, alerts in scored:
-        if score < 65 or any(alert.severity == "critical" for alert in alerts):
-            state = "Needs attention"
-        elif score < 85 or any(alert.severity == "warning" for alert in alerts):
-            state = "Watch"
-        else:
-            state = "Healthy"
+        status, escalated_by_care = state_for(site, score, alerts)
+        state = {"red": "Needs attention", "yellow": "Watch", "green": "Healthy"}[status]
         lines += [f"## {markdown_literal(site.name)} — {state}", "", f"Score: {score}/100", f"URL: {markdown_literal(site.url)}"]
         if captured_at_by_url is not None:
             captured_at = captured_at_by_url[site.url]
@@ -189,6 +197,8 @@ def generate_maintenance_report(
             timestamp_label = captured_at if parsed.tzinfo else f"{captured_at} UTC"
             lines.append(f"Captured at: {timestamp_label}")
         lines.append("")
+        if escalated_by_care:
+            lines += ["Paired care finding escalates this site; review the care report above.", ""]
         lines += ["Recommended actions:"]
         lines += [
             f"- [{a.severity}] " + (
@@ -197,6 +207,9 @@ def generate_maintenance_report(
                 else a.message
             )
             for a in alerts
-        ] if alerts else ["- Continue normal maintenance cadence."]
+        ] if alerts else [
+            "- Review the paired care check and resolve its findings."
+            if escalated_by_care else "- Continue normal maintenance cadence."
+        ]
         lines.append("")
     return "\n".join(lines).strip() + "\n"

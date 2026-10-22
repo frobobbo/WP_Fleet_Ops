@@ -6844,6 +6844,7 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
             fleet_sites,
             saved_evidence=saved_evidence,
             captured_at_by_url={row["url"]: row["captured_at"] for row in current_fleet_rows},
+            paired_care_status_by_url={check.url: check.status for check in care_checks},
             tracked_site_count=len(tracked_sites),
         )
     )
