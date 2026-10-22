@@ -133,9 +133,11 @@ def _dashboard_status(score: int) -> str:
 
 
 def _alert_aware_status(score: int, alerts: list[dict]) -> str:
-    """A critical finding overrides a healthy numerical snapshot score."""
+    """Actionable findings prevent a healthy numerical score hiding site risk."""
     if any(alert.get("severity") == "critical" for alert in alerts):
         return "red"
+    if any(alert.get("severity") == "warning" for alert in alerts):
+        return "yellow" if score >= 65 else "red"
     return _dashboard_status(score)
 
 
@@ -433,6 +435,7 @@ def _summary_payload(
         or invalid_care_check_count
         or clock_skew_care_check_count
         or any(row["score"] < 85 for row in current_rows)
+        or "yellow" in site_statuses
         or any(check["status"] == "yellow" for check in current_care_checks)
         or (average_score is not None and average_score < 85)
     ):
@@ -894,6 +897,7 @@ def api_clients():
                 "lowest_score": None,
                 "_red_care_checks": 0,
                 "_yellow_care_checks": 0,
+                "_yellow_site_count": 0,
                 "observed_score_total": 0,
                 "observed_score_count": 0,
                 "healthy_sites": 0,
@@ -978,6 +982,7 @@ def api_clients():
         )
         summary["healthy_sites"] += site_status == "green"
         summary["needs_attention"] += site_status == "red"
+        summary["_yellow_site_count"] += site_status == "yellow"
         summary["critical_alerts"] += sum(
             1 for alert in row["alerts"] if alert.get("severity") == "critical"
         )
@@ -1005,6 +1010,7 @@ def api_clients():
         lowest_score = summary.pop("lowest_score")
         red_care_checks = summary.pop("_red_care_checks")
         yellow_care_checks = summary.pop("_yellow_care_checks")
+        yellow_site_count = summary.pop("_yellow_site_count")
         summary["average_score"] = average_score
         summary["observed_average_score"] = observed_average_score
         summary["monitoring_coverage_percent"] = round(
@@ -1033,7 +1039,7 @@ def api_clients():
             lowest_score is not None and lowest_score < 65
         ):
             summary["status"] = "red"
-        elif summary["monitoring_gap_count"] or yellow_care_checks or (
+        elif summary["monitoring_gap_count"] or yellow_care_checks or yellow_site_count or (
             lowest_score is not None and lowest_score < 85
         ):
             summary["status"] = "yellow"

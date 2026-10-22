@@ -1152,6 +1152,29 @@ def test_api_summary_does_not_hide_a_current_risky_care_check(tmp_path, care_sco
     assert summary["needs_attention"] == (1 if care_status == "red" else 0)
 
 
+def test_current_warning_alert_prevents_healthy_site_and_account_status(tmp_path):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Update Due", url="https://update-due.example",
+            client="Maintenance Client", wp_updates="1",
+        ),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    site = client.get("/api/sites").json()["sites"][0]
+    assert site["score"] >= 85
+    assert site["alerts"][0]["severity"] == "warning"
+    assert site["status"] == "yellow"
+    assert client.get("/api/site-directory").json()["sites"][0]["status"] == "yellow"
+    summary = client.get("/api/summary").json()
+    assert summary["overall_status"] == "yellow"
+    assert summary["healthy_sites"] == 0
+    assert client.get("/api/clients").json()["clients"][0]["status"] == "yellow"
+    assert "— Watch" in client.get("/report").text
+
+
 @pytest.mark.parametrize("care_status", ["red", "yellow"])
 def test_site_apis_reflect_current_care_risk_without_changing_snapshot_score(tmp_path, care_status):
     client = make_test_client(tmp_path)
