@@ -3424,6 +3424,38 @@ def test_api_client_workload_counts_distinct_urls_with_the_same_display_name(tmp
     assert payload["clients"][0]["open_action_count"] == 2
 
 
+def test_client_workload_latest_snapshot_compares_offset_aware_instants(tmp_path):
+    client = make_test_client(tmp_path)
+    older_url = "https://older-workload.example"
+    newer_url = "https://newer-workload.example"
+    for name, url in (("Older", older_url), ("Newer", newer_url)):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client="Offset Client", wp_updates="2"),
+            follow_redirects=False,
+        ).status_code == 303
+
+    now = datetime.now(timezone.utc)
+    older = (now - timedelta(hours=2)).astimezone(
+        timezone(timedelta(hours=5))
+    ).isoformat(timespec="seconds")
+    newer = (now - timedelta(minutes=30)).astimezone(
+        timezone(timedelta(hours=-4))
+    ).isoformat(timespec="seconds")
+    assert older > newer  # Lexical order is the reverse of chronological order.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        for url, captured_at in ((older_url, older), (newer_url, newer)):
+            con.execute(
+                "update snapshots set captured_at = ? where site_id = "
+                "(select id from sites where url = ?)",
+                (captured_at, url),
+            )
+
+    payload = client.get("/api/client-workload").json()
+    assert payload["client_count"] == 1
+    assert payload["clients"][0]["latest_snapshot_at"] == newer
+
+
 def test_api_client_workload_surfaces_paired_monitoring_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

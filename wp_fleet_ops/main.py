@@ -1603,6 +1603,7 @@ def _client_workload_rows() -> list[dict]:
                 "info_action_count": 0,
                 "lowest_score": action["score"],
                 "latest_snapshot_at": None,
+                "_latest_snapshot_dt": None,
                 "top_action": None,
             },
         )
@@ -1611,7 +1612,11 @@ def _client_workload_rows() -> list[dict]:
         summary[f"{action['severity']}_action_count"] += 1
         summary["lowest_score"] = min(summary["lowest_score"], action["score"])
         captured_at = action.get("latest_snapshot_at")
-        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
+        captured_dt = _parse_captured_at(captured_at)
+        if captured_dt is not None and (
+            summary["_latest_snapshot_dt"] is None or captured_dt > summary["_latest_snapshot_dt"]
+        ):
+            summary["_latest_snapshot_dt"] = captured_dt
             summary["latest_snapshot_at"] = captured_at
         current_top = summary["top_action"]
         if current_top is None or (
@@ -1623,6 +1628,7 @@ def _client_workload_rows() -> list[dict]:
 
     rows = []
     for summary in clients.values():
+        summary.pop("_latest_snapshot_dt")
         top_action = summary.pop("top_action")
         site_urls = summary.pop("site_urls")
         summary["site_count"] = len(site_urls)
