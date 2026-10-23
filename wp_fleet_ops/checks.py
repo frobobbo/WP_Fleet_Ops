@@ -607,6 +607,13 @@ def _report_checked_at(value: object) -> str:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return "invalid timestamp (unverified)"
+    if parsed.tzinfo is not None:
+        try:
+            parsed.astimezone(timezone.utc)
+        except OverflowError:
+            # An offset near the datetime year bounds can parse successfully
+            # without identifying a representable UTC observation instant.
+            return "invalid timestamp (unverified)"
     # Older SQLite timestamps are UTC but store no zone; imported ISO strings
     # with explicit offsets must retain their original observation timezone.
     return value if parsed.tzinfo else f"{value} UTC"

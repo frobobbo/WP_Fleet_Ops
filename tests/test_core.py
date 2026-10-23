@@ -974,6 +974,33 @@ def test_care_report_labels_legacy_naive_check_timestamp_as_utc():
     report = summarize_care_report([replace(check, checked_at="2026-10-22 12:00:00")])
     assert "Checked at: 2026-10-22 12:00:00 UTC" in report
 
+@pytest.mark.parametrize("timestamp", [
+    "0001-01-01T00:00:00+14:00",
+    "9999-12-31T23:59:59-14:00",
+])
+def test_reports_reject_timestamps_without_representable_utc_instant(timestamp):
+    check = evaluate_site("Clock", "https://clock.example", 200, 200, 90, "6.6", 0, 12)
+    site = FleetSite("Clock", check.url, True, 90, 0, 12, 200, 3)
+
+    care = summarize_care_report([replace(check, checked_at=timestamp)])
+    fleet = generate_maintenance_report([site], captured_at_by_url={site.url: timestamp})
+
+    assert "Checked at: invalid timestamp (unverified)" in care
+    assert "Captured at: invalid timestamp (unverified)" in fleet
+    assert timestamp not in care + fleet
+
+def test_fleet_report_preserves_offsets_and_labels_legacy_utc_timestamps():
+    site = FleetSite("Clock", "https://clock.example", True, 90, 0, 12, 200, 3)
+    offset = generate_maintenance_report(
+        [site], captured_at_by_url={site.url: "2026-10-22T08:00:00-04:00"}
+    )
+    legacy = generate_maintenance_report(
+        [site], captured_at_by_url={site.url: "2026-10-22 12:00:00"}
+    )
+
+    assert "Captured at: 2026-10-22T08:00:00-04:00" in offset
+    assert "Captured at: 2026-10-22 12:00:00 UTC" in legacy
+
 
 @pytest.mark.parametrize(
     ("field", "value"),
