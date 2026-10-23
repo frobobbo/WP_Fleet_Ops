@@ -408,7 +408,13 @@ def _effective_security_headers(headers) -> dict[str, str]:
                 continue
             x_frame_options_seen = True
         if _security_header_is_effective(name, value):
-            effective_headers[normalized_name] = value
+            if normalized_name == "content-security-policy":
+                # Each CSP response field is enforced independently. Preserve
+                # the first restrictive policy as evidence rather than replacing
+                # it with a later, possibly weaker, independently enforced one.
+                effective_headers.setdefault(normalized_name, value)
+            else:
+                effective_headers[normalized_name] = value
     if frame_ancestors_seen:
         effective_headers.pop("x-frame-options", None)
     return effective_headers

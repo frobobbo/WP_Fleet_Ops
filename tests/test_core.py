@@ -156,6 +156,39 @@ def test_restrictive_frame_ancestors_takes_precedence_over_x_frame_options():
     assert "Add clickjacking protection header." not in check.actions
 
 
+@pytest.mark.parametrize("first_restrictive", [True, False])
+def test_repeated_csp_headers_retain_enforced_clickjacking_protection(first_restrictive):
+    # Browsers enforce each CSP header independently (the intersection). A
+    # later broad policy cannot erase an earlier restrictive frame-ancestors.
+    headers = Message()
+    policies = ["frame-ancestors 'self'", "frame-ancestors *"]
+    if not first_restrictive:
+        policies.reverse()
+    for policy in policies:
+        headers.add_header("Content-Security-Policy", policy)
+    check = evaluate_site(
+        "Repeated CSP", "https://repeated-csp.example", 200, 200, 60,
+        "unknown", 0, 24, headers,  # type: ignore[arg-type]  (real HTTP header container)
+    )
+
+    assert check.security_headers["content-security-policy"] == "frame-ancestors 'self'"
+    assert "Add clickjacking protection header." not in check.actions
+
+
+def test_repeated_restrictive_csp_headers_keep_first_enforced_policy():
+    headers = Message()
+    headers.add_header("Content-Security-Policy", "frame-ancestors 'none'")
+    headers.add_header("Content-Security-Policy", "frame-ancestors 'self'")
+    check = evaluate_site(
+        "Multiple Policies", "https://policies.example", 200, 200, 60,
+        "unknown", 0, 24, headers,  # type: ignore[arg-type]  (real HTTP header container)
+    )
+
+    # Retain the first independently enforced restrictive policy instead of
+    # replacing its evidence with a later, less restrictive policy.
+    assert check.security_headers["content-security-policy"] == "frame-ancestors 'none'"
+
+
 def test_container_healthcheck_requires_database_readiness():
     dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
     healthcheck = next(
