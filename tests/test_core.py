@@ -953,6 +953,28 @@ def test_fleet_report_does_not_claim_invalid_snapshot_timestamp_is_utc(captured_
     assert "Captured at: not-a-date UTC" not in report
 
 
+@pytest.mark.parametrize("checked_at", ["not-a-date", "2026-10-22", None, "2026-10-22 12:00:00\n## Forged"])
+def test_care_report_does_not_claim_invalid_check_timestamp_is_verified(checked_at):
+    check = evaluate_site("Bad Clock", "https://bad-clock.example", 200, 200, 90, "6.6", 0, 12)
+
+    report = summarize_care_report([replace(check, checked_at=checked_at)])
+
+    assert "Checked at: invalid timestamp (unverified)" in report
+    assert "## Forged" not in report
+
+
+def test_care_report_preserves_valid_check_timestamp_offsets():
+    check = evaluate_site("Offset Clock", "https://offset-clock.example", 200, 200, 90, "6.6", 0, 12)
+    report = summarize_care_report([replace(check, checked_at="2026-10-22T08:00:00-04:00")])
+    assert "Checked at: 2026-10-22T08:00:00-04:00" in report
+
+
+def test_care_report_labels_legacy_naive_check_timestamp_as_utc():
+    check = evaluate_site("Legacy Clock", "https://legacy-clock.example", 200, 200, 90, "6.6", 0, 12)
+    report = summarize_care_report([replace(check, checked_at="2026-10-22 12:00:00")])
+    assert "Checked at: 2026-10-22 12:00:00 UTC" in report
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

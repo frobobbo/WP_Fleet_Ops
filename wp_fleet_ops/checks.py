@@ -596,6 +596,22 @@ def fetch_basic_site_check(
     )
 
 
+def _report_checked_at(value: object) -> str:
+    """Label only complete, parseable observation times as verified instants."""
+    if not isinstance(value, str) or re.match(
+        r"^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?=$|[.,Z+-])",
+        value,
+    ) is None:
+        return "invalid timestamp (unverified)"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return "invalid timestamp (unverified)"
+    # Older SQLite timestamps are UTC but store no zone; imported ISO strings
+    # with explicit offsets must retain their original observation timezone.
+    return value if parsed.tzinfo else f"{value} UTC"
+
+
 def summarize_care_report(
     checks: list[SiteCheck],
     *,
@@ -645,9 +661,9 @@ def summarize_care_report(
             f"Score: {c.score}/100",
             f"URL: {markdown_literal(c.url)}",
             f"WordPress version: {markdown_literal(c.wordpress_version)}",
-            # Preserve the recorded ISO offset rather than labeling all stored
-            # observations UTC (older or imported records may use another zone).
-            f"Checked at: {c.checked_at}",
+            # Preserve verified ISO offsets; reject damaged or incomplete
+            # evidence rather than injecting it into the exported Markdown.
+            f"Checked at: {_report_checked_at(c.checked_at)}",
             # The persisted care summary can call a good-scoring site healthy;
             # never repeat that claim after current paired fleet evidence escalates it.
             summary,
