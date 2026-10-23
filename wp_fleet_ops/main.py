@@ -173,7 +173,12 @@ def _parse_captured_at(value: object) -> datetime | None:
             return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    try:
+        return parsed.astimezone(timezone.utc)
+    except OverflowError:
+        # An ISO offset near datetime's minimum/maximum year may be parseable
+        # yet have no representable UTC instant. Treat it as invalid evidence.
+        return None
 
 
 def _snapshot_freshness(

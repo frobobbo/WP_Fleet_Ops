@@ -46,6 +46,21 @@ def test_non_text_observation_timestamp_is_invalid_not_a_server_error(tmp_path, 
     ) is None
 
 
+@pytest.mark.parametrize(
+    "bad_timestamp",
+    ["0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-14:00"],
+)
+def test_out_of_range_utc_observation_is_invalid_not_a_server_error(tmp_path, bad_timestamp):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    now = datetime.now(timezone.utc)
+    assert main._snapshot_freshness(bad_timestamp, now, 168) == ("invalid", None)
+    assert main._latest_trusted_timestamp(
+        [{"captured_at": bad_timestamp}], "captured_at", now,
+    ) is None
+
+
 def test_manual_not_modified_response_marks_paired_uptime_down(tmp_path):
     client = make_test_client(tmp_path)
     response = client.post(
