@@ -139,6 +139,17 @@ def generate_alerts(
     return alerts
 
 
+def _report_alert_text(value: str) -> str:
+    """Keep persisted alert text on one Markdown list line, without links/markup."""
+    # Alert sentences use ordinary periods, hyphens, and parentheses. These
+    # cannot form Markdown links once brackets are escaped, nor introduce list
+    # syntax after the fixed line prefix. Preserve existing report readability.
+    escaped = markdown_literal(" ".join(value.split()))
+    for mark in (".", "-", "(", ")"):
+        escaped = escaped.replace("\\" + mark, mark)
+    return escaped
+
+
 def generate_maintenance_report(
     sites: list[FleetSite],
     *,
@@ -199,10 +210,10 @@ def generate_maintenance_report(
             lines += ["Paired care finding escalates this site; review the care report above.", ""]
         lines += ["Recommended actions:"]
         lines += [
-            f"- [{a.severity}] " + (
-                markdown_literal(site.name) + a.message[len(site.name):]
+            f"- [{_report_alert_text(a.severity)}] " + (
+                markdown_literal(site.name) + " " + _report_alert_text(a.message[len(site.name) + 1:])
                 if a.message.startswith(f"{site.name} ")
-                else a.message
+                else _report_alert_text(a.message)
             )
             for a in alerts
         ] if alerts else [

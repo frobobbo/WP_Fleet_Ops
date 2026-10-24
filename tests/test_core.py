@@ -8,7 +8,7 @@ from urllib.error import HTTPError
 import pytest
 
 from wp_fleet_ops.checks import evaluate_site, fetch_basic_site_check, normalize_site_url, summarize_care_report
-from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
+from wp_fleet_ops.fleet import Alert, FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from wp_fleet_ops.storage import FleetOpsStore
 
 def test_care_report_treats_persisted_actions_as_single_line_literal_text():
@@ -22,6 +22,19 @@ def test_care_report_treats_persisted_actions_as_single_line_literal_text():
 
     assert "- Review \\[urgent\\]\\(https://example\\.test\\) \\#\\# Forged approval" in report
     assert "\n## Forged approval" not in report
+
+def test_fleet_report_treats_persisted_alerts_as_literal_text():
+    site = FleetSite("Alert Site", "https://alert.example", True, 60, 0, 24, 200, 3)
+    report = generate_maintenance_report(
+        [site],
+        saved_evidence={site.url: (
+            90, [Alert(site.name, "warning", "Review [urgent](https://example.test)\n## Forged approval")],
+        )},
+    )
+
+    assert r"Review \[urgent\](https://example.test) \#\# Forged approval" in report
+    assert "\n## Forged approval" not in report
+    assert "[urgent](https://example.test)" not in report
 
 
 @pytest.mark.parametrize("invalid_source", ["'unsafe-inline'", "'nonce-fake'"])
@@ -199,6 +212,23 @@ def test_repeated_restrictive_csp_headers_keep_first_enforced_policy():
     # Retain the first independently enforced restrictive policy instead of
     # replacing its evidence with a later, less restrictive policy.
     assert check.security_headers["content-security-policy"] == "frame-ancestors 'none'"
+
+def test_three_x_frame_options_fields_never_restore_clickjacking_credit():
+    # Once duplicate XFO fields make the response ambiguous, a later valid
+    # field must not restore protection credit or overwrite the evidence.
+    headers = Message()
+    headers.add_header("Strict-Transport-Security", "max-age=31536000")
+    for value in ("DENY", "SAMEORIGIN", "DENY"):
+        headers.add_header("X-Frame-Options", value)
+
+    check = evaluate_site(
+        "Triple XFO", "https://triple-xfo.example", 200, 200, 60,
+        "unknown", 0, 24, headers,  # type: ignore[arg-type]
+    )
+
+    assert check.security_headers == {"strict-transport-security": "max-age=31536000"}
+    assert check.score == 96
+    assert "Add clickjacking protection header." in check.actions
 
 
 def test_container_healthcheck_requires_database_readiness():
