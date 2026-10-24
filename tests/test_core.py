@@ -1833,6 +1833,27 @@ def test_fetch_basic_site_check_rejects_hsts_from_plain_http_error(monkeypatch):
     assert "Add or verify HSTS security header." in check.actions
 
 
+def test_fetch_basic_site_check_invalid_http_error_target_fails_closed(monkeypatch):
+    headers = Message()
+    headers["Strict-Transport-Security"] = "max-age=31536000"
+
+    def invalid_redirect(*_args, **_kwargs):
+        raise HTTPError(
+            "https://user:secret@broken.example/failure", 503,
+            "Service Unavailable", headers, None,
+        )
+
+    monkeypatch.setattr("wp_fleet_ops.checks.urllib.request.urlopen", invalid_redirect)
+    monkeypatch.setattr("wp_fleet_ops.checks.ssl_days_remaining", lambda *_args, **_kwargs: 60)
+
+    check = fetch_basic_site_check("Broken Redirect", "https://origin.example")
+
+    assert check.url == "https://origin.example"
+    assert check.http_status == 0
+    assert check.security_headers == {}
+    assert "Investigate uptime: HTTP status is 0." in check.actions
+
+
 def test_fetch_basic_site_check_retains_only_effective_monitored_security_headers(monkeypatch):
     headers = Message()
     headers["Strict-Transport-Security"] = "max-age=31536000"

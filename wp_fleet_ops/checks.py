@@ -571,15 +571,21 @@ def fetch_basic_site_check(
             # scoring nor safe to retain in operational history.
             headers = _monitored_security_headers(resp.headers, effective_url)
     except urllib.error.HTTPError as exc:
-        # HTTPError still represents a completed HTTP response. Preserve its
-        # status and headers so operators see the actual server-side failure.
-        status = exc.code
-        effective_url = normalize_site_url(exc.geturl())
-        headers = (
-            _monitored_security_headers(exc.headers, effective_url)
-            if exc.headers
-            else {}
-        )
+        # HTTPError normally represents a completed response. An invalid final
+        # redirect target, however, cannot establish which origin supplied its
+        # headers or TLS evidence. Do not mislabel that remote failure as an
+        # operator input error or retain untrusted security-header evidence.
+        try:
+            effective_url = normalize_site_url(exc.geturl())
+        except ValueError:
+            status = 0
+        else:
+            status = exc.code
+            headers = (
+                _monitored_security_headers(exc.headers, effective_url)
+                if exc.headers
+                else {}
+            )
     except Exception:
         status = 0
     latency_ms = int((time.monotonic() - started) * 1000)
