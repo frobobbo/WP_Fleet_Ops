@@ -23,6 +23,22 @@ def test_care_report_treats_persisted_actions_as_single_line_literal_text():
     assert "- Review \\[urgent\\]\\(https://example\\.test\\) \\#\\# Forged approval" in report
     assert "\n## Forged approval" not in report
 
+def test_care_report_treats_persisted_summary_as_single_line_literal_text():
+    check = evaluate_site("Safe **Site**", "https://safe.example", 200, 10, 90, "6.8", 0, 1)
+    check = replace(
+        check,
+        summary="Safe **Site** [approved](https://example.test)\n## Forged approval",
+    )
+
+    report = summarize_care_report([check])
+
+    assert (
+        r"Safe \*\*Site\*\* \[approved\]\(https://example\.test\) \#\# Forged approval"
+        in report
+    )
+    assert "\n## Forged approval" not in report
+    assert "[approved](https://example.test)" not in report
+
 def test_fleet_report_treats_persisted_alerts_as_literal_text():
     site = FleetSite("Alert Site", "https://alert.example", True, 60, 0, 24, 200, 3)
     report = generate_maintenance_report(

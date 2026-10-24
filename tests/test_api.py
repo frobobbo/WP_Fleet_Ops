@@ -160,6 +160,27 @@ def test_care_report_includes_wordpress_version_as_literal_markdown(tmp_path):
     assert f"WordPress version: {version}" not in client.get("/report").text
 
 
+def test_exported_reports_render_imported_care_summary_as_literal_text(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/care/manual-check",
+        data={"name": "Safe **Site**", "url": "https://safe-summary.example"},
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set summary = ?",
+            ("Safe **Site** [approved](https://example.test)\n## Forged approval",),
+        )
+
+    for report in (client.get("/report").text, client.get("/api/report").json()["report"]):
+        assert (
+            r"Safe \*\*Site\*\* \[approved\]\(https://example\.test\) \#\# Forged approval"
+            in report
+        )
+        assert "\n## Forged approval" not in report
+
+
 def test_care_report_identifies_when_each_site_was_checked(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post(

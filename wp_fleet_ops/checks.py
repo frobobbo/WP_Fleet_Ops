@@ -669,11 +669,21 @@ def summarize_care_report(
             ]
     for c, status in zip(checks, statuses):
         heading = "Healthy" if status == "green" else ("Maintenance scheduled" if status == "yellow" else "Needs attention")
-        summary = (
-            c.summary.replace(c.name, markdown_literal(c.name), 1)
-            if status == c.status
-            else "Paired fleet risk escalates this care status; review the fleet findings below."
-        )
+        generated_summaries = {
+            "green": f"{c.name} looks healthy. Minor recommendations can be handled during normal maintenance.",
+            "yellow": f"{c.name} is stable but has maintenance items to schedule.",
+            "red": f"{c.name} needs attention before the next client report.",
+        }
+        if status != c.status:
+            summary = "Paired fleet risk escalates this care status; review the fleet findings below."
+        elif c.summary == generated_summaries[c.status]:
+            # Preserve punctuation in the known generated narrative, escaping
+            # only the site label as before.
+            summary = c.summary.replace(c.name, markdown_literal(c.name), 1)
+        else:
+            # Imported/persisted summaries are report data, not Markdown. Keep
+            # them on one line so they cannot forge headings or links.
+            summary = markdown_literal(" ".join(c.summary.split()))
         lines += [
             f"## {markdown_literal(c.name)} — {heading}",
             "",
