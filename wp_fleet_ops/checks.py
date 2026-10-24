@@ -690,6 +690,8 @@ def summarize_care_report(
         ]
         if c.actions:
             lines.append("Recommended actions:")
-            lines += [f"- {a}" for a in c.actions]
+            # Stored/imported actions are data, not report syntax. Collapse line
+            # breaks before escaping so they cannot add headings or list items.
+            lines += [f"- {markdown_literal(' '.join(a.split()))}" for a in c.actions]
             lines.append("")
     return "\n".join(lines).strip() + "\n"

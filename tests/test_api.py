@@ -5759,7 +5759,9 @@ def test_api_actions_include_thirty_day_certificate_renewals(tmp_path):
         "recommended_action": "Renew or replace the TLS certificate before it expires.",
         "latest_snapshot_at": payload["actions"][0]["latest_snapshot_at"],
     }
-    assert "Plan SSL renewal: 30 day(s) remaining." in client.get("/report").text
+    from wp_fleet_ops.checks import markdown_literal
+
+    assert markdown_literal("Plan SSL renewal: 30 day(s) remaining.") in client.get("/report").text
 
 
 def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path):

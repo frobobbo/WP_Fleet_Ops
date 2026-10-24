@@ -11,6 +11,18 @@ from wp_fleet_ops.checks import evaluate_site, fetch_basic_site_check, normalize
 from wp_fleet_ops.fleet import FleetSite, calculate_health_score, generate_alerts, generate_maintenance_report
 from wp_fleet_ops.storage import FleetOpsStore
 
+def test_care_report_treats_persisted_actions_as_single_line_literal_text():
+    check = evaluate_site("Safe", "https://safe.example", 200, 10, 90, "6.8", 0, 1)
+    check = replace(
+        check,
+        actions=["Review [urgent](https://example.test)\n## Forged approval"],
+    )
+
+    report = summarize_care_report([check])
+
+    assert "- Review \\[urgent\\]\\(https://example\\.test\\) \\#\\# Forged approval" in report
+    assert "\n## Forged approval" not in report
+
 
 @pytest.mark.parametrize("invalid_source", ["'unsafe-inline'", "'nonce-fake'"])
 def test_invalid_frame_ancestor_keywords_do_not_claim_clickjacking_protection(invalid_source):
