@@ -50,6 +50,27 @@ def test_source_bundle_contains_only_runtime_files(tmp_path):
         }
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
 
+def test_source_bundle_ignores_checkout_file_permissions(tmp_path):
+    root = tmp_path / "project"
+    root.mkdir()
+    make_source_tree(root)
+    first = tmp_path / "first.tar.gz"
+    second = tmp_path / "second.tar.gz"
+    subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root), "--output", str(first)],
+        check=True, capture_output=True, text=True,
+    )
+    source = root / "wp_fleet_ops" / "main.py"
+    source.chmod(0o755)
+    subprocess.run(
+        [sys.executable, str(BUILDER), "--root", str(root), "--output", str(second)],
+        check=True, capture_output=True, text=True,
+    )
+
+    assert first.read_bytes() == second.read_bytes()
+    with tarfile.open(second, "r:gz") as archive:
+        assert all(member.mode == 0o644 for member in archive.getmembers())
+
 
 @pytest.mark.parametrize("relative_path", ["wp_fleet_ops/main.py", "templates/index.html"])
 def test_source_bundle_requires_app_entrypoint_and_dashboard(tmp_path, relative_path):

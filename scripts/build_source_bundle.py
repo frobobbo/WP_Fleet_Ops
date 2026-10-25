@@ -7,7 +7,6 @@ import argparse
 import gzip
 import os
 from pathlib import Path
-import stat
 import tarfile
 import tempfile
 
@@ -77,7 +76,9 @@ def _normalized_tar_info(info: tarfile.TarInfo) -> tarfile.TarInfo:
     info.uname = ""
     info.gname = ""
     info.mtime = 0
-    info.mode = 0o755 if info.mode & stat.S_IXUSR else 0o644
+    # All bundled runtime inputs are read by Python or pip, never executed as
+    # files. Do not let local checkout executable bits change release bytes.
+    info.mode = 0o644
     return info
 
 
