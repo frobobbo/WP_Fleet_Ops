@@ -1099,6 +1099,7 @@ def test_api_summary_does_not_call_an_empty_fleet_healthy(tmp_path):
 
     assert summary["sites"] == 0
     assert summary["current_evidence_count"] == 0
+    assert summary["maintenance_sites"] == 0
     assert summary["average_score"] is None
     assert summary["overall_status"] == "yellow"
     for field in (
@@ -1151,6 +1152,7 @@ def test_api_summary_returns_dashboard_rollups(tmp_path):
     assert summary["fleet_snapshots"] == 2
     assert summary["care_checks"] == 2
     assert summary["healthy_sites"] == 1
+    assert summary["maintenance_sites"] == 0
     assert summary["needs_attention"] == 1
     assert summary["average_score"] == 50
     assert summary["overall_status"] == "red"
@@ -1185,6 +1187,7 @@ def test_api_summary_does_not_hide_a_current_risky_care_check(tmp_path, care_sco
     # red care evidence counts as a site needing attention even if the fleet
     # snapshot score remains 100.
     assert summary["healthy_sites"] == 0
+    assert summary["maintenance_sites"] == (1 if care_status == "yellow" else 0)
     assert summary["needs_attention"] == (1 if care_status == "red" else 0)
 
 
@@ -1207,6 +1210,7 @@ def test_current_warning_alert_prevents_healthy_site_and_account_status(tmp_path
     summary = client.get("/api/summary").json()
     assert summary["overall_status"] == "yellow"
     assert summary["healthy_sites"] == 0
+    assert summary["maintenance_sites"] == 1
     assert client.get("/api/clients").json()["clients"][0]["status"] == "yellow"
     assert "— Watch" in client.get("/report").text
 
@@ -1575,6 +1579,7 @@ def test_api_summary_excludes_stale_care_checks_from_current_client_risk(tmp_pat
     assert summary["average_score"] is None
     assert summary["observed_average_score"] == 100
     assert summary["healthy_sites"] == 0
+    assert summary["maintenance_sites"] == 0
     assert summary["needs_attention"] == 0
     assert summary["critical_alerts"] == 0
     assert summary["client_risks"] == 0

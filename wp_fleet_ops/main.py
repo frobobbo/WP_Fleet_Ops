@@ -473,6 +473,7 @@ def _summary_payload(
         "monitoring_gap_count": monitoring_gap_count,
         "paired_coverage_percent": paired_coverage_percent,
         "healthy_sites": site_statuses.count("green"),
+        "maintenance_sites": site_statuses.count("yellow"),
         "needs_attention": site_statuses.count("red"),
         "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),
         "critical_alerts": critical_alerts,
