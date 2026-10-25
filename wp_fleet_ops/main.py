@@ -6279,11 +6279,12 @@ def _dispatch_summary_status(
     immediate_count: int,
     scheduled_count: int,
     monitoring_gap_count: int = 0,
+    tracked_site_count: int = 0,
 ) -> str:
     """Return a compact dispatch status for queue-level routing."""
     if immediate_count:
         return "red"
-    if scheduled_count or monitoring_gap_count:
+    if scheduled_count or monitoring_gap_count or not tracked_site_count:
         return "yellow"
     return "green"
 
@@ -6344,7 +6345,11 @@ def api_dispatch_summary():
     else:
         dispatch_top_client = None
         dispatch_top_site = None
-        dispatch_top_action = "Continue normal monitoring cadence."
+        dispatch_top_action = (
+            "Register a site and capture an initial combined care check and fleet snapshot."
+            if not monitoring_payload["tracked_site_count"]
+            else "Continue normal monitoring cadence."
+        )
         top_client = None
 
     if immediate_actions:
@@ -6355,6 +6360,8 @@ def api_dispatch_summary():
         next_queue = "monitoring"
     elif watch_actions:
         next_queue = "watch"
+    elif not monitoring_payload["tracked_site_count"]:
+        next_queue = "onboarding"
     else:
         next_queue = "none"
 
@@ -6364,6 +6371,7 @@ def api_dispatch_summary():
             len(immediate_actions),
             len(scheduled_actions),
             monitoring_gap_count,
+            monitoring_payload["tracked_site_count"],
         ),
         "open_action_count": len(actions),
         "immediate_action_count": len(immediate_actions),

@@ -10026,6 +10026,38 @@ def test_api_maintenance_ticket_drafts_returns_ticket_ready_approval_requests(tm
     assert draft["open_action_count"] >= 1
 
 
+def test_dispatch_empty_inventory_requests_onboarding_instead_of_claiming_clear(tmp_path):
+    client = make_test_client(tmp_path)
+
+    dispatch = client.get("/api/dispatch-summary").json()
+    assert dispatch["status"] == "yellow"
+    assert dispatch["open_action_count"] == 0
+    assert dispatch["monitoring_gap_count"] == 0
+    assert dispatch["next_queue"] == "onboarding"
+    assert dispatch["top_site"] is None
+    assert dispatch["top_action"] == (
+        "Register a site and capture an initial combined care check and fleet snapshot."
+    )
+    brief = client.get("/api/daily-ops-brief").json()
+    assert brief["status"] == "yellow"
+    assert brief["next_queue"] == "onboarding"
+    assert brief["recommended_focus"] == dispatch["top_action"]
+
+
+def test_dispatch_healthy_populated_inventory_remains_clear(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Clear Dispatch", url="https://clear-dispatch.example"),
+        follow_redirects=False,
+    ).status_code == 303
+
+    dispatch = client.get("/api/dispatch-summary").json()
+    assert dispatch["status"] == "green"
+    assert dispatch["next_queue"] == "none"
+    assert dispatch["top_action"] == "Continue normal monitoring cadence."
+
+
 def test_api_dispatch_summary_returns_queue_level_operator_routing(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
