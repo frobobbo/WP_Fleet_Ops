@@ -327,6 +327,10 @@ def _pagination_navigation(limit: int, offset: int, returned_count: int, total_c
 def _recommended_action(alert: dict) -> str:
     """Translate an alert into a concise operator next step."""
     message = (alert.get("message") or "").lower()
+    # A backup-service outage is backup remediation, not proof that the site is
+    # down. Preserve site availability as the priority when both are reported.
+    if message.startswith("backup "):
+        return "Run and verify a fresh backup, then confirm backup scheduling."
     if re.search(r"\bdown\b", message) or "uptime" in message:
         return "Confirm site availability, hosting status, and recent deploys."
     if "ssl" in message or "certificate" in message:

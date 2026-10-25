@@ -369,12 +369,14 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
     make_test_client(tmp_path)
     import wp_fleet_ops.main as main
 
-    assert main._recommended_action({"message": "Backup download failed."}) == (
-        "Run and verify a fresh backup, then confirm backup scheduling."
-    )
-    assert main._recommended_action({"message": "Site appears down or unreachable."}) == (
-        "Confirm site availability, hosting status, and recent deploys."
-    )
+    for message in ("Backup download failed.", "Backup server is down."):
+        assert main._recommended_action({"message": message}) == (
+            "Run and verify a fresh backup, then confirm backup scheduling."
+        )
+    for message in ("Site appears down or unreachable.", "Site is down; backup is stale."):
+        assert main._recommended_action({"message": message}) == (
+            "Confirm site availability, hosting status, and recent deploys."
+        )
 
 
 def test_fetched_check_uses_detailed_security_header_score(
