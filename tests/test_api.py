@@ -375,6 +375,8 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
         "Backup-service is down.",
         "The backup service is down.",
         "Scheduled backups are down.",
+        "Nightly backup service is down.",
+        "The daily backup job is down.",
     ):
         assert main._recommended_action({"message": message}) == (
             "Run and verify a fresh backup, then confirm backup scheduling."
