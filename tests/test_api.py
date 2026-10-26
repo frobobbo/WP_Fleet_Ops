@@ -369,7 +369,11 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
     make_test_client(tmp_path)
     import wp_fleet_ops.main as main
 
-    for message in ("Backup download failed.", "Backup server is down."):
+    for message in (
+        "Backup download failed.",
+        "Backup server is down.",
+        "Backup-service is down.",
+    ):
         assert main._recommended_action({"message": message}) == (
             "Run and verify a fresh backup, then confirm backup scheduling."
         )

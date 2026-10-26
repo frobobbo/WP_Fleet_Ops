@@ -329,7 +329,7 @@ def _recommended_action(alert: dict) -> str:
     message = (alert.get("message") or "").lower()
     # A backup-service outage is backup remediation, not proof that the site is
     # down. Preserve site availability as the priority when both are reported.
-    if message.startswith("backup "):
+    if message.startswith(("backup ", "backup-")):
         return "Run and verify a fresh backup, then confirm backup scheduling."
     if re.search(r"\bdown\b", message) or "uptime" in message:
         return "Confirm site availability, hosting status, and recent deploys."
