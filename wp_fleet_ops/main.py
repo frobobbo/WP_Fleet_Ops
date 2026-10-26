@@ -328,8 +328,9 @@ def _recommended_action(alert: dict) -> str:
     """Translate an alert into a concise operator next step."""
     message = (alert.get("message") or "").lower()
     # A backup-service outage is backup remediation, not proof that the site is
-    # down. Preserve site availability as the priority when both are reported.
-    if message.startswith(("backup ", "backup-")):
+    # down. Handle common leading qualifiers and plural backups, but preserve
+    # site availability as the priority when an outage alert starts with "site".
+    if re.match(r"^(?:(?:the|a|scheduled) )?backups?(?:\b|[-_])", message):
         return "Run and verify a fresh backup, then confirm backup scheduling."
     if re.search(r"\bdown\b", message) or "uptime" in message:
         return "Confirm site availability, hosting status, and recent deploys."
