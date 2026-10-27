@@ -348,6 +348,8 @@ def _recommended_action(alert: dict) -> str:
     if "hsts is ineffective over http" in message:
         if "clickjacking protection is missing" in message:
             return "Serve the site over HTTPS and add clickjacking protection headers."
+        if "clickjacking protection is unverified" in message:
+            return "Serve the site over HTTPS and verify clickjacking protection headers."
         return "Serve the site over HTTPS before relying on HSTS coverage."
     if "security" in message or "header" in message:
         return "Add or correct the missing security headers."

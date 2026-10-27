@@ -1238,6 +1238,25 @@ def test_count_only_plain_http_with_no_headers_flags_missing_framing_protection(
     ]
 
 
+def test_count_only_plain_http_with_one_header_does_not_assume_framing_protection():
+    # The single reported field might be HSTS, which browsers ignore on HTTP.
+    site = FleetSite("Plain HTTP", "http://plain-http.example", True, 90, 0, 24, 250, 1)
+
+    assert calculate_health_score(site) == 92
+    assert [alert.message for alert in generate_alerts(site)] == [
+        "Security headers need review: HSTS is ineffective over HTTP and clickjacking protection is unverified."
+    ]
+
+
+def test_count_only_plain_http_with_two_headers_has_at_least_one_framing_control():
+    site = FleetSite("Plain HTTP", "http://plain-http.example", True, 90, 0, 24, 250, 2)
+
+    assert calculate_health_score(site) == 96
+    assert [alert.message for alert in generate_alerts(site)] == [
+        "Security headers need review: HSTS is ineffective over HTTP."
+    ]
+
+
 def test_named_headers_cannot_claim_hsts_coverage_over_plain_http():
     site = FleetSite("Plain HTTP", "http://plain-http.example", True, 90, 0, 24, 250, 3)
 

@@ -73,6 +73,10 @@ def calculate_health_score(site: FleetSite) -> int:
         # HSTS received over HTTP is ignored by browsers. Count-only snapshots
         # therefore cannot claim complete transport-security coverage for a
         # plain-HTTP endpoint, even when all three monitored fields were reported.
+        # With exactly one header, it could be ineffective HSTS alone, so there
+        # is no evidence that framing protection exists either.
+        if site.security_header_count == 1:
+            missing_security_points = 8
         missing_security_points = max(4, missing_security_points)
     score -= missing_security_points
     return max(0, min(100, score))
@@ -105,11 +109,13 @@ def generate_alerts(
         alerts.append(Alert(site.name, "warning", f"Homepage response time is {site.response_ms} ms."))
     if security_headers is None and urlparse(site.url).scheme.lower() == "http":
         # Without named header evidence, zero reported headers proves both
-        # transport and framing protection are absent. A nonzero count cannot
-        # identify which of the framing controls was actually supplied.
+        # controls absent; one could be ineffective HSTS alone. Two or more
+        # fields guarantee at least one framing control among the three monitored.
         message = "Security headers need review: HSTS is ineffective over HTTP"
         if site.security_header_count == 0:
             message += " and clickjacking protection is missing"
+        elif site.security_header_count == 1:
+            message += " and clickjacking protection is unverified"
         alerts.append(Alert(site.name, "info", message + "."))
     elif security_headers is None and site.security_header_count < 2:
         alerts.append(Alert(site.name, "info", "Security headers need review."))
