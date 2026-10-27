@@ -61,11 +61,15 @@ def calculate_health_score(site: FleetSite) -> int:
     if site.response_ms > 1200:
         score -= 10
     if site.security_header_count == 0:
-        # CarePulse deducts four points for missing HSTS and four for missing
-        # clickjacking protection. Match that breakdown so the dashboard and
-        # paired care report assign the same score to count-only snapshots.
+        # No named evidence exists for either browser control.
         missing_security_points = 8
     elif site.security_header_count == 1:
+        # One of the three monitored fields cannot prove *which* control is
+        # present. In particular, a framing header is not evidence of HSTS.
+        missing_security_points = 8
+    elif site.security_header_count == 2:
+        # Two fields guarantee at least one framing header, but both may be
+        # framing headers (XFO and CSP), leaving HSTS unverified.
         missing_security_points = 4
     else:
         missing_security_points = 0
@@ -117,7 +121,11 @@ def generate_alerts(
         elif site.security_header_count == 1:
             message += " and clickjacking protection is unverified"
         alerts.append(Alert(site.name, "info", message + "."))
-    elif security_headers is None and site.security_header_count < 2:
+    elif security_headers is None and site.security_header_count == 1:
+        alerts.append(Alert(site.name, "info", "Security headers need review: HSTS and clickjacking protection are unverified."))
+    elif security_headers is None and site.security_header_count == 2:
+        alerts.append(Alert(site.name, "info", "Security headers need review: HSTS is unverified."))
+    elif security_headers is None and site.security_header_count == 0:
         alerts.append(Alert(site.name, "info", "Security headers need review."))
     elif security_headers is not None:
         normalized_headers = {header.lower() for header in security_headers}

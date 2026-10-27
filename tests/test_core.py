@@ -1209,7 +1209,10 @@ def test_fleet_security_score_matches_care_checks(security_header_count, securit
     )
     fleet_site = FleetSite("Security Coverage", care_check.url, True, 60, 0, 24, 250, security_header_count)
 
-    assert calculate_health_score(fleet_site) == care_check.score == expected_score
+    # The care check has named headers; FleetSite deliberately keeps only a
+    # count. It cannot infer which control was present from that count alone.
+    assert care_check.score == expected_score
+    assert calculate_health_score(fleet_site) <= expected_score
 
 
 def test_count_only_plain_http_snapshot_cannot_claim_hsts_coverage():
@@ -1255,6 +1258,20 @@ def test_count_only_plain_http_with_two_headers_has_at_least_one_framing_control
     assert [alert.message for alert in generate_alerts(site)] == [
         "Security headers need review: HSTS is ineffective over HTTP."
     ]
+
+@pytest.mark.parametrize(
+    ("count", "score", "message"),
+    [
+        (1, 92, "Security headers need review: HSTS and clickjacking protection are unverified."),
+        (2, 96, "Security headers need review: HSTS is unverified."),
+        (3, 100, None),
+    ],
+)
+def test_count_only_https_does_not_assume_which_headers_are_present(count, score, message):
+    site = FleetSite("Unknown headers", "https://unknown.example", True, 90, 0, 24, 250, count)
+
+    assert calculate_health_score(site) == score
+    assert [alert.message for alert in generate_alerts(site)] == ([message] if message else [])
 
 
 def test_named_headers_cannot_claim_hsts_coverage_over_plain_http():

@@ -431,6 +431,7 @@ def evaluate_site(
     backup_age_hours: int,
     security_headers: dict[str, str] | None = None,
     security_header_url: str | None = None,
+    security_header_count: int | None = None,
 ) -> SiteCheck:
     if http_status != 0 and not 100 <= http_status <= 599:
         raise ValueError("http_status must be 0 or between 100 and 599.")
@@ -456,6 +457,8 @@ def evaluate_site(
         else normalized_url
     )
     headers = _monitored_security_headers(security_headers or {}, header_response_url)
+    if security_header_count is not None and not 0 <= security_header_count <= len(MONITORED_SECURITY_HEADERS):
+        raise ValueError("security_header_count must be between 0 and 3.")
     score = 100
     actions: list[str] = []
     # urllib follows ordinary redirects; an unresolved redirect has not proved
@@ -482,12 +485,29 @@ def evaluate_site(
     elif backup_age_hours > 36:
         score -= 8
         actions.append(f"Check backup freshness: latest backup is {backup_age_hours} hours old.")
-    if "strict-transport-security" not in headers:
+    # Manual snapshots report only a count, not header identities. One field
+    # proves neither control; two prove framing but not HSTS. Never manufacture
+    # concrete header evidence in the persisted care check.
+    hsts_verified = (
+        "strict-transport-security" in headers
+        if security_header_count is None
+        else security_header_count == 3 and header_response_url.startswith("https://")
+    )
+    framing_verified = (
+        "x-frame-options" in headers or "content-security-policy" in headers
+        if security_header_count is None
+        else security_header_count >= 2
+    )
+    if not hsts_verified:
         score -= 4
         actions.append("Add or verify HSTS security header.")
-    if "x-frame-options" not in headers and "content-security-policy" not in headers:
+    if not framing_verified:
         score -= 4
-        actions.append("Add clickjacking protection header.")
+        actions.append(
+            "Verify clickjacking protection header."
+            if security_header_count == 1
+            else "Add clickjacking protection header."
+        )
     score = max(0, min(100, score))
     status = status_from_score(score)
     if status == "green":

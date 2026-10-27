@@ -407,6 +407,26 @@ def test_action_router_verifies_uncertain_plain_http_framing_protection(tmp_path
     }) == "Serve the site over HTTPS and verify clickjacking protection headers."
 
 
+@pytest.mark.parametrize("count, expected_score", [(1, 92), (2, 96), (3, 100)])
+def test_count_only_snapshot_does_not_invent_named_header_evidence(tmp_path, count, expected_score):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(security_header_count=str(count)),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    check = client.get("/api/care-check-history").json()["care_checks"][0]
+    snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    assert check["score"] == snapshot["score"] == expected_score
+    assert check["security_headers"] == {}
+    if count < 3:
+        assert "HSTS" in snapshot["alerts"][0]["message"]
+        action = client.get("/api/actions").json()["actions"][0]["recommended_action"]
+        assert action == "Verify the named HSTS and clickjacking headers before claiming security coverage."
+
+
 def test_fetched_check_uses_detailed_security_header_score(
     tmp_path,
     monkeypatch,

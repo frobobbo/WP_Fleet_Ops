@@ -351,6 +351,8 @@ def _recommended_action(alert: dict) -> str:
         if "clickjacking protection is unverified" in message:
             return "Serve the site over HTTPS and verify clickjacking protection headers."
         return "Serve the site over HTTPS before relying on HSTS coverage."
+    if "security headers need review" in message and "unverified" in message:
+        return "Verify the named HSTS and clickjacking headers before claiming security coverage."
     if "security" in message or "header" in message:
         return "Add or correct the missing security headers."
     return "Review the site dashboard and resolve the reported condition."
@@ -6705,19 +6707,6 @@ def fetch_care_check(
     return RedirectResponse("/", status_code=303)
 
 
-def _security_headers_from_count(security_header_count: int) -> dict[str, str]:
-    """Represent count-only snapshots in care reports without losing coverage."""
-    bounded_count = max(0, min(security_header_count, len(MONITORED_SECURITY_HEADERS)))
-    representative_values = {
-        "strict-transport-security": "max-age=1",
-        "x-frame-options": "SAMEORIGIN",
-        "content-security-policy": "frame-ancestors 'self'",
-    }
-    return {
-        header: representative_values[header]
-        for header in MONITORED_SECURITY_HEADERS[:bounded_count]
-    }
-
 
 @app.post("/snapshot")
 def snapshot(
@@ -6745,7 +6734,8 @@ def snapshot(
         "unknown",
         wp_updates,
         backup_age_hours,
-        _security_headers_from_count(security_header_count),
+        {},
+        security_header_count=security_header_count,
     )
     store.save_observation(
         name,
