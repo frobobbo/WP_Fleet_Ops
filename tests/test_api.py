@@ -389,6 +389,15 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
         )
 
 
+def test_action_router_addresses_both_missing_plain_http_controls(tmp_path):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({
+        "message": "Security headers need review: HSTS is ineffective over HTTP and clickjacking protection is missing."
+    }) == "Serve the site over HTTPS and add clickjacking protection headers."
+
+
 def test_fetched_check_uses_detailed_security_header_score(
     tmp_path,
     monkeypatch,

@@ -104,13 +104,13 @@ def generate_alerts(
     if site.response_ms > 1200:
         alerts.append(Alert(site.name, "warning", f"Homepage response time is {site.response_ms} ms."))
     if security_headers is None and urlparse(site.url).scheme.lower() == "http":
-        alerts.append(
-            Alert(
-                site.name,
-                "info",
-                "Security headers need review: HSTS is ineffective over HTTP.",
-            )
-        )
+        # Without named header evidence, zero reported headers proves both
+        # transport and framing protection are absent. A nonzero count cannot
+        # identify which of the framing controls was actually supplied.
+        message = "Security headers need review: HSTS is ineffective over HTTP"
+        if site.security_header_count == 0:
+            message += " and clickjacking protection is missing"
+        alerts.append(Alert(site.name, "info", message + "."))
     elif security_headers is None and site.security_header_count < 2:
         alerts.append(Alert(site.name, "info", "Security headers need review."))
     elif security_headers is not None:

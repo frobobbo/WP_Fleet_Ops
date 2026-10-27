@@ -346,6 +346,8 @@ def _recommended_action(alert: dict) -> str:
     if "slow" in message or "response" in message or "latency" in message:
         return "Review performance, caching, and upstream response time."
     if "hsts is ineffective over http" in message:
+        if "clickjacking protection is missing" in message:
+            return "Serve the site over HTTPS and add clickjacking protection headers."
         return "Serve the site over HTTPS before relying on HSTS coverage."
     if "security" in message or "header" in message:
         return "Add or correct the missing security headers."

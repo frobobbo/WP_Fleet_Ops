@@ -1230,6 +1230,14 @@ def test_count_only_plain_http_snapshot_cannot_claim_hsts_coverage():
     ]
 
 
+def test_count_only_plain_http_with_no_headers_flags_missing_framing_protection():
+    site = FleetSite("Plain HTTP", "http://plain-http.example", True, 90, 0, 24, 250, 0)
+
+    assert [alert.message for alert in generate_alerts(site)] == [
+        "Security headers need review: HSTS is ineffective over HTTP and clickjacking protection is missing."
+    ]
+
+
 def test_named_headers_cannot_claim_hsts_coverage_over_plain_http():
     site = FleetSite("Plain HTTP", "http://plain-http.example", True, 90, 0, 24, 250, 3)
 
