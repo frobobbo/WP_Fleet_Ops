@@ -61,6 +61,21 @@ def test_out_of_range_utc_observation_is_invalid_not_a_server_error(tmp_path, ba
     ) is None
 
 
+def test_snapshot_without_header_count_does_not_invent_security_evidence(tmp_path):
+    client = make_test_client(tmp_path)
+    payload = valid_snapshot_payload()
+    payload.pop("security_header_count")
+    response = client.post("/snapshot", data=payload, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert 'name="security_header_count" type="number" min="0" max="3" value="0"' in client.get("/").text
+    snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    assert snapshot["security_header_count"] == 0
+    site = client.get("/api/sites").json()["sites"][0]
+    assert site["observed_score"] == 92
+    assert any("Security headers need review" in alert["message"] for alert in site["observed_alerts"])
+
+
 def test_manual_not_modified_response_marks_paired_uptime_down(tmp_path):
     client = make_test_client(tmp_path)
     response = client.post(

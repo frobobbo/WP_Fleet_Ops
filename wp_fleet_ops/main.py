@@ -6720,7 +6720,8 @@ def snapshot(
     wp_updates: int = Form(0, ge=0, le=SQLITE_INTEGER_MAX),
     backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),
     response_ms: int = Form(250, ge=0, le=SQLITE_INTEGER_MAX),
-    security_header_count: int = Form(3, ge=0, le=3),
+    # Absence of this optional field cannot establish any browser protection.
+    security_header_count: int = Form(0, ge=0, le=3),
 ):
     name = normalize_site_name(name)
     url = normalize_site_url(url)
