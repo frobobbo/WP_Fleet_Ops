@@ -952,6 +952,42 @@ def test_care_evaluation_rejects_invalid_http_statuses(http_status):
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("http_status", True),
+        ("http_status", 200.5),
+        ("latency_ms", False),
+        ("latency_ms", 250.5),
+        ("ssl_days_remaining", True),
+        ("ssl_days_remaining", 60.5),
+        ("update_count", False),
+        ("update_count", 1.5),
+        ("backup_age_hours", True),
+        ("backup_age_hours", 24.5),
+        ("security_header_count", False),
+        ("security_header_count", 1.5),
+    ],
+)
+def test_care_evaluation_rejects_noninteger_telemetry(field, value):
+    metrics = {
+        "http_status": 200,
+        "latency_ms": 250,
+        "ssl_days_remaining": 60,
+        "update_count": 0,
+        "backup_age_hours": 24,
+        "security_header_count": 2,
+    }
+    metrics[field] = value
+    with pytest.raises(ValueError, match=f"{field} must be an integer"):
+        evaluate_site(
+            "Integer Telemetry", "https://integer-telemetry.example",
+            metrics["http_status"], metrics["latency_ms"],
+            metrics["ssl_days_remaining"], "6.6", metrics["update_count"],
+            metrics["backup_age_hours"], security_header_count=metrics["security_header_count"],
+        )
+
+
 def test_care_evaluation_retains_zero_http_failure_sentinel():
     check = evaluate_site(
         "Unavailable Site",

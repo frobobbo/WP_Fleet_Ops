@@ -433,6 +433,18 @@ def evaluate_site(
     security_header_url: str | None = None,
     security_header_count: int | None = None,
 ) -> SiteCheck:
+    for field, value in (
+        ("http_status", http_status),
+        ("latency_ms", latency_ms),
+        ("ssl_days_remaining", ssl_days_remaining),
+        ("update_count", update_count),
+        ("backup_age_hours", backup_age_hours),
+        ("security_header_count", security_header_count),
+    ):
+        if value is not None and type(value) is not int:
+            # bool is an int subclass; neither booleans nor fractional counts
+            # are valid observations for scoring and SQLite history.
+            raise ValueError(f"{field} must be an integer.")
     if http_status != 0 and not 100 <= http_status <= 599:
         raise ValueError("http_status must be 0 or between 100 and 599.")
     for field, value in (
@@ -576,6 +588,8 @@ def fetch_basic_site_check(
         ("update_count", update_count),
         ("backup_age_hours", backup_age_hours),
     ):
+        if type(value) is not int:
+            raise ValueError(f"{field} must be an integer.")
         if value < 0:
             raise ValueError(f"{field} must not be negative.")
     effective_url = url
