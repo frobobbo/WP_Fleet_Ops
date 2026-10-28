@@ -239,7 +239,10 @@ def generate_maintenance_report(
             for a in alerts
         ] if alerts else [
             "- Review the paired care check and resolve its findings."
-            if escalated_by_care else "- Continue normal maintenance cadence."
+            if escalated_by_care else (
+                "- Investigate the low fleet health score; alert details are unavailable."
+                if score < 85 else "- Continue normal maintenance cadence."
+            )
         ]
         lines.append("")
     return "\n".join(lines).strip() + "\n"

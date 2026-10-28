@@ -1056,6 +1056,20 @@ def test_fleet_report_headings_respect_alert_severity_even_when_score_is_healthy
     assert "Critical sites: 1" in report
 
 
+@pytest.mark.parametrize("score, heading", [(60, "Needs attention"), (80, "Watch")])
+def test_fleet_report_does_not_recommend_normal_cadence_for_low_score_without_alerts(score, heading):
+    # Imported or incomplete saved evidence can have a low score but no alert
+    # details. The fallback recommendation must not contradict the site heading.
+    site = FleetSite("Incomplete Alerts", "https://incomplete.example", True, 90, 0, 12, 200, 3)
+    report = generate_maintenance_report(
+        [site], saved_evidence={site.url: (score, [])}
+    )
+
+    assert f"## Incomplete Alerts — {heading}" in report
+    assert "Investigate the low fleet health score; alert details are unavailable." in report
+    assert "Continue normal maintenance cadence." not in report
+
+
 def test_fleet_report_counts_red_score_without_critical_alert_as_critical_site():
     # Several warning-level issues can push the combined score into red even
     # when no individual alert is critical. The summary must match the heading.
