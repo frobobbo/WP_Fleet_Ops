@@ -20,15 +20,22 @@ class FleetSite:
     security_header_count: int
 
     def __post_init__(self) -> None:
+        if type(self.uptime_ok) is not bool:
+            raise ValueError("uptime_ok must be a boolean.")
         for field, value in (
             ("ssl_days", self.ssl_days),
             ("wp_updates", self.wp_updates),
             ("backup_age_hours", self.backup_age_hours),
             ("response_ms", self.response_ms),
+            ("security_header_count", self.security_header_count),
         ):
+            # bool is an int subclass, but neither booleans nor fractional
+            # values are valid telemetry counts for scoring or SQLite history.
+            if type(value) is not int:
+                raise ValueError(f"{field} must be an integer.")
             if value < 0:
                 raise ValueError(f"{field} must not be negative.")
-        if not 0 <= self.security_header_count <= 3:
+        if self.security_header_count > 3:
             raise ValueError("security_header_count must be between 0 and 3.")
 
     def to_dict(self) -> dict:

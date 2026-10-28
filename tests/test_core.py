@@ -1102,6 +1102,11 @@ def test_fleet_report_preserves_offsets_and_labels_legacy_utc_timestamps():
         ("response_ms", -1),
         ("security_header_count", -1),
         ("security_header_count", 4),
+        ("ssl_days", 30.5),
+        ("wp_updates", True),
+        ("backup_age_hours", 12.5),
+        ("response_ms", False),
+        ("security_header_count", 1.5),
     ],
 )
 def test_fleet_site_rejects_invalid_telemetry(field, value):
@@ -1125,6 +1130,11 @@ def test_fleet_site_rejects_invalid_telemetry(field, value):
             metrics["response_ms"],
             metrics["security_header_count"],
         )
+
+
+def test_fleet_site_rejects_nonboolean_uptime():
+    with pytest.raises(ValueError, match="uptime_ok"):
+        FleetSite("Integrity", "https://integrity.example", 1, 60, 0, 12, 250, 3)  # type: ignore[arg-type]
 
 
 def test_fleet_alerts_treat_seven_day_certificate_as_critical():
