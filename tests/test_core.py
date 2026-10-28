@@ -1070,6 +1070,27 @@ def test_fleet_report_does_not_recommend_normal_cadence_for_low_score_without_al
     assert "Continue normal maintenance cadence." not in report
 
 
+@pytest.mark.parametrize("score, status", [(60, "red"), (80, "yellow")])
+def test_care_report_recommends_investigation_when_low_score_has_no_actions(score, status):
+    check = evaluate_site("Incomplete Actions", "https://incomplete.example", 200, 200, 90, "6.6", 0, 12)
+    check = replace(check, score=score, status=status, actions=[])
+
+    report = summarize_care_report([check])
+
+    assert "Recommended actions:" in report
+    assert "- Investigate the low care health score; action details are unavailable." in report
+    assert "looks healthy" not in report
+
+
+def test_care_report_does_not_invent_actions_for_healthy_check():
+    check = evaluate_site(
+        "Healthy", "https://healthy.example", 200, 200, 90, "6.6", 0, 12,
+        {"strict-transport-security": "max-age=1", "x-frame-options": "DENY"},
+    )
+    assert check.score == 100 and check.actions == []
+    assert "Recommended actions:" not in summarize_care_report([check])
+
+
 def test_fleet_report_counts_red_score_without_critical_alert_as_critical_site():
     # Several warning-level issues can push the combined score into red even
     # when no individual alert is critical. The summary must match the heading.

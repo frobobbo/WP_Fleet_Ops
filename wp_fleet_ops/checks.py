@@ -710,10 +710,13 @@ def summarize_care_report(
         }
         if status != c.status:
             summary = "Paired fleet risk escalates this care status; review the fleet findings below."
-        elif c.summary == generated_summaries[c.status]:
-            # Preserve punctuation in the known generated narrative, escaping
-            # only the site label as before.
-            summary = c.summary.replace(c.name, markdown_literal(c.name), 1)
+        elif c.summary in generated_summaries.values():
+            # Stored status may have changed since this generated summary was
+            # saved. Render the current status instead of repeating a stale
+            # healthy claim for a low-scoring check.
+            summary = generated_summaries[c.status].replace(
+                c.name, markdown_literal(c.name), 1
+            )
         else:
             # Imported/persisted summaries are report data, not Markdown. Keep
             # them on one line so they cannot forge headings or links.
@@ -738,4 +741,12 @@ def summarize_care_report(
             # breaks before escaping so they cannot add headings or list items.
             lines += [f"- {markdown_literal(' '.join(a.split()))}" for a in c.actions]
             lines.append("")
+        elif c.score < 85:
+            # Older/imported checks can retain a poor score without action
+            # details. Never leave a low-scoring client report without a next step.
+            lines += [
+                "Recommended actions:",
+                "- Investigate the low care health score; action details are unavailable.",
+                "",
+            ]
     return "\n".join(lines).strip() + "\n"
