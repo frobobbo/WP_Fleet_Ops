@@ -329,9 +329,10 @@ def _recommended_action(alert: dict) -> str:
     message = (alert.get("message") or "").lower()
     # A backup-service outage is backup remediation, not proof that the site is
     # down. Handle cadence and backup-type qualifiers (including "the daily
-    # backup" and "offsite backup") while preserving site-first outage alerts.
+    # backup" and both spellings of "off-site backup") while preserving
+    # site-first outage alerts.
     if re.match(
-        r"^(?:(?:the|a|scheduled|nightly|daily|weekly|automated|offsite|incremental) )*backups?(?:\b|[-_])",
+        r"^(?:(?:the|a|scheduled|nightly|daily|weekly|automated|off[- ]?site|incremental) )*backups?(?:\b|[-_])",
         message,
     ):
         return "Run and verify a fresh backup, then confirm backup scheduling."
