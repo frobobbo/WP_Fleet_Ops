@@ -336,7 +336,14 @@ def _recommended_action(alert: dict) -> str:
         message,
     ):
         return "Run and verify a fresh backup, then confirm backup scheduling."
-    if re.search(r"\bdown\b", message) or "uptime" in message:
+    if (
+        re.search(r"\bdown\b", message)
+        or "uptime" in message
+        or re.search(
+            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable)\b",
+            message,
+        )
+    ):
         return "Confirm site availability, hosting status, and recent deploys."
     if "ssl" in message or "certificate" in message:
         return "Renew or replace the TLS certificate before it expires."

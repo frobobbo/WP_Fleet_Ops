@@ -406,6 +406,33 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
         )
 
 
+@pytest.mark.parametrize("message", [
+    "Site is unreachable.",
+    "Website is offline.",
+    "Homepage unavailable after deploy.",
+])
+def test_action_router_triages_imported_site_availability_alerts(tmp_path, message):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({"message": message}) == (
+        "Confirm site availability, hosting status, and recent deploys."
+    )
+
+
+@pytest.mark.parametrize("message", [
+    "Backup service is offline.",
+    "Off-site backup server unreachable.",
+])
+def test_action_router_keeps_imported_backup_outages_in_backup_lane(tmp_path, message):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({"message": message}) == (
+        "Run and verify a fresh backup, then confirm backup scheduling."
+    )
+
+
 def test_action_router_addresses_both_missing_plain_http_controls(tmp_path):
     make_test_client(tmp_path)
     import wp_fleet_ops.main as main
