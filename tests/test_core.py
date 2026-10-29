@@ -1082,6 +1082,34 @@ def test_care_report_recommends_investigation_when_low_score_has_no_actions(scor
     assert "looks healthy" not in report
 
 
+@pytest.mark.parametrize("status", ["red", "yellow"])
+def test_care_report_recommends_review_for_escalated_status_without_actions(status):
+    check = evaluate_site(
+        "Imported Risk", "https://imported-risk.example", 200, 200, 90, "6.6", 0, 12,
+        {"strict-transport-security": "max-age=1", "x-frame-options": "DENY"},
+    )
+    assert check.score == 100 and check.actions == []
+    report = summarize_care_report([replace(check, status=status)])
+
+    assert "Recommended actions:" in report
+    assert "- Review the flagged care status; action details are unavailable." in report
+    assert "Investigate the low care health score" not in report
+
+
+def test_care_report_recommends_paired_fleet_review_when_care_has_no_actions():
+    check = evaluate_site(
+        "Paired Risk", "https://paired-risk.example", 200, 200, 90, "6.6", 0, 12,
+        {"strict-transport-security": "max-age=1", "x-frame-options": "DENY"},
+    )
+    report = summarize_care_report(
+        [check], paired_fleet_status_by_url={check.url: "red"}
+    )
+
+    assert "## Paired Risk — Needs attention" in report
+    assert "Recommended actions:\n- Review the paired fleet findings below." in report
+    assert "Investigate the low care health score" not in report
+
+
 def test_care_report_does_not_invent_actions_for_healthy_check():
     check = evaluate_site(
         "Healthy", "https://healthy.example", 200, 200, 90, "6.6", 0, 12,

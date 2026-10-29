@@ -741,12 +741,15 @@ def summarize_care_report(
             # breaks before escaping so they cannot add headings or list items.
             lines += [f"- {markdown_literal(' '.join(a.split()))}" for a in c.actions]
             lines.append("")
-        elif c.score < 85:
-            # Older/imported checks can retain a poor score without action
-            # details. Never leave a low-scoring client report without a next step.
-            lines += [
-                "Recommended actions:",
-                "- Investigate the low care health score; action details are unavailable.",
-                "",
-            ]
+        elif status != "green" or c.score < 85:
+            # Older/imported checks can have no action details even when their
+            # stored status, score, or paired fleet evidence requires attention.
+            # Do not call a healthy care score low when the risk came from fleet.
+            if status != c.status:
+                next_step = "Review the paired fleet findings below."
+            elif c.score < 85:
+                next_step = "Investigate the low care health score; action details are unavailable."
+            else:
+                next_step = "Review the flagged care status; action details are unavailable."
+            lines += ["Recommended actions:", f"- {next_step}", ""]
     return "\n".join(lines).strip() + "\n"
