@@ -1082,6 +1082,25 @@ def test_care_report_recommends_investigation_when_low_score_has_no_actions(scor
     assert "looks healthy" not in report
 
 
+@pytest.mark.parametrize(
+    ("score", "heading", "summary_count"),
+    [(60, "Needs attention", "Needs attention: 1"), (80, "Maintenance scheduled", "Maintenance: 1")],
+)
+def test_care_report_escalates_low_score_with_stale_green_status(score, heading, summary_count):
+    check = evaluate_site(
+        "Imported Score", "https://imported-score.example", 200, 200, 90,
+        "6.6", 0, 12, {"strict-transport-security": "max-age=1", "x-frame-options": "DENY"},
+    )
+    assert check.status == "green" and check.actions == []
+    report = summarize_care_report([replace(check, score=score)])
+
+    assert f"## Imported Score — {heading}" in report
+    assert summary_count in report
+    assert "Imported Score looks healthy" not in report
+    assert "Investigate the low care health score; action details are unavailable." in report
+    assert "Paired fleet risk escalates" not in report
+
+
 @pytest.mark.parametrize("status", ["red", "yellow"])
 def test_care_report_recommends_review_for_escalated_status_without_actions(status):
     check = evaluate_site(

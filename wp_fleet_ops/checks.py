@@ -674,9 +674,18 @@ def summarize_care_report(
     total = len(checks)
     severity = {"green": 0, "yellow": 1, "red": 2}
     paired_fleet_status_by_url = paired_fleet_status_by_url or {}
-    statuses = [
-        max((c.status, paired_fleet_status_by_url.get(c.url, "green")), key=severity.__getitem__)
+    # Imports may preserve a stale status alongside a lower score. Never
+    # render that combination as healthy, even before paired fleet escalation.
+    care_statuses = [
+        max(
+            (c.status, "red" if c.score < 65 else "yellow" if c.score < 85 else "green"),
+            key=severity.__getitem__,
+        )
         for c in checks
+    ]
+    statuses = [
+        max((care_status, paired_fleet_status_by_url.get(c.url, "green")), key=severity.__getitem__)
+        for c, care_status in zip(checks, care_statuses)
     ]
     green = statuses.count("green")
     yellow = statuses.count("yellow")
@@ -701,15 +710,21 @@ def summarize_care_report(
                 "Register a site and capture a care check before reporting health.",
                 "",
             ]
-    for c, status in zip(checks, statuses):
+    for c, care_status, status in zip(checks, care_statuses, statuses):
         heading = "Healthy" if status == "green" else ("Maintenance scheduled" if status == "yellow" else "Needs attention")
         generated_summaries = {
             "green": f"{c.name} looks healthy. Minor recommendations can be handled during normal maintenance.",
             "yellow": f"{c.name} is stable but has maintenance items to schedule.",
             "red": f"{c.name} needs attention before the next client report.",
         }
-        if status != c.status:
+        if status != care_status:
             summary = "Paired fleet risk escalates this care status; review the fleet findings below."
+        elif care_status != c.status:
+            # An imported healthy summary is not authoritative when the
+            # persisted score itself requires maintenance or investigation.
+            summary = generated_summaries[care_status].replace(
+                c.name, markdown_literal(c.name), 1
+            )
         elif c.summary in generated_summaries.values():
             # Stored status may have changed since this generated summary was
             # saved. Render the current status instead of repeating a stale
@@ -745,7 +760,7 @@ def summarize_care_report(
             # Older/imported checks can have no action details even when their
             # stored status, score, or paired fleet evidence requires attention.
             # Do not call a healthy care score low when the risk came from fleet.
-            if status != c.status:
+            if status != care_status:
                 next_step = "Review the paired fleet findings below."
             elif c.score < 85:
                 next_step = "Investigate the low care health score; action details are unavailable."
