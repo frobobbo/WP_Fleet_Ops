@@ -410,6 +410,9 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
     "Site is unreachable.",
     "Website is offline.",
     "Homepage unavailable after deploy.",
+    "Homepage returned HTTP 503 after deploy.",
+    "Site request timed out.",
+    "Website timeout after deploy.",
 ])
 def test_action_router_triages_imported_site_availability_alerts(tmp_path, message):
     make_test_client(tmp_path)
@@ -423,6 +426,8 @@ def test_action_router_triages_imported_site_availability_alerts(tmp_path, messa
 @pytest.mark.parametrize("message", [
     "Backup service is offline.",
     "Off-site backup server unreachable.",
+    "Backup server returned HTTP 503.",
+    "Backup job timed out.",
 ])
 def test_action_router_keeps_imported_backup_outages_in_backup_lane(tmp_path, message):
     make_test_client(tmp_path)
