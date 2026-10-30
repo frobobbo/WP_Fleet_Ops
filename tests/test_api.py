@@ -438,6 +438,21 @@ def test_action_router_keeps_imported_backup_outages_in_backup_lane(tmp_path, me
     )
 
 
+@pytest.mark.parametrize("message", [
+    "Site backup service is down.",
+    "The site's backup job timed out.",
+    "Website off-site backup server is unreachable.",
+    "WordPress nightly backup job is offline.",
+])
+def test_action_router_keeps_site_qualified_backup_failures_in_backup_lane(tmp_path, message):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({"message": message}) == (
+        "Run and verify a fresh backup, then confirm backup scheduling."
+    )
+
+
 def test_action_router_addresses_both_missing_plain_http_controls(tmp_path):
     make_test_client(tmp_path)
     import wp_fleet_ops.main as main
