@@ -360,6 +360,9 @@ def _recommended_action(alert: dict) -> str:
             return "Serve the site over HTTPS and verify clickjacking protection headers."
         return "Serve the site over HTTPS before relying on HSTS coverage."
     if "security headers need review" in message and "unverified" in message:
+        if "hsts is unverified" in message and "clickjacking" not in message:
+            # Two count-only fields prove a framing control, but not HSTS.
+            return "Verify the HSTS header before claiming transport-security coverage."
         return "Verify the named HSTS and clickjacking headers before claiming security coverage."
     if "security" in message or "header" in message:
         return "Add or correct the missing security headers."

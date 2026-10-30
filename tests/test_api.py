@@ -468,7 +468,11 @@ def test_count_only_snapshot_does_not_invent_named_header_evidence(tmp_path, cou
     if count < 3:
         assert "HSTS" in snapshot["alerts"][0]["message"]
         action = client.get("/api/actions").json()["actions"][0]["recommended_action"]
-        assert action == "Verify the named HSTS and clickjacking headers before claiming security coverage."
+        assert action == (
+            "Verify the HSTS header before claiming transport-security coverage."
+            if count == 2 else
+            "Verify the named HSTS and clickjacking headers before claiming security coverage."
+        )
 
 
 def test_fetched_check_uses_detailed_security_header_score(
