@@ -346,8 +346,8 @@ def _recommended_action(alert: dict) -> str:
             # rather than using the words "down" or "unreachable". Require a
             # site/homepage subject so a backup-service HTTP error stays in its
             # own remediation lane. Imported probes also omit the "HTTP" label
-            # in messages such as "Homepage returned 503".
-            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable|timeout|timed out|http [45][0-9]{2}|(?:returned|returns?|responds?(?: with)?) (?:http |status )?[45][0-9]{2})\b",
+            # in messages such as "Homepage returned 503" or "Website returning 502".
+            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable|timeout|timed out|http [45][0-9]{2}|(?:(?:is )?returning|returned|returns?|responds?(?: with)?) (?:http |status )?[45][0-9]{2})\b",
             message,
         )
     ):

@@ -412,6 +412,8 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
     "Homepage unavailable after deploy.",
     "Homepage returned HTTP 503 after deploy.",
     "Homepage returned 503 after deploy.",
+    "Homepage is returning HTTP 503 after deploy.",
+    "Website returning 502 after deploy.",
     "Site returned status 502 after deploy.",
     "Website responds with 404.",
     "Site request timed out.",
