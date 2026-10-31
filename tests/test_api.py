@@ -453,6 +453,20 @@ def test_action_router_keeps_site_qualified_backup_failures_in_backup_lane(tmp_p
     )
 
 
+@pytest.mark.parametrize("message", [
+    "Plugin updates are pending.",
+    "WordPress core update available.",
+    "Theme updates available.",
+])
+def test_action_router_handles_common_wordpress_update_alerts(tmp_path, message):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({"message": message}) == (
+        "Schedule WordPress core, plugin, and theme updates."
+    )
+
+
 def test_action_router_addresses_both_missing_plain_http_controls(tmp_path):
     make_test_client(tmp_path)
     import wp_fleet_ops.main as main

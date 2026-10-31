@@ -355,7 +355,11 @@ def _recommended_action(alert: dict) -> str:
         return "Renew or replace the TLS certificate before it expires."
     if "backup" in message:
         return "Run and verify a fresh backup, then confirm backup scheduling."
-    if "wordpress updates" in message or "updates pending" in message:
+    if re.search(
+        r"\b(?:wordpress|wp|core|plugins?|themes?)(?:\s+core)?\s+updates?\b"
+        r"|\bupdates? (?:are )?(?:pending|available)\b",
+        message,
+    ):
         return "Schedule WordPress core, plugin, and theme updates."
     if "slow" in message or "response" in message or "latency" in message:
         return "Review performance, caching, and upstream response time."
