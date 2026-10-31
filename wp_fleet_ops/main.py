@@ -370,6 +370,17 @@ def _recommended_action(alert: dict) -> str:
             # Two count-only fields prove a framing control, but not HSTS.
             return "Verify the HSTS header before claiming transport-security coverage."
         return "Verify the named HSTS and clickjacking headers before claiming security coverage."
+    if message.startswith("security headers need review: missing "):
+        # Named header evidence identifies exactly which control needs repair;
+        # count-only snapshots continue to use the conservative review advice.
+        missing_hsts = "missing hsts" in message
+        missing_framing = "clickjacking protection" in message
+        if missing_hsts and missing_framing:
+            return "Add or verify HSTS over HTTPS and add a restrictive clickjacking protection header."
+        if missing_hsts:
+            return "Add or verify the HSTS security header over HTTPS."
+        if missing_framing:
+            return "Add a restrictive clickjacking protection header."
     if "security" in message or "header" in message:
         return "Add or correct the missing security headers."
     return "Review the site dashboard and resolve the reported condition."

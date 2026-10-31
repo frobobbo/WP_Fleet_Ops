@@ -471,6 +471,27 @@ def test_action_router_verifies_uncertain_plain_http_framing_protection(tmp_path
     }) == "Serve the site over HTTPS and verify clickjacking protection headers."
 
 
+@pytest.mark.parametrize(("message", "expected"), [
+    (
+        "Security headers need review: missing HSTS.",
+        "Add or verify the HSTS security header over HTTPS.",
+    ),
+    (
+        "Security headers need review: missing clickjacking protection.",
+        "Add a restrictive clickjacking protection header.",
+    ),
+    (
+        "Security headers need review: missing HSTS and clickjacking protection.",
+        "Add or verify HSTS over HTTPS and add a restrictive clickjacking protection header.",
+    ),
+])
+def test_action_router_names_missing_verified_security_controls(tmp_path, message, expected):
+    make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    assert main._recommended_action({"message": message}) == expected
+
+
 @pytest.mark.parametrize("count, expected_score", [(1, 92), (2, 96), (3, 100)])
 def test_count_only_snapshot_does_not_invent_named_header_evidence(tmp_path, count, expected_score):
     client = make_test_client(tmp_path)
@@ -543,7 +564,7 @@ def test_fetched_check_uses_detailed_security_header_score(
     assert actions["action_count"] == 1
     assert "HSTS" in actions["actions"][0]["message"]
     assert actions["actions"][0]["recommended_action"] == (
-        "Add or correct the missing security headers."
+        "Add or verify the HSTS security header over HTTPS."
     )
 
 
