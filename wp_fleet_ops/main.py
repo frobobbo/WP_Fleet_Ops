@@ -345,8 +345,9 @@ def _recommended_action(alert: dict) -> str:
             # Imported homepage probes often report an HTTP error or timeout
             # rather than using the words "down" or "unreachable". Require a
             # site/homepage subject so a backup-service HTTP error stays in its
-            # own remediation lane.
-            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable|timeout|timed out|http [45][0-9]{2})\b",
+            # own remediation lane. Imported probes also omit the "HTTP" label
+            # in messages such as "Homepage returned 503".
+            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable|timeout|timed out|http [45][0-9]{2}|(?:returned|returns?|responds?(?: with)?) (?:http |status )?[45][0-9]{2})\b",
             message,
         )
     ):
