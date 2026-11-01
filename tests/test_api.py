@@ -4199,6 +4199,34 @@ def test_api_availability_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+@pytest.mark.parametrize("http_status", [0, 503, 204])
+def test_api_availability_does_not_call_failed_paired_homepage_available(tmp_path, http_status):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Conflicting Evidence", url="https://conflict.example"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    # Imported observations may disagree even though normal combined captures
+    # derive both statuses from the same check. The endpoint must fail closed.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+
+    payload = client.get("/api/availability").json()
+    assert payload["status"] == "red"
+    assert payload["current_evidence_count"] == 1
+    assert payload["available_count"] == 0
+    assert payload["down_count"] == 1
+    site = payload["sites"][0]
+    assert site["snapshot_freshness"] == "current"
+    assert site["care_check_freshness"] == "current"
+    assert site["last_observed_reachable"] is True
+    assert site["reachable"] is False
+    assert site["availability_status"] == "down"
+    assert "Confirm site availability" in site["recommended_action"]
+
+
 def test_api_backups_empty_inventory_is_unverified(tmp_path):
     client = make_test_client(tmp_path)
 

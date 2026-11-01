@@ -1915,7 +1915,14 @@ def api_availability(client: str | None = None):
                 availability_status = "unknown"
                 reachable = None
             else:
-                reachable = last_observed_reachable
+                # Imports can preserve contradictory current observations. A
+                # successful fleet snapshot does not prove a usable homepage
+                # when its paired care response is an error or empty page.
+                reachable = bool(
+                    last_observed_reachable
+                    and care_check is not None
+                    and homepage_response_usable(care_check["http_status"])
+                )
                 availability_status = "available" if reachable else "down"
 
         sites.append(
