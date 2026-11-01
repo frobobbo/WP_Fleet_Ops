@@ -416,6 +416,9 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
     "Website returning 502 after deploy.",
     "Site returned status 502 after deploy.",
     "Website responds with 404.",
+    "Homepage responded with HTTP 503 after deploy.",
+    "Site responded with status 502 after deploy.",
+    "Website returned HTTP status 504 after deploy.",
     "Site request timed out.",
     "Website timeout after deploy.",
 ])
@@ -433,6 +436,7 @@ def test_action_router_triages_imported_site_availability_alerts(tmp_path, messa
     "Off-site backup server unreachable.",
     "Backup server returned HTTP 503.",
     "Backup server returned 503.",
+    "Backup server responded with HTTP 503.",
     "Backup job timed out.",
 ])
 def test_action_router_keeps_imported_backup_outages_in_backup_lane(tmp_path, message):

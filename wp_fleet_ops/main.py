@@ -347,7 +347,8 @@ def _recommended_action(alert: dict) -> str:
             # site/homepage subject so a backup-service HTTP error stays in its
             # own remediation lane. Imported probes also omit the "HTTP" label
             # in messages such as "Homepage returned 503" or "Website returning 502".
-            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable|timeout|timed out|http [45][0-9]{2}|(?:(?:is )?returning|returned|returns?|responds?(?: with)?) (?:http |status )?[45][0-9]{2})\b",
+            # Include common past-tense responses and "HTTP status 503" labels.
+            r"\b(?:site|website|homepage)\b[^.!?]*\b(?:unreachable|offline|unavailable|timeout|timed out|http (?:status )?[45][0-9]{2}|(?:(?:is )?returning|returned|returns?|respond(?:s|ed)?(?: with)?) (?:http (?:status )?|status )?[45][0-9]{2})\b",
             message,
         )
     ):
