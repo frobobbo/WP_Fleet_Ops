@@ -421,6 +421,10 @@ def test_action_router_does_not_confuse_backup_download_with_site_outage(tmp_pat
     "Website returned HTTP status 504 after deploy.",
     "Site request timed out.",
     "Website timeout after deploy.",
+    "Site DNS lookup failed after deploy.",
+    "Website DNS resolution failure after deploy.",
+    "Homepage connection refused after deploy.",
+    "Site failed to connect after deploy.",
 ])
 def test_action_router_triages_imported_site_availability_alerts(tmp_path, message):
     make_test_client(tmp_path)
@@ -438,6 +442,8 @@ def test_action_router_triages_imported_site_availability_alerts(tmp_path, messa
     "Backup server returned 503.",
     "Backup server responded with HTTP 503.",
     "Backup job timed out.",
+    "Website backup server DNS lookup failed.",
+    "Site backup connection refused.",
 ])
 def test_action_router_keeps_imported_backup_outages_in_backup_lane(tmp_path, message):
     make_test_client(tmp_path)
