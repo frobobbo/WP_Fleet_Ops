@@ -1361,6 +1361,30 @@ def test_api_summary_does_not_hide_a_current_risky_care_check(tmp_path, care_sco
     assert summary["needs_attention"] == (1 if care_status == "red" else 0)
 
 
+@pytest.mark.parametrize(("care_score", "expected_status"), [(60, "red"), (80, "yellow")])
+def test_api_summary_reconciles_imported_care_score_with_stale_green_status(
+    tmp_path, care_score, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Imported Risk", url="https://imported-risk.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    # Imported data can retain its old green status despite a corrected score.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = ?", (care_score,))
+
+    summary = client.get("/api/summary").json()
+    assert summary["current_evidence_count"] == 1
+    assert summary["average_score"] == 100  # Fleet snapshot is still healthy.
+    assert summary["overall_status"] == expected_status
+    assert summary["healthy_sites"] == 0
+    assert summary["maintenance_sites"] == (expected_status == "yellow")
+    assert summary["needs_attention"] == (expected_status == "red")
+    assert summary["client_risks"] == (expected_status == "red")
+
+
 def test_current_warning_alert_prevents_healthy_site_and_account_status(tmp_path):
     client = make_test_client(tmp_path)
     response = client.post(

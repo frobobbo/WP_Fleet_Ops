@@ -462,7 +462,13 @@ def _summary_payload(
     # Snapshot score and care status may disagree after a corrected check.
     # Keep average_score as the measured fleet score, but count site health
     # using both current halves of the paired evidence.
-    care_status_by_url = {check["url"]: check["status"] for check in current_care_checks}
+    # Imported checks can retain a stale green status after their score was
+    # corrected. The exported report reconciles both; keep live rollups in
+    # agreement instead of declaring that site (and its client) healthy.
+    care_status_by_url = {
+        check["url"]: _paired_site_status(check["status"], _dashboard_status(check["score"]))
+        for check in current_care_checks
+    }
     site_statuses = []
     for row in current_rows:
         fleet_status = _alert_aware_status(row["score"], row["alerts"])
@@ -477,7 +483,7 @@ def _summary_payload(
     # Use only paired, fresh evidence; stale or unpaired historical scores must
     # not escalate the live status (their coverage gaps remain yellow below).
     if critical_alerts or any(row["score"] < 65 for row in current_rows) or any(
-        check["status"] == "red" for check in current_care_checks
+        care_status_by_url[check["url"]] == "red" for check in current_care_checks
     ):
         overall_status = "red"
     elif (
@@ -492,7 +498,7 @@ def _summary_payload(
         or clock_skew_care_check_count
         or any(row["score"] < 85 for row in current_rows)
         or "yellow" in site_statuses
-        or any(check["status"] == "yellow" for check in current_care_checks)
+        or any(care_status_by_url[check["url"]] == "yellow" for check in current_care_checks)
         or (average_score is not None and average_score < 85)
     ):
         overall_status = "yellow"
@@ -526,7 +532,7 @@ def _summary_payload(
         "healthy_sites": site_statuses.count("green"),
         "maintenance_sites": site_statuses.count("yellow"),
         "needs_attention": site_statuses.count("red"),
-        "client_risks": sum(1 for check in current_care_checks if check["status"] == "red"),
+        "client_risks": sum(1 for check in current_care_checks if care_status_by_url[check["url"]] == "red"),
         "critical_alerts": critical_alerts,
         "average_score": average_score,
         "observed_average_score": observed_average_score,
