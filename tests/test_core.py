@@ -327,6 +327,9 @@ def test_helm_connection_test_checks_required_app_surfaces():
     assert '"${base_url}/report"' in helm_test
     assert "WP FleetOps Maintenance Report" in helm_test
     assert '"${base_url}/api/report"' in helm_test
+    assert '"${base_url}/api/availability"' in helm_test
+    assert "availability_response=" in helm_test
+    assert "'\"site_count\":[0-9]+'" in helm_test
     assert '"tracked_site_count"' in helm_test
     assert '"monitoring_gap_count"' in helm_test
     assert '"helm.sh/hook-delete-policy": before-hook-creation' in helm_test

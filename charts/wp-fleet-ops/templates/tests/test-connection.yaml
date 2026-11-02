@@ -44,3 +44,6 @@ spec:
           printf '%s' "${api_report}" | grep -Fq 'WP FleetOps Maintenance Report'
           printf '%s' "${api_report}" | grep -Eq '"tracked_site_count":[0-9]+'
           printf '%s' "${api_report}" | grep -Eq '"monitoring_gap_count":[0-9]+'
+          availability_response="$(wget -qO- "${base_url}/api/availability")"
+          printf '%s' "${availability_response}" | grep -Eq '"site_count":[0-9]+'
+          printf '%s' "${availability_response}" | grep -Eq '"monitoring_gap_count":[0-9]+'
