@@ -4048,14 +4048,19 @@ def test_api_availability_fails_closed_for_missing_and_stale_evidence(tmp_path):
     assert missing["reachable"] is None
     assert missing["last_observed_reachable"] is None
     assert missing["latest_snapshot_at"] is None
+    assert missing["current_http_status"] is None
+    assert missing["last_observed_http_status"] is None
     assert stale["availability_status"] == "unknown"
     assert stale["snapshot_freshness"] == "stale"
     assert stale["reachable"] is None
     assert stale["last_observed_reachable"] is True
+    assert stale["current_http_status"] is None
+    assert stale["last_observed_http_status"] == 200
     assert stale["snapshot_age_hours"] > 168
     assert healthy["availability_status"] == "available"
     assert healthy["snapshot_freshness"] == "current"
     assert healthy["reachable"] is True
+    assert healthy["current_http_status"] == healthy["last_observed_http_status"] == 200
 
 
 def test_api_availability_filters_sites_and_evidence_by_client_and_unassigned(tmp_path):
@@ -4218,6 +4223,8 @@ def test_api_availability_requires_current_paired_care_evidence(tmp_path):
     assert site["evidence_status"] == "incomplete"
     assert site["reachable"] is None
     assert site["last_observed_reachable"] is False
+    assert site["current_http_status"] is None
+    assert site["last_observed_http_status"] == 0
     assert site["recommended_action"] == (
         "Capture a fresh care check before relying on availability status."
     )
@@ -4247,6 +4254,8 @@ def test_api_availability_does_not_call_failed_paired_homepage_available(tmp_pat
     assert site["care_check_freshness"] == "current"
     assert site["last_observed_reachable"] is True
     assert site["reachable"] is False
+    assert site["current_http_status"] == http_status
+    assert site["last_observed_http_status"] == http_status
     assert site["availability_status"] == "down"
     assert "Confirm site availability" in site["recommended_action"]
 

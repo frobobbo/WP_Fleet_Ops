@@ -1942,6 +1942,19 @@ def api_availability(client: str | None = None):
                 ),
                 "reachable": reachable,
                 "last_observed_reachable": last_observed_reachable,
+                # A recent care response is not a current availability signal
+                # without a matching current fleet snapshot. Keep historical
+                # HTTP evidence separately for investigating unknown sites.
+                "current_http_status": (
+                    care_check["http_status"]
+                    if care_check is not None
+                    and freshness == "current"
+                    and care_check_freshness == "current"
+                    else None
+                ),
+                "last_observed_http_status": (
+                    care_check["http_status"] if care_check is not None else None
+                ),
                 "latest_snapshot_at": latest_snapshot_at,
                 "latest_care_check_at": (
                     care_check.get("checked_at") if care_check else None
