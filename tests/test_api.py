@@ -2774,6 +2774,77 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     assert payload["sites"][2]["breaches"][0]["severity"] == "warning"
 
 
+@pytest.mark.parametrize("http_status", [0, 201, 204, 206, 299, 302, 304, 404, 503])
+def test_api_sla_breaches_reconciles_failed_paired_homepage(tmp_path, http_status):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="SLA Conflict", url="https://sla-conflict.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    # Imported evidence can disagree even when both observation times are current.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+
+    response = client.get("/api/sla-breaches")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "red"
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["breach_count"] == payload["critical_breach_count"] == 1
+    site = payload["sites"][0]
+    assert site["sla_status"] == "breached"
+    assert site["highest_severity"] == "critical"
+    assert site["breach_count"] == 1
+    assert [breach["target"] for breach in site["breaches"]] == ["availability"]
+    assert site["last_observed_breaches"] == site["breaches"]
+    assert "Confirm site availability" in site["recommended_action"]
+    assert client.get("/api/availability").json()["down_count"] == 1
+
+
+@pytest.mark.parametrize("http_status", [200, 203])
+def test_api_sla_breaches_accepts_usable_paired_homepage(tmp_path, http_status):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="SLA Page", url="https://sla-page.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+
+    payload = client.get("/api/sla-breaches").json()
+    assert payload["status"] == "green"
+    assert payload["current_evidence_count"] == 1
+    assert payload["breach_count"] == 0
+    assert payload["sites"] == []
+
+
+@pytest.mark.parametrize("stale_source", ["snapshots", "care_checks"])
+def test_api_sla_breaches_does_not_escalate_stale_paired_homepage(tmp_path, stale_source):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="SLA Stale Conflict", url="https://sla-stale.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = 503")
+        timestamp = "captured_at" if stale_source == "snapshots" else "checked_at"
+        con.execute(f"update {stale_source} set {timestamp} = ?", ("2000-01-01 00:00:00",))
+
+    payload = client.get("/api/sla-breaches").json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["breach_count"] == payload["critical_breach_count"] == 0
+    site = payload["sites"][0]
+    assert site["sla_status"] == "unknown"
+    assert site["breaches"] == []
+    assert site["last_observed_breaches"][0]["target"] == "availability"
+
+
 def test_api_sla_breaches_filters_sites_and_evidence_by_client_and_unassigned(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
