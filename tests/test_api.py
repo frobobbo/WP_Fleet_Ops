@@ -4130,6 +4130,30 @@ def test_api_availability_filters_sites_and_evidence_by_client_and_unassigned(tm
     ]
 
 
+def test_api_availability_orders_same_named_sites_by_url_regardless_of_store_order(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    for url in ("https://a-availability.example", "https://z-availability.example"):
+        response = client.post(
+            "/sites",
+            data={"name": "Same Name", "url": url, "client": "Same Client"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    import wp_fleet_ops.main as main
+
+    original_list_sites = main.store.list_sites
+    monkeypatch.setattr(main.store, "list_sites", lambda: list(reversed(original_list_sites())))
+    response = client.get("/api/availability", params={"client": "Same Client"})
+
+    assert response.status_code == 200
+    assert response.json()["unknown_count"] == 2
+    assert [site["url"] for site in response.json()["sites"]] == [
+        "https://a-availability.example",
+        "https://z-availability.example",
+    ]
+
+
 def test_api_availability_rejects_unknown_client(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

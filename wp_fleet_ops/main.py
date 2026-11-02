@@ -1965,6 +1965,9 @@ def api_availability(client: str | None = None):
             ),
             site["client"].lower(),
             site["name"].lower(),
+            # Names are not unique per client. Keep output stable even when
+            # the storage layer changes its enumeration order.
+            site["url"],
         )
     )
     current_snapshot_count = sum(
