@@ -6174,6 +6174,52 @@ def test_api_actions_include_thirty_day_certificate_renewals(tmp_path):
     assert markdown_literal("Plan SSL renewal: 30 day(s) remaining.") in client.get("/report").text
 
 
+def test_api_certificate_renewal_calendar_empty_inventory_is_unverified(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/certificate-renewal-calendar")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["renewal_evidence_percent"] == 0
+    assert payload["renewal_count"] == 0
+    assert payload["overdue_count"] == 0
+    assert payload["immediate_count"] == 0
+    assert payload["scheduled_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["sites"] == []
+
+
+@pytest.mark.parametrize("account_filter", [None, "Client TLS"])
+def test_api_certificate_renewal_calendar_healthy_paired_inventory_is_green(tmp_path, account_filter):
+    client = make_test_client(tmp_path)
+    response = client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(client="Client TLS", ssl_days="90"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    response = client.get(
+        "/api/certificate-renewal-calendar",
+        params={"client": account_filter} if account_filter else {},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == account_filter
+    assert payload["status"] == "green"
+    assert payload["site_count"] == 1
+    assert payload["current_evidence_count"] == 1
+    assert payload["renewal_evidence_percent"] == 100
+    assert payload["renewal_count"] == 0
+    assert payload["unknown_count"] == 0
+    assert payload["sites"] == []
+
+
 def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

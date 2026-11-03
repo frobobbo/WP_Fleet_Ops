@@ -3339,8 +3339,9 @@ def api_certificate_renewal_calendar(client: str | None = None):
     immediate_count = sum(1 for site in sites if site["renewal_window"] == "immediate")
     scheduled_count = sum(1 for site in sites if site["renewal_window"] == "scheduled")
     unknown_count = len(tracked_sites) - current_evidence_count
+    # An empty renewal queue proves nothing when no sites are registered.
     overall_status = "red" if overdue_count or immediate_count else (
-        "yellow" if scheduled_count or unknown_count else "green"
+        "yellow" if not tracked_sites or scheduled_count or unknown_count else "green"
     )
     return {
         "generated_at": now.isoformat(),
@@ -3356,7 +3357,7 @@ def api_certificate_renewal_calendar(client: str | None = None):
         "unknown_count": unknown_count,
         "renewal_evidence_percent": round((current_evidence_count / len(tracked_sites)) * 100)
         if tracked_sites
-        else 100,
+        else 0,
         "sites": sites,
     }
 
