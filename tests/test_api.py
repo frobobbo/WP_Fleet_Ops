@@ -5829,6 +5829,36 @@ def test_api_performance_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+def test_api_certificates_does_not_call_an_empty_inventory_healthy(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/certificates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["certificate_evidence_percent"] == 0
+    for field in (
+        "site_count", "current_snapshot_count", "current_care_check_count",
+        "current_evidence_count", "snapshot_gap_count", "care_check_gap_count",
+        "monitoring_gap_count", "healthy_count", "critical_count", "warning_count",
+        "unknown_count",
+    ):
+        assert payload[field] == 0
+    assert payload["minimum_ssl_days"] is None
+    assert payload["sites"] == []
+
+    # Paired current evidence must still produce a fully covered healthy view.
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(ssl_days="90"), follow_redirects=False,
+    ).status_code == 303
+    covered = client.get("/api/certificates").json()
+    assert covered["status"] == "green"
+    assert covered["certificate_evidence_percent"] == 100
+    assert covered["current_evidence_count"] == covered["healthy_count"] == 1
+    assert covered["minimum_ssl_days"] == 90
+
+
 def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

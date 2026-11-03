@@ -3164,7 +3164,7 @@ def api_certificates(client: str | None = None):
     warning_count = sum(1 for site in sites if site["certificate_status"] == "warning")
     healthy_count = sum(1 for site in sites if site["certificate_status"] == "healthy")
     unknown_count = len(sites) - current_evidence_count
-    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count or not sites else "green")
     current_ssl_days = [
         site["ssl_days_remaining"]
         for site in sites
@@ -3186,7 +3186,7 @@ def api_certificates(client: str | None = None):
         "critical_count": critical_count,
         "warning_count": warning_count,
         "unknown_count": unknown_count,
-        "certificate_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "certificate_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "minimum_ssl_days": min(current_ssl_days, default=None),
         "sites": sites,
     }
