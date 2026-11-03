@@ -6414,6 +6414,50 @@ def test_api_certificate_renewal_calendar_requires_current_paired_care_evidence(
     )
 
 
+def test_api_updates_empty_inventory_is_unverified_not_current(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/updates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["update_evidence_percent"] == 0
+    assert payload["client"] is None
+    assert payload["sites"] == []
+    for field in (
+        "site_count", "current_snapshot_count", "current_care_check_count",
+        "current_evidence_count", "snapshot_gap_count", "care_check_gap_count",
+        "monitoring_gap_count", "critical_count", "warning_count", "current_count",
+        "unknown_count", "backlog_count", "total_pending_updates", "max_pending_updates",
+    ):
+        assert payload[field] == 0, field
+
+
+@pytest.mark.parametrize(
+    ("updates", "expected_status", "expected_site_status"),
+    [("0", "green", "current"), ("2", "yellow", "warning"), ("5", "red", "critical")],
+)
+def test_api_updates_current_paired_evidence_retains_status(
+    tmp_path, updates, expected_status, expected_site_status,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(wp_updates=updates),
+        follow_redirects=False,
+    ).status_code == 303
+
+    payload = client.get("/api/updates").json()
+
+    assert payload["status"] == expected_status
+    assert payload["site_count"] == payload["current_evidence_count"] == 1
+    assert payload["update_evidence_percent"] == 100
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["total_pending_updates"] == int(updates)
+    assert payload["sites"][0]["update_status"] == expected_site_status
+
+
 def test_api_updates_prioritizes_wordpress_update_backlog(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

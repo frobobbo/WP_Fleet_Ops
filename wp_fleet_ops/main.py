@@ -3513,7 +3513,9 @@ def api_updates(client: str | None = None):
     warning_count = sum(1 for site in sites if site["update_status"] == "warning")
     current_count = sum(1 for site in sites if site["update_status"] == "current")
     unknown_count = len(sites) - current_evidence_count
-    overall_status = "red" if critical_count else ("yellow" if warning_count or unknown_count else "green")
+    overall_status = "red" if critical_count else (
+        "yellow" if warning_count or unknown_count or not sites else "green"
+    )
     current_update_counts = [
         site["pending_updates"]
         for site in sites
@@ -3535,7 +3537,7 @@ def api_updates(client: str | None = None):
         "warning_count": warning_count,
         "current_count": current_count,
         "unknown_count": unknown_count,
-        "update_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "update_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "backlog_count": critical_count + warning_count,
         "total_pending_updates": sum(current_update_counts),
         "max_pending_updates": max(current_update_counts, default=0),
