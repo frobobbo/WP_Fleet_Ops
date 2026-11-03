@@ -5516,6 +5516,34 @@ def test_api_security_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+def test_api_performance_does_not_call_an_empty_inventory_fast(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/api/performance")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["performance_evidence_percent"] == 0
+    for field in (
+        "site_count", "current_snapshot_count", "current_care_check_count",
+        "current_evidence_count", "snapshot_gap_count", "care_check_gap_count",
+        "monitoring_gap_count", "slow_count", "warning_count", "fast_count",
+        "unknown_count",
+    ):
+        assert payload[field] == 0
+    assert payload["sites"] == []
+
+    # Real, current fast evidence must still produce a fully covered green view.
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    covered = client.get("/api/performance").json()
+    assert covered["status"] == "green"
+    assert covered["performance_evidence_percent"] == 100
+    assert covered["current_evidence_count"] == covered["fast_count"] == 1
+
+
 def test_api_performance_prioritizes_slowest_sites(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

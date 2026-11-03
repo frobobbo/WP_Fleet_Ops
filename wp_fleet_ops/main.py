@@ -2979,7 +2979,7 @@ def api_performance(client: str | None = None):
     warning_count = sum(1 for site in sites if site["performance_status"] == "warning")
     fast_count = sum(1 for site in sites if site["performance_status"] == "fast")
     unknown_count = len(sites) - current_evidence_count
-    overall_status = "red" if slow_count else ("yellow" if warning_count or unknown_count else "green")
+    overall_status = "red" if slow_count else ("yellow" if warning_count or unknown_count or not sites else "green")
     current_response_times = [
         site["response_ms"]
         for site in sites
@@ -3001,7 +3001,7 @@ def api_performance(client: str | None = None):
         "warning_count": warning_count,
         "fast_count": fast_count,
         "unknown_count": unknown_count,
-        "performance_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "performance_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "average_response_ms": round(sum(current_response_times) / len(current_response_times))
         if current_response_times
         else 0,
