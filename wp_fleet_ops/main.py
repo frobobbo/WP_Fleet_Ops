@@ -2608,7 +2608,10 @@ def api_restore_drill_queue(client: str | None = None):
     watch_count = sum(1 for site in sites if site["restore_drill_priority"] == "watch")
     routine_count = sum(1 for site in sites if site["restore_drill_priority"] == "routine")
     unknown_count = len(sites) - current_evidence_count
-    status = "red" if urgent_count else ("yellow" if unknown_count or high_count or watch_count else "green")
+    # Without tracked sites, an empty queue provides no recovery evidence.
+    status = "red" if urgent_count else (
+        "yellow" if not sites or unknown_count or high_count or watch_count else "green"
+    )
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
@@ -2626,7 +2629,7 @@ def api_restore_drill_queue(client: str | None = None):
         "high_count": high_count,
         "watch_count": watch_count,
         "routine_count": routine_count,
-        "restore_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 100,
+        "restore_evidence_percent": round((current_evidence_count / len(sites)) * 100) if sites else 0,
         "sites": sites,
     }
 

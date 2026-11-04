@@ -4951,6 +4951,39 @@ def test_api_backup_remediation_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+@pytest.mark.parametrize("remove_last_site", [False, True])
+def test_api_restore_drill_queue_empty_inventory_is_unverified(tmp_path, remove_last_site):
+    client = make_test_client(tmp_path)
+    if remove_last_site:
+        url = "https://last-restore.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(url=url, backup_age_hours="12"),
+            follow_redirects=False,
+        ).status_code == 303
+        populated = client.get("/api/restore-drill-queue").json()
+        assert populated["status"] == "green"
+        assert populated["site_count"] == populated["routine_count"] == 1
+        assert populated["current_evidence_count"] == 1
+        assert populated["restore_evidence_percent"] == 100
+        assert client.delete("/sites", params={"url": url}).status_code == 200
+
+    response = client.get("/api/restore-drill-queue")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["client"] is None
+    assert payload["restore_evidence_percent"] == 0
+    assert payload["sites"] == []
+    for field in (
+        "site_count", "current_snapshot_count", "current_care_check_count",
+        "current_evidence_count", "snapshot_gap_count", "care_check_gap_count",
+        "monitoring_gap_count", "unknown_count", "urgent_count", "high_count",
+        "watch_count", "routine_count",
+    ):
+        assert payload[field] == 0, field
+
+
 def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
