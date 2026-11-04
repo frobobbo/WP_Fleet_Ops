@@ -3807,7 +3807,9 @@ def api_maintenance_windows(client: str | None = None):
     sites.sort(key=lambda site: (urgency_rank[site["maintenance_window"]], -site["risk_count"], site["score"], site["client"].lower(), site["name"].lower()))
     immediate_count = sum(1 for site in sites if site["maintenance_window"] == "immediate")
     scheduled_count = sum(1 for site in sites if site["maintenance_window"] == "scheduled")
-    status = "red" if immediate_count else ("yellow" if scheduled_count or unknown_count else "green")
+    status = "red" if immediate_count else (
+        "yellow" if scheduled_count or unknown_count or not tracked_site_count else "green"
+    )
     return {
         "generated_at": now.isoformat(),
         "client": normalized_client,
@@ -3827,7 +3829,7 @@ def api_maintenance_windows(client: str | None = None):
         "maintenance_evidence_percent": (
             round((current_evidence_count / tracked_site_count) * 100)
             if tracked_site_count
-            else 100
+            else 0
         ),
         "window_count": len(sites),
         "immediate_count": immediate_count,
@@ -3947,7 +3949,7 @@ def api_maintenance_calendar(client: str | None = None):
     immediate_site_count = sum(window["site_count"] for window in windows if window["window"] == "immediate")
     scheduled_site_count = sum(window["site_count"] for window in windows if window["window"] == "scheduled")
     status = "red" if immediate_site_count else (
-        "yellow" if scheduled_site_count or unknown_count else "green"
+        "yellow" if scheduled_site_count or unknown_count or not tracked_site_count else "green"
     )
     return {
         "generated_at": now.isoformat(),
@@ -3968,7 +3970,7 @@ def api_maintenance_calendar(client: str | None = None):
         "maintenance_evidence_percent": (
             round((current_evidence_count / tracked_site_count) * 100)
             if tracked_site_count
-            else 100
+            else 0
         ),
         "window_count": len(windows),
         "immediate_site_count": immediate_site_count,

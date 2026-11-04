@@ -7055,6 +7055,43 @@ def test_api_risk_register_requires_current_paired_care_evidence(tmp_path):
     assert payload["entries"] == []
 
 
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize("remove_last_site", [False, True])
+def test_maintenance_views_empty_inventory_is_unverified(tmp_path, path, remove_last_site):
+    client = make_test_client(tmp_path)
+    if remove_last_site:
+        url = "https://last-maintenance.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(url=url),
+            follow_redirects=False,
+        ).status_code == 303
+        populated = client.get(path).json()
+        assert populated["status"] == "green"
+        assert populated["site_count"] == populated["current_evidence_count"] == 1
+        assert populated["maintenance_evidence_percent"] == 100
+        assert populated["window_count"] == 0
+        assert client.delete("/sites", params={"url": url}).status_code == 200
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["client"] is None
+    assert payload["maintenance_evidence_percent"] == 0
+    assert payload["sites" if path.endswith("windows") else "windows"] == []
+    for field in (
+        "site_count", "monitored_site_count", "current_snapshot_count",
+        "current_care_check_count", "current_evidence_count", "missing_snapshot_count",
+        "stale_snapshot_count", "snapshot_gap_count", "care_check_gap_count",
+        "monitoring_gap_count", "unknown_count", "window_count",
+    ):
+        assert payload[field] == 0, field
+    prefix = "" if path.endswith("windows") else "site_"
+    for urgency in ("immediate", "scheduled"):
+        assert payload[f"{urgency}_{prefix}count"] == 0
+
+
 def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
