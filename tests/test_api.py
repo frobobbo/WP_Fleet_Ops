@@ -6827,6 +6827,47 @@ def test_api_updates_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+@pytest.mark.parametrize("remove_last_site", [False, True])
+def test_api_risk_register_empty_inventory_is_unverified(tmp_path, remove_last_site):
+    client = make_test_client(tmp_path)
+    if remove_last_site:
+        url = "https://last-risk.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(url=url),
+            follow_redirects=False,
+        ).status_code == 303
+        populated = client.get("/api/risk-register").json()
+        assert populated["status"] == "green"
+        assert populated["site_count"] == populated["current_evidence_count"] == 1
+        assert populated["risk_evidence_percent"] == 100
+        assert populated["entries"] == []
+        assert client.delete("/sites", params={"url": url}).status_code == 200
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["client"] is None
+    assert payload["risk_evidence_percent"] == 0
+    assert payload["entries"] == []
+    for field in (
+        "site_count", "monitored_site_count", "current_snapshot_count",
+        "current_care_check_count", "current_evidence_count", "missing_snapshot_count",
+        "stale_snapshot_count", "snapshot_gap_count", "care_check_gap_count",
+        "monitoring_gap_count", "unknown_count", "category_count",
+        "critical_category_count", "warning_category_count",
+    ):
+        assert payload[field] == 0, field
+
+    scoped = client.get("/api/risk-register", params={"client": "Unknown Client"})
+    assert scoped.status_code == 404
+    assert scoped.json() == {
+        "detail": "No tracked sites found for client 'Unknown Client'.",
+        "client": "Unknown Client",
+    }
+
+
 def test_api_risk_register_filters_risks_and_evidence_by_client(tmp_path):
     client = make_test_client(tmp_path)
     for name, url, account, updates in (

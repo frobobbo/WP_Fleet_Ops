@@ -3718,7 +3718,7 @@ def api_risk_register(client: str | None = None):
         1 for entry in entries if entry["highest_severity"] == "warning"
     )
     status = "red" if critical_category_count else (
-        "yellow" if warning_category_count or unknown_count else "green"
+        "yellow" if warning_category_count or unknown_count or not tracked_site_count else "green"
     )
     return {
         "generated_at": now.isoformat(),
@@ -3739,7 +3739,7 @@ def api_risk_register(client: str | None = None):
         "risk_evidence_percent": (
             round((current_evidence_count / tracked_site_count) * 100)
             if tracked_site_count
-            else 100
+            else 0
         ),
         "category_count": len(entries),
         "critical_category_count": critical_category_count,
