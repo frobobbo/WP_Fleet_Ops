@@ -7439,6 +7439,71 @@ def test_api_slo_empty_inventory_does_not_claim_full_compliance(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("uptime_ok", "http_status", "expected_met"),
+    [("true", status, 0) for status in [0, 201, 204, 206, 299, 302, 304, 404, 503]]
+    + [("true", 200, 1), ("true", 203, 1), ("false", 200, 0), ("false", 203, 0)],
+)
+def test_api_slo_reconciles_paired_homepage_evidence(
+    tmp_path, uptime_ok, http_status, expected_met
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(uptime_ok=uptime_ok),
+        follow_redirects=False,
+    ).status_code == 303
+    # Independently imported observations can disagree despite current timestamps.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+
+    response = client.get("/api/slo")
+    assert response.status_code == 200
+    payload = response.json()
+    objectives = {row["name"]: row for row in payload["objectives"]}
+    availability = objectives["availability"]
+    assert availability["met_count"] == expected_met
+    assert availability["miss_count"] == 1 - expected_met
+    assert availability["compliance_percent"] == expected_met * 100.0
+    assert availability["status"] == ("healthy" if expected_met else "at_risk")
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert objectives["monitoring"]["met_count"] == 1
+    assert client.get("/api/availability").json()["available_count"] == expected_met
+
+
+def test_api_slo_scopes_conflicting_homepage_evidence_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account in ["Healthy Account", "Failed Account"]:
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=account,
+                url=f"https://{account.split()[0].lower()}-slo-paired.example",
+                client=account,
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set http_status = 503 where site_id = "
+            "(select id from sites where client = ?)",
+            ("Failed Account",),
+        )
+
+    for account, expected_met, expected_miss in [
+        (None, 1, 1), ("Healthy Account", 1, 0), ("Failed Account", 0, 1),
+    ]:
+        response = client.get("/api/slo", params={"client": account} if account else {})
+        assert response.status_code == 200
+        payload = response.json()
+        availability = next(row for row in payload["objectives"] if row["name"] == "availability")
+        assert availability["met_count"] == expected_met
+        assert availability["miss_count"] == expected_miss
+        assert payload["current_evidence_count"] == expected_met + expected_miss
+        assert payload["monitoring_gap_count"] == 0
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

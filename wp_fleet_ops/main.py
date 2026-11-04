@@ -4012,8 +4012,17 @@ def api_slo(client: str | None = None):
     # Every objective uses the full tracked fleet as its denominator and only
     # paired current snapshots and care checks as evidence. A stale or missing
     # half of the observation therefore cannot make an objective look healthy.
+    care_http_status_by_url = {check["url"]: check["http_status"] for check in care_checks}
     objectives = [
-        _slo_row("availability", "Sites reachable", tracked_total, sum(1 for row in current_rows if row["uptime_ok"]), "site reachable"),
+        _slo_row(
+            "availability", "Sites reachable", tracked_total,
+            sum(
+                1 for row in current_rows
+                if row["uptime_ok"]
+                and homepage_response_usable(care_http_status_by_url[row["url"]])
+            ),
+            "site reachable",
+        ),
         _slo_row("tls", "TLS renewal buffer", tracked_total, sum(1 for row in current_rows if row["ssl_days"] >= 14), ">= 14 days remaining"),
         _slo_row("backups", "Backup freshness", tracked_total, sum(1 for row in current_rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
         _slo_row("performance", "Homepage response", tracked_total, sum(1 for row in current_rows if row["response_ms"] <= 1500), "<= 1500 ms"),
