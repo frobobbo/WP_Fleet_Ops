@@ -7589,6 +7589,95 @@ def test_api_slo_scopes_conflicting_certificate_evidence_to_client(tmp_path):
         assert payload["monitoring_gap_count"] == 0
 
 
+@pytest.mark.parametrize(
+    ("snapshot_age", "care_age", "expected_met"),
+    [(24, 73, 0), (73, 24, 0), (73, 73, 0), (72, 72, 1),
+     (24, 72, 1), (72, 24, 1), (0, 0, 1)],
+)
+def test_api_slo_reconciles_paired_backup_freshness(
+    tmp_path, snapshot_age, care_age, expected_met
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(backup_age_hours=str(snapshot_age)),
+        follow_redirects=False,
+    ).status_code == 303
+    # Current independently imported observations can disagree about backup age.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = ?", (care_age,))
+
+    response = client.get("/api/slo")
+    assert response.status_code == 200
+    payload = response.json()
+    objectives = {row["name"]: row for row in payload["objectives"]}
+    backups = objectives["backups"]
+    assert backups["met_count"] == expected_met
+    assert backups["miss_count"] == 1 - expected_met
+    assert backups["compliance_percent"] == expected_met * 100.0
+    assert backups["status"] == ("healthy" if expected_met else "at_risk")
+    assert backups["threshold"] == "<= 72 hours old"
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert objectives["monitoring"]["met_count"] == 1
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("timestamp", [None, "2000-01-01 00:00:00", "invalid", "2999-01-01 00:00:00"])
+def test_api_slo_suppresses_untrusted_paired_backup_freshness(tmp_path, source, timestamp):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        if timestamp is None:
+            con.execute(f"delete from {source}")
+        else:
+            con.execute(f"update {source} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/slo").json()
+    backups = next(row for row in payload["objectives"] if row["name"] == "backups")
+    assert backups["met_count"] == 0
+    assert backups["miss_count"] == 1
+    assert backups["status"] == "at_risk"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+
+
+def test_api_slo_scopes_conflicting_backup_evidence_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account in ["Fresh Account", "Overdue Account", ""]:
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=account or "Unassigned Site",
+                url=f"https://{(account or 'unassigned').split()[0].lower()}-slo-backup.example",
+                client=account,
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set backup_age_hours = 73 where site_id = "
+            "(select id from sites where client = ?)",
+            ("Overdue Account",),
+        )
+
+    for account, expected_met, expected_miss in [
+        (None, 2, 1), ("Fresh Account", 1, 0), ("Overdue Account", 0, 1),
+        ("Unassigned", 1, 0),
+    ]:
+        response = client.get("/api/slo", params={"client": account} if account else {})
+        assert response.status_code == 200
+        payload = response.json()
+        backups = next(row for row in payload["objectives"] if row["name"] == "backups")
+        assert backups["met_count"] == expected_met
+        assert backups["miss_count"] == expected_miss
+        assert payload["current_evidence_count"] == expected_met + expected_miss
+        assert payload["monitoring_gap_count"] == 0
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

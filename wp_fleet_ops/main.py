@@ -4032,7 +4032,15 @@ def api_slo(client: str | None = None):
             ),
             ">= 14 days remaining",
         ),
-        _slo_row("backups", "Backup freshness", tracked_total, sum(1 for row in current_rows if row["backup_age_hours"] <= 72), "<= 72 hours old"),
+        _slo_row(
+            "backups", "Backup freshness", tracked_total,
+            sum(
+                1 for row in current_rows
+                if row["backup_age_hours"] <= 72
+                and care_checks_by_url[row["url"]]["backup_age_hours"] <= 72
+            ),
+            "<= 72 hours old",
+        ),
         _slo_row("performance", "Homepage response", tracked_total, sum(1 for row in current_rows if row["response_ms"] <= 1500), "<= 1500 ms"),
         _slo_row("security", "Security headers", tracked_total, sum(1 for row in current_rows if row["security_header_count"] >= 2), ">= 2 core headers"),
         _slo_row(
