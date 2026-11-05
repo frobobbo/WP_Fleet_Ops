@@ -1140,8 +1140,13 @@ def api_clients():
     }
 
 
-def _sla_breaches(row: dict, *, http_status: int | None = None) -> list[dict]:
-    """Return target misses, reconciling fleet and paired homepage evidence."""
+def _sla_breaches(
+    row: dict,
+    *,
+    http_status: int | None = None,
+    ssl_days_remaining: int | None = None,
+) -> list[dict]:
+    """Return target misses, reconciling paired homepage and TLS evidence."""
     breaches = []
     if not row["uptime_ok"] or (
         http_status is not None and not homepage_response_usable(http_status)
@@ -1155,12 +1160,16 @@ def _sla_breaches(row: dict, *, http_status: int | None = None) -> list[dict]:
                 "recommended_action": "Confirm site availability, hosting status, DNS, and recent deploys.",
             }
         )
-    if row["ssl_days"] < 14:
+    ssl_days = (
+        min(row["ssl_days"], ssl_days_remaining)
+        if ssl_days_remaining is not None else row["ssl_days"]
+    )
+    if ssl_days < 14:
         breaches.append(
             {
                 "target": "tls_certificate",
-                "severity": "critical" if row["ssl_days"] <= 7 else "warning",
-                "observed": f"{row['ssl_days']} days remaining",
+                "severity": "critical" if ssl_days <= 7 else "warning",
+                "observed": f"{ssl_days} days remaining",
                 "threshold": ">= 14 days remaining",
                 "recommended_action": "Renew or replace the TLS certificate before client traffic is at risk.",
             }
@@ -1263,11 +1272,14 @@ def api_sla_breaches(client: str | None = None):
                 SNAPSHOT_FRESHNESS_HOURS,
             )
             latest_snapshot_at = row.get("captured_at")
-            # A green fleet snapshot cannot conceal a failed paired homepage.
+            # A green fleet snapshot cannot conceal paired homepage or TLS risk.
             # The freshness gate below keeps stale observations historical only.
             last_observed_breaches = _sla_breaches(
                 row,
                 http_status=care_check["http_status"] if care_check is not None else None,
+                ssl_days_remaining=(
+                    care_check["ssl_days_remaining"] if care_check is not None else None
+                ),
             )
             last_observed_breaches.sort(
                 key=lambda breach: (severity_rank.get(breach["severity"], 99), breach["target"])

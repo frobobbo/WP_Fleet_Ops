@@ -2774,6 +2774,113 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
     assert payload["sites"][2]["breaches"][0]["severity"] == "warning"
 
 
+@pytest.mark.parametrize(
+    ("snapshot_days", "care_days", "expected_severity"),
+    [(60, 0, "critical"), (60, 7, "critical"), (60, 8, "warning"),
+     (60, 13, "warning"), (7, 60, "critical"), (13, 60, "warning"),
+     (13, 7, "critical"), (7, 13, "critical"), (14, 14, None),
+     (60, 14, None), (14, 60, None)],
+)
+def test_api_sla_breaches_reconciles_paired_certificate_expiry(
+    tmp_path, snapshot_days, care_days, expected_severity
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(ssl_days=str(snapshot_days)),
+        follow_redirects=False,
+    ).status_code == 303
+    # Independently imported current observations can disagree about expiry.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = ?", (care_days,))
+
+    response = client.get("/api/sla-breaches")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["breach_count"] == int(expected_severity is not None)
+    assert payload["critical_breach_count"] == int(expected_severity == "critical")
+    assert payload["warning_breach_count"] == int(expected_severity == "warning")
+    assert payload["status"] == (
+        "red" if expected_severity == "critical"
+        else "yellow" if expected_severity == "warning" else "green"
+    )
+    if expected_severity is None:
+        assert payload["sites"] == []
+    else:
+        site = payload["sites"][0]
+        assert site["sla_status"] == "breached"
+        assert site["highest_severity"] == expected_severity
+        assert site["breach_count"] == 1
+        assert site["last_observed_breaches"] == site["breaches"]
+        breach = site["breaches"][0]
+        assert breach["target"] == "tls_certificate"
+        assert breach["severity"] == expected_severity
+        assert breach["observed"] == f"{min(snapshot_days, care_days)} days remaining"
+        assert breach["threshold"] == ">= 14 days remaining"
+        assert "Renew or replace" in site["recommended_action"]
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "2999-01-01 00:00:00"])
+def test_api_sla_breaches_keeps_untrusted_paired_certificate_expiry_historical(
+    tmp_path, source, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = 0")
+        con.execute(f"update {source} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/sla-breaches").json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["breach_count"] == payload["critical_breach_count"] == 0
+    site = payload["sites"][0]
+    assert site["sla_status"] == "unknown"
+    assert site["breaches"] == []
+    assert site["last_observed_breaches"][0]["target"] == "tls_certificate"
+    assert site["last_observed_breaches"][0]["observed"] == "0 days remaining"
+
+
+def test_api_sla_breaches_scopes_conflicting_certificate_expiry_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account in ["Safe Account", "Expiring Account", ""]:
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=account or "Unassigned Site",
+                url=f"https://{(account or 'unassigned').split()[0].lower()}-sla-tls.example",
+                client=account,
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set ssl_days_remaining = 7 where site_id = "
+            "(select id from sites where client = ?)",
+            ("Expiring Account",),
+        )
+
+    for account, site_count, breach_count in [
+        (None, 3, 1), ("Safe Account", 1, 0), ("Expiring Account", 1, 1),
+        ("Unassigned", 1, 0),
+    ]:
+        response = client.get("/api/sla-breaches", params={"client": account} if account else {})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == site_count
+        assert payload["monitoring_gap_count"] == 0
+        assert payload["breach_count"] == payload["critical_breach_count"] == breach_count
+        assert payload["status"] == ("red" if breach_count else "green")
+        assert [site["client"] for site in payload["sites"]] == ["Expiring Account"] * breach_count
+
+
 @pytest.mark.parametrize("http_status", [0, 201, 204, 206, 299, 302, 304, 404, 503])
 def test_api_sla_breaches_reconciles_failed_paired_homepage(tmp_path, http_status):
     client = make_test_client(tmp_path)
