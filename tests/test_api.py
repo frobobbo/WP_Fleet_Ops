@@ -7504,6 +7504,91 @@ def test_api_slo_scopes_conflicting_homepage_evidence_to_client(tmp_path):
         assert payload["monitoring_gap_count"] == 0
 
 
+@pytest.mark.parametrize(
+    ("snapshot_days", "care_days", "expected_met"),
+    [(60, 0, 0), (60, 13, 0), (13, 60, 0), (0, 60, 0),
+     (14, 14, 1), (60, 14, 1), (14, 60, 1)],
+)
+def test_api_slo_reconciles_paired_certificate_expiry(
+    tmp_path, snapshot_days, care_days, expected_met
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(ssl_days=str(snapshot_days)),
+        follow_redirects=False,
+    ).status_code == 303
+    # Current independently imported observations can disagree about expiry.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = ?", (care_days,))
+
+    response = client.get("/api/slo")
+    assert response.status_code == 200
+    payload = response.json()
+    objectives = {row["name"]: row for row in payload["objectives"]}
+    tls = objectives["tls"]
+    assert tls["met_count"] == expected_met
+    assert tls["miss_count"] == 1 - expected_met
+    assert tls["compliance_percent"] == expected_met * 100.0
+    assert tls["status"] == ("healthy" if expected_met else "at_risk")
+    assert tls["threshold"] == ">= 14 days remaining"
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert objectives["monitoring"]["met_count"] == 1
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "2999-01-01 00:00:00"])
+def test_api_slo_suppresses_untrusted_paired_certificate_expiry(tmp_path, source, timestamp):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(f"update {source} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/slo").json()
+    tls = next(row for row in payload["objectives"] if row["name"] == "tls")
+    assert tls["met_count"] == 0
+    assert tls["miss_count"] == 1
+    assert tls["status"] == "at_risk"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+
+
+def test_api_slo_scopes_conflicting_certificate_evidence_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account in ["Renewed Account", "Expired Account"]:
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=account,
+                url=f"https://{account.split()[0].lower()}-slo-tls.example",
+                client=account,
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set ssl_days_remaining = 0 where site_id = "
+            "(select id from sites where client = ?)",
+            ("Expired Account",),
+        )
+
+    for account, expected_met, expected_miss in [
+        (None, 1, 1), ("Renewed Account", 1, 0), ("Expired Account", 0, 1),
+    ]:
+        response = client.get("/api/slo", params={"client": account} if account else {})
+        assert response.status_code == 200
+        payload = response.json()
+        tls = next(row for row in payload["objectives"] if row["name"] == "tls")
+        assert tls["met_count"] == expected_met
+        assert tls["miss_count"] == expected_miss
+        assert payload["current_evidence_count"] == expected_met + expected_miss
+        assert payload["monitoring_gap_count"] == 0
+
+
 def test_api_slo_returns_service_objective_compliance(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
