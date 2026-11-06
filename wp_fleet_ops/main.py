@@ -1146,8 +1146,9 @@ def _sla_breaches(
     http_status: int | None = None,
     ssl_days_remaining: int | None = None,
     care_backup_age_hours: int | None = None,
+    care_latency_ms: int | None = None,
 ) -> list[dict]:
-    """Return target misses, reconciling paired homepage, TLS, and backup evidence."""
+    """Return target misses, reconciling both sources of paired SLA evidence."""
     breaches = []
     if not row["uptime_ok"] or (
         http_status is not None and not homepage_response_usable(http_status)
@@ -1189,12 +1190,16 @@ def _sla_breaches(
                 "recommended_action": "Run and verify a fresh backup immediately.",
             }
         )
-    if row["response_ms"] > 1500:
+    response_ms = (
+        max(row["response_ms"], care_latency_ms)
+        if care_latency_ms is not None else row["response_ms"]
+    )
+    if response_ms > 1500:
         breaches.append(
             {
                 "target": "response_time",
                 "severity": "warning",
-                "observed": f"{row['response_ms']} ms",
+                "observed": f"{response_ms} ms",
                 "threshold": "<= 1500 ms",
                 "recommended_action": "Review caching, hosting resources, and slow page dependencies.",
             }
@@ -1277,7 +1282,7 @@ def api_sla_breaches(client: str | None = None):
                 SNAPSHOT_FRESHNESS_HOURS,
             )
             latest_snapshot_at = row.get("captured_at")
-            # A green fleet snapshot cannot conceal paired homepage, TLS, or backup risk.
+            # A green fleet snapshot cannot conceal risk in the paired care check.
             # The freshness gate below keeps stale observations historical only.
             last_observed_breaches = _sla_breaches(
                 row,
@@ -1287,6 +1292,9 @@ def api_sla_breaches(client: str | None = None):
                 ),
                 care_backup_age_hours=(
                     care_check["backup_age_hours"] if care_check is not None else None
+                ),
+                care_latency_ms=(
+                    care_check["latency_ms"] if care_check is not None else None
                 ),
             )
             last_observed_breaches.sort(
