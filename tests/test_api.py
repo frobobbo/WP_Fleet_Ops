@@ -2775,6 +2775,113 @@ def test_api_sla_breaches_returns_sites_missing_operational_targets(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("snapshot_age", "care_age", "breached"),
+    [(24, 73, True), (0, 96, True), (96, 24, True),
+     (72, 73, True), (73, 96, True), (96, 73, True),
+     (72, 72, False), (24, 72, False), (72, 24, False)],
+)
+def test_api_sla_breaches_reconciles_paired_backup_age(
+    tmp_path, snapshot_age, care_age, breached
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(backup_age_hours=str(snapshot_age)),
+        follow_redirects=False,
+    ).status_code == 303
+    # Independently imported current observations can disagree about backup age.
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = ?", (care_age,))
+
+    response = client.get("/api/sla-breaches")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["breach_count"] == payload["critical_breach_count"] == int(breached)
+    assert payload["warning_breach_count"] == 0
+    assert payload["status"] == ("red" if breached else "green")
+    if not breached:
+        assert payload["sites"] == []
+    else:
+        site = payload["sites"][0]
+        assert site["sla_status"] == "breached"
+        assert site["highest_severity"] == "critical"
+        assert site["breach_count"] == 1
+        assert site["last_observed_breaches"] == site["breaches"]
+        breach = site["breaches"][0]
+        assert breach["target"] == "backup_freshness"
+        assert breach["severity"] == "critical"
+        assert breach["observed"] == f"{max(snapshot_age, care_age)} hours old"
+        assert breach["threshold"] == "<= 72 hours old"
+        assert site["recommended_action"] == "Run and verify a fresh backup immediately."
+    objective = next(
+        row for row in client.get("/api/slo").json()["objectives"]
+        if row["name"] == "backups"
+    )
+    assert objective["met_count"] == int(not breached)
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "2999-01-01 00:00:00"])
+def test_api_sla_breaches_keeps_untrusted_paired_backup_age_historical(
+    tmp_path, source, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = 96")
+        con.execute(f"update {source} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/sla-breaches").json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["breach_count"] == payload["critical_breach_count"] == 0
+    site = payload["sites"][0]
+    assert site["sla_status"] == "unknown"
+    assert site["breaches"] == []
+    assert site["last_observed_breaches"][0]["target"] == "backup_freshness"
+    assert site["last_observed_breaches"][0]["observed"] == "96 hours old"
+
+
+def test_api_sla_breaches_scopes_conflicting_backup_age_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account in ["Safe Account", "Overdue Account", ""]:
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=account or "Unassigned Site",
+                url=f"https://{(account or 'unassigned').split()[0].lower()}-sla-backup.example",
+                client=account,
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set backup_age_hours = 96 where site_id = "
+            "(select id from sites where client = ?)",
+            ("Overdue Account",),
+        )
+
+    for account, site_count, breach_count in [
+        (None, 3, 1), ("Safe Account", 1, 0), ("Overdue Account", 1, 1),
+        ("Unassigned", 1, 0),
+    ]:
+        response = client.get("/api/sla-breaches", params={"client": account} if account else {})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == site_count
+        assert payload["monitoring_gap_count"] == 0
+        assert payload["breach_count"] == payload["critical_breach_count"] == breach_count
+        assert payload["status"] == ("red" if breach_count else "green")
+        assert [site["client"] for site in payload["sites"]] == ["Overdue Account"] * breach_count
+
+
+@pytest.mark.parametrize(
     ("snapshot_days", "care_days", "expected_severity"),
     [(60, 0, "critical"), (60, 7, "critical"), (60, 8, "warning"),
      (60, 13, "warning"), (7, 60, "critical"), (13, 60, "warning"),

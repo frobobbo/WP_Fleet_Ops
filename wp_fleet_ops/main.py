@@ -1145,8 +1145,9 @@ def _sla_breaches(
     *,
     http_status: int | None = None,
     ssl_days_remaining: int | None = None,
+    care_backup_age_hours: int | None = None,
 ) -> list[dict]:
-    """Return target misses, reconciling paired homepage and TLS evidence."""
+    """Return target misses, reconciling paired homepage, TLS, and backup evidence."""
     breaches = []
     if not row["uptime_ok"] or (
         http_status is not None and not homepage_response_usable(http_status)
@@ -1174,12 +1175,16 @@ def _sla_breaches(
                 "recommended_action": "Renew or replace the TLS certificate before client traffic is at risk.",
             }
         )
-    if row["backup_age_hours"] > 72:
+    backup_age_hours = (
+        max(row["backup_age_hours"], care_backup_age_hours)
+        if care_backup_age_hours is not None else row["backup_age_hours"]
+    )
+    if backup_age_hours > 72:
         breaches.append(
             {
                 "target": "backup_freshness",
                 "severity": "critical",
-                "observed": f"{row['backup_age_hours']} hours old",
+                "observed": f"{backup_age_hours} hours old",
                 "threshold": "<= 72 hours old",
                 "recommended_action": "Run and verify a fresh backup immediately.",
             }
@@ -1272,13 +1277,16 @@ def api_sla_breaches(client: str | None = None):
                 SNAPSHOT_FRESHNESS_HOURS,
             )
             latest_snapshot_at = row.get("captured_at")
-            # A green fleet snapshot cannot conceal paired homepage or TLS risk.
+            # A green fleet snapshot cannot conceal paired homepage, TLS, or backup risk.
             # The freshness gate below keeps stale observations historical only.
             last_observed_breaches = _sla_breaches(
                 row,
                 http_status=care_check["http_status"] if care_check is not None else None,
                 ssl_days_remaining=(
                     care_check["ssl_days_remaining"] if care_check is not None else None
+                ),
+                care_backup_age_hours=(
+                    care_check["backup_age_hours"] if care_check is not None else None
                 ),
             )
             last_observed_breaches.sort(
