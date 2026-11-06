@@ -2947,8 +2947,13 @@ def api_performance(client: str | None = None):
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_response_ms = row["response_ms"]
-            if freshness == "current" and care_check_freshness == "current":
-                response_ms = last_observed_response_ms
+            if (
+                freshness == "current"
+                and care_check_freshness == "current"
+                and care_check is not None
+            ):
+                # Both current sources must agree before performance can be fast.
+                response_ms = max(last_observed_response_ms, care_check["latency_ms"])
                 status = _performance_status(response_ms)
             else:
                 response_ms = None
@@ -2961,6 +2966,9 @@ def api_performance(client: str | None = None):
                 "client": site.get("client") or "Unassigned",
                 "response_ms": response_ms,
                 "last_observed_response_ms": last_observed_response_ms,
+                "last_observed_care_latency_ms": (
+                    care_check["latency_ms"] if care_check else None
+                ),
                 "performance_status": status,
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
@@ -2992,7 +3000,11 @@ def api_performance(client: str | None = None):
                 freshness_rank.get(site["snapshot_freshness"], 99),
                 freshness_rank.get(site["care_check_freshness"], 99),
             ),
-            -(site["last_observed_response_ms"] or 0),
+            -(
+                site["response_ms"]
+                if site["response_ms"] is not None
+                else (site["last_observed_response_ms"] or 0)
+            ),
             site["client"].lower(),
             site["name"].lower(),
         )

@@ -6188,6 +6188,119 @@ def test_api_performance_requires_current_paired_care_evidence(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("snapshot_ms", "care_ms", "status"),
+    [(250, 2200, "slow"), (2200, 250, "slow"),
+     (750, 751, "warning"), (751, 750, "warning"),
+     (1500, 1501, "slow"), (1501, 1500, "slow"),
+     (250, 750, "fast"), (750, 250, "fast"), (750, 750, "fast"),
+     (250, 1500, "warning"), (1500, 250, "warning"),
+     (1500, 1500, "warning"), (0, 0, "fast")],
+)
+def test_api_performance_reconciles_paired_response_times(
+    tmp_path, snapshot_ms, care_ms, status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(response_ms=str(snapshot_ms)),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set latency_ms = ?", (care_ms,))
+
+    response = client.get("/api/performance")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == {"slow": "red", "warning": "yellow", "fast": "green"}[status]
+    for category in ("slow", "warning", "fast"):
+        assert payload[f"{category}_count"] == int(category == status)
+    assert payload["average_response_ms"] == payload["max_response_ms"] == max(snapshot_ms, care_ms)
+    site = payload["sites"][0]
+    assert site["performance_status"] == status
+    assert site["response_ms"] == max(snapshot_ms, care_ms)
+    assert site["last_observed_response_ms"] == snapshot_ms
+    assert site["last_observed_care_latency_ms"] == care_ms
+    assert site["recommended_action"] == {
+        "slow": "Investigate hosting, caching, and heavy checkout/page dependencies.",
+        "warning": "Review caching and frontend asset weight before it becomes a client-visible issue.",
+        "fast": "Continue normal performance monitoring.",
+    }[status]
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "2999-01-01 00:00:00", None])
+def test_api_performance_keeps_untrusted_paired_response_times_historical(
+    tmp_path, source, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set latency_ms = 2200")
+        if timestamp is None:
+            con.execute(f"delete from {source}")
+        else:
+            con.execute(f"update {source} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/performance").json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["slow_count"] == payload["warning_count"] == payload["fast_count"] == 0
+    assert payload["average_response_ms"] == payload["max_response_ms"] == 0
+    site = payload["sites"][0]
+    assert site["performance_status"] == "unknown"
+    assert site["evidence_status"] == "incomplete"
+    assert site["response_ms"] is None
+    assert site["last_observed_response_ms"] == (
+        None if source == "snapshots" and timestamp is None else 250
+    )
+    assert site["last_observed_care_latency_ms"] == (
+        None if source == "care_checks" and timestamp is None else 2200
+    )
+
+
+def test_api_performance_sorts_and_scopes_reconciled_response_times(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, account, snapshot_ms in [
+        ("Fleet Slow", "Client Fleet", 1800),
+        ("Care Slow", "Client Care", 250),
+        ("Fast", "", 250),
+    ]:
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name, url=f"https://{name.split()[0].lower()}-performance-pair.example",
+                client=account, response_ms=str(snapshot_ms),
+            ), follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set latency_ms = 2200 where site_id = "
+            "(select id from sites where client = ?)", ("Client Care",),
+        )
+
+    for account, names, times in [
+        (None, ["Care Slow", "Fleet Slow", "Fast"], [2200, 1800, 250]),
+        ("Client Care", ["Care Slow"], [2200]),
+        ("Client Fleet", ["Fleet Slow"], [1800]),
+        ("Unassigned", ["Fast"], [250]),
+    ]:
+        response = client.get("/api/performance", params={"client": account} if account else {})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == len(names)
+        assert payload["monitoring_gap_count"] == 0
+        assert [site["name"] for site in payload["sites"]] == names
+        assert [site["response_ms"] for site in payload["sites"]] == times
+        assert payload["average_response_ms"] == round(sum(times) / len(times))
+        assert payload["max_response_ms"] == max(times)
+
+
 def test_api_certificates_does_not_call_an_empty_inventory_healthy(tmp_path):
     client = make_test_client(tmp_path)
 
