@@ -2142,8 +2142,15 @@ def api_backups(client: str | None = None):
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_backup_age_hours = row["backup_age_hours"]
-            if freshness == "current" and care_check_freshness == "current":
-                backup_age_hours = last_observed_backup_age_hours
+            if (
+                freshness == "current"
+                and care_check_freshness == "current"
+                and care_check is not None
+            ):
+                # Neither current source may conceal an older paired backup.
+                backup_age_hours = max(
+                    last_observed_backup_age_hours, care_check["backup_age_hours"],
+                )
                 status = _backup_status(backup_age_hours)
             else:
                 backup_age_hours = None
@@ -2156,6 +2163,9 @@ def api_backups(client: str | None = None):
                 "client": site.get("client") or "Unassigned",
                 "backup_age_hours": backup_age_hours,
                 "last_observed_backup_age_hours": last_observed_backup_age_hours,
+                "last_observed_care_backup_age_hours": (
+                    care_check["backup_age_hours"] if care_check else None
+                ),
                 "backup_status": status,
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
@@ -2187,7 +2197,11 @@ def api_backups(client: str | None = None):
                 freshness_rank.get(site["snapshot_freshness"], 99),
                 freshness_rank.get(site["care_check_freshness"], 99),
             ),
-            -(site["last_observed_backup_age_hours"] or 0),
+            -(
+                site["backup_age_hours"]
+                if site["backup_age_hours"] is not None
+                else (site["last_observed_backup_age_hours"] or 0)
+            ),
             site["client"].lower(),
             site["name"].lower(),
         )
