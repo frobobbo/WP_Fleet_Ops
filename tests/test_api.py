@@ -6494,6 +6494,154 @@ def test_api_certificates_prioritizes_expiring_tls_inventory(tmp_path):
     assert payload["sites"][2]["certificate_status"] == "healthy"
 
 
+@pytest.mark.parametrize(
+    ("fleet_days", "care_days", "expected_status"),
+    [
+        (90, 0, "critical"),
+        (0, 90, "critical"),
+        (90, 7, "critical"),
+        (7, 90, "critical"),
+        (90, 8, "warning"),
+        (8, 90, "warning"),
+        (90, 30, "warning"),
+        (30, 90, "warning"),
+        (90, 31, "healthy"),
+        (31, 90, "healthy"),
+    ],
+)
+def test_api_certificates_reconciles_current_paired_expiry(
+    tmp_path, fleet_days, care_days, expected_status,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(ssl_days=str(fleet_days)),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = ?", (care_days,))
+
+    response = client.get("/api/certificates")
+    assert response.status_code == 200
+    payload = response.json()
+    site = payload["sites"][0]
+    assert site["evidence_status"] == "current"
+    assert site["ssl_days_remaining"] == min(fleet_days, care_days)
+    assert site["certificate_status"] == expected_status
+    assert site["last_observed_ssl_days_remaining"] == fleet_days
+    assert site["last_observed_care_ssl_days_remaining"] == care_days
+    assert payload["minimum_ssl_days"] == min(fleet_days, care_days)
+    for status in ("critical", "warning", "healthy"):
+        assert payload[f"{status}_count"] == int(status == expected_status)
+    assert payload["status"] == {
+        "critical": "red", "warning": "yellow", "healthy": "green",
+    }[expected_status]
+    assert site["recommended_action"] == {
+        "critical": "Renew or replace the TLS certificate immediately.",
+        "warning": "Schedule certificate renewal before the 7-day critical window.",
+        "healthy": "Continue normal certificate monitoring.",
+    }[expected_status]
+
+
+def test_api_certificates_orders_by_shorter_current_paired_expiry(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, fleet_days, care_days in (
+        ("Fleet Earlier", 5, 90),
+        ("Care Earlier", 90, 0),
+    ):
+        url = f"https://{name.lower().replace(' ', '-')}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, ssl_days=str(fleet_days)),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set ssl_days_remaining = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_days, url),
+            )
+
+    payload = client.get("/api/certificates").json()
+    assert [site["name"] for site in payload["sites"]] == ["Care Earlier", "Fleet Earlier"]
+    assert [site["ssl_days_remaining"] for site in payload["sites"]] == [0, 5]
+    assert payload["critical_count"] == 2
+    assert payload["minimum_ssl_days"] == 0
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_certificates_keeps_conflicting_incomplete_evidence_unknown(
+    tmp_path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(ssl_days="90"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = 0")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/certificates").json()
+    site = payload["sites"][0]
+    assert site["evidence_status"] == "incomplete"
+    assert site["certificate_status"] == "unknown"
+    assert site["ssl_days_remaining"] is None
+    assert site["last_observed_ssl_days_remaining"] == (
+        None if source == "snapshots" and freshness == "missing" else 90
+    )
+    assert site["last_observed_care_ssl_days_remaining"] == (
+        None if source == "care_checks" and freshness == "missing" else 0
+    )
+    assert payload["critical_count"] == 0
+    assert payload["warning_count"] == 0
+    assert payload["healthy_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["minimum_ssl_days"] is None
+    assert payload["status"] == "yellow"
+
+
+def test_api_certificates_scopes_conflicting_paired_expiry_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account, care_days in (("Safe Account", 90), ("Expiring Account", 0), ("", 7)):
+        url = f"https://{account.lower().replace(' ', '-') or 'unassigned'}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=account or "Unassigned", url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set ssl_days_remaining = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_days, url),
+            )
+
+    for account, days, status in (
+        ("Safe Account", 60, "green"),
+        ("Expiring Account", 0, "red"),
+        ("unassigned", 7, "red"),
+    ):
+        response = client.get("/api/certificates", params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["status"] == status
+        assert payload["minimum_ssl_days"] == days
+        assert payload["sites"][0]["ssl_days_remaining"] == days
+
+
 def test_api_certificates_filters_status_by_client_and_unassigned(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -3156,8 +3156,15 @@ def api_certificates(client: str | None = None):
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_ssl_days = row["ssl_days"]
-            if freshness == "current" and care_check_freshness == "current":
-                ssl_days = last_observed_ssl_days
+            if (
+                freshness == "current"
+                and care_check_freshness == "current"
+                and care_check is not None
+            ):
+                # Neither current source may conceal an earlier paired expiry.
+                ssl_days = min(
+                    last_observed_ssl_days, care_check["ssl_days_remaining"],
+                )
                 status = _certificate_status(ssl_days)
             else:
                 ssl_days = None
@@ -3170,6 +3177,9 @@ def api_certificates(client: str | None = None):
                 "client": site.get("client") or "Unassigned",
                 "ssl_days_remaining": ssl_days,
                 "last_observed_ssl_days_remaining": last_observed_ssl_days,
+                "last_observed_care_ssl_days_remaining": (
+                    care_check["ssl_days_remaining"] if care_check else None
+                ),
                 "certificate_status": status,
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
@@ -3201,9 +3211,13 @@ def api_certificates(client: str | None = None):
                 freshness_rank.get(site["snapshot_freshness"], 99),
                 freshness_rank.get(site["care_check_freshness"], 99),
             ),
-            site["last_observed_ssl_days_remaining"]
-            if site["last_observed_ssl_days_remaining"] is not None
-            else float("inf"),
+            site["ssl_days_remaining"]
+            if site["ssl_days_remaining"] is not None
+            else (
+                site["last_observed_ssl_days_remaining"]
+                if site["last_observed_ssl_days_remaining"] is not None
+                else float("inf")
+            ),
             site["client"].lower(),
             site["name"].lower(),
         )
