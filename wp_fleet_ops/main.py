@@ -2358,6 +2358,9 @@ def api_backup_remediation(client: str | None = None):
                     "url": site["url"],
                     "backup_age_hours": None,
                     "last_observed_backup_age_hours": last_observed_backup_age_hours,
+                    "last_observed_care_backup_age_hours": (
+                        care_check["backup_age_hours"] if care_check else None
+                    ),
                     "backup_status": "unknown",
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": snapshot_age_hours,
@@ -2380,10 +2383,15 @@ def api_backup_remediation(client: str | None = None):
         assert row is not None and last_observed_backup_age_hours is not None
         assert care_check is not None
         summary["current_evidence_count"] += 1
-        status = _backup_status(last_observed_backup_age_hours)
+        # A fresh fleet backup cannot conceal an overdue paired care backup.
+        backup_age_hours = max(
+            last_observed_backup_age_hours,
+            care_check["backup_age_hours"],
+        )
+        status = _backup_status(backup_age_hours)
         summary["oldest_backup_age_hours"] = max(
             summary["oldest_backup_age_hours"],
-            last_observed_backup_age_hours,
+            backup_age_hours,
         )
         if status == "critical":
             summary["critical_site_count"] += 1
@@ -2402,8 +2410,9 @@ def api_backup_remediation(client: str | None = None):
                 {
                     "name": site["name"],
                     "url": site["url"],
-                    "backup_age_hours": last_observed_backup_age_hours,
+                    "backup_age_hours": backup_age_hours,
                     "last_observed_backup_age_hours": last_observed_backup_age_hours,
+                    "last_observed_care_backup_age_hours": care_check["backup_age_hours"],
                     "backup_status": status,
                     "snapshot_freshness": freshness,
                     "snapshot_age_hours": snapshot_age_hours,
@@ -2438,7 +2447,7 @@ def api_backup_remediation(client: str | None = None):
                     freshness_rank.get(site["snapshot_freshness"], 99),
                     freshness_rank.get(site["care_check_freshness"], 99),
                 ),
-                -(site["last_observed_backup_age_hours"] or 0),
+                -(site["backup_age_hours"] or site["last_observed_backup_age_hours"] or 0),
                 site["name"].lower(),
             )
         )

@@ -5084,6 +5084,140 @@ def test_api_actions_surfaces_aging_backup_warning(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("fleet_age", "care_age", "expected_status"),
+    [
+        (12, 96, "critical"),
+        (96, 12, "critical"),
+        (12, 73, "critical"),
+        (12, 72, "warning"),
+        (12, 37, "warning"),
+        (12, 36, "fresh"),
+        (0, 0, "fresh"),
+    ],
+)
+def test_api_backup_remediation_reconciles_current_paired_backup_ages(
+    tmp_path, fleet_age, care_age, expected_status,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(backup_age_hours=str(fleet_age)),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = ?", (care_age,))
+
+    response = client.get("/api/backup-remediation")
+    assert response.status_code == 200
+    payload = response.json()
+    account = payload["clients"][0]
+    assert payload["status"] == {
+        "critical": "red", "warning": "yellow", "fresh": "green",
+    }[expected_status]
+    assert payload["current_evidence_count"] == 1
+    assert payload["critical_site_count"] == int(expected_status == "critical")
+    assert payload["stale_site_count"] == int(expected_status != "fresh")
+    assert account["backup_status"] == expected_status
+    assert account["oldest_backup_age_hours"] == max(fleet_age, care_age)
+    for status in ("critical", "warning", "fresh"):
+        assert account[f"{status}_site_count"] == int(status == expected_status)
+    if expected_status == "fresh":
+        assert account["sites"] == []
+    else:
+        site = account["sites"][0]
+        assert site["backup_age_hours"] == max(fleet_age, care_age)
+        assert site["last_observed_backup_age_hours"] == fleet_age
+        assert site["last_observed_care_backup_age_hours"] == care_age
+        assert site["evidence_status"] == "current"
+        assert site["recommended_action"] == {
+            "critical": "Run and verify an immediate backup.",
+            "warning": "Confirm the next scheduled backup completes successfully.",
+        }[expected_status]
+
+
+def test_api_backup_remediation_orders_and_scopes_older_paired_backups(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, account, fleet_age, care_age in (
+        ("Fleet Older", "Recovery", 120, 12),
+        ("Care Older", "Recovery", 12, 168),
+        ("Other Account", "Other", 12, 240),
+    ):
+        url = f"https://{name.lower().replace(' ', '-')}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name, url=url, client=account, backup_age_hours=str(fleet_age),
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set backup_age_hours = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_age, url),
+            )
+
+    all_accounts = client.get("/api/backup-remediation").json()
+    assert [row["client"] for row in all_accounts["clients"]] == ["Recovery", "Other"]
+    assert all_accounts["critical_site_count"] == 3
+    response = client.get("/api/backup-remediation", params={"client": "Recovery"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["site_count"] == payload["critical_site_count"] == 2
+    assert payload["client_count"] == 1
+    account = payload["clients"][0]
+    assert account["oldest_backup_age_hours"] == 168
+    assert [site["name"] for site in account["sites"]] == ["Care Older", "Fleet Older"]
+    assert [site["backup_age_hours"] for site in account["sites"]] == [168, 120]
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_backup_remediation_keeps_conflicting_incomplete_evidence_unknown(
+    tmp_path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(backup_age_hours="12"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = 120")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get("/api/backup-remediation")
+    assert response.status_code == 200
+    payload = response.json()
+    account = payload["clients"][0]
+    site = account["sites"][0]
+    assert payload["status"] == "yellow"
+    assert payload["critical_site_count"] == payload["stale_site_count"] == 0
+    assert payload["current_evidence_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert account["backup_status"] == "unknown"
+    assert account["oldest_backup_age_hours"] == 0
+    assert site["evidence_status"] == "incomplete"
+    assert site["backup_status"] == "unknown"
+    assert site["backup_age_hours"] is None
+    assert site["last_observed_backup_age_hours"] == (
+        None if source == "snapshots" and freshness == "missing" else 12
+    )
+    assert site["last_observed_care_backup_age_hours"] == (
+        None if source == "care_checks" and freshness == "missing" else 120
+    )
+
+
 def test_api_backup_remediation_groups_stale_backup_work_by_client(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
