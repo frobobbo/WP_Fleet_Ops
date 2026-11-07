@@ -3522,8 +3522,15 @@ def api_updates(client: str | None = None):
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_pending_updates = row["wp_updates"]
-            if freshness == "current" and care_check_freshness == "current":
-                pending_updates = last_observed_pending_updates
+            if (
+                freshness == "current"
+                and care_check_freshness == "current"
+                and care_check is not None
+            ):
+                # Neither current source may conceal a larger paired backlog.
+                pending_updates = max(
+                    last_observed_pending_updates, care_check["update_count"],
+                )
                 status = _update_status(pending_updates)
             else:
                 pending_updates = None
@@ -3536,6 +3543,9 @@ def api_updates(client: str | None = None):
                 "client": site.get("client") or "Unassigned",
                 "pending_updates": pending_updates,
                 "last_observed_pending_updates": last_observed_pending_updates,
+                "last_observed_care_pending_updates": (
+                    care_check["update_count"] if care_check else None
+                ),
                 "update_status": status,
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
@@ -3567,7 +3577,11 @@ def api_updates(client: str | None = None):
                 freshness_rank.get(site["snapshot_freshness"], 99),
                 freshness_rank.get(site["care_check_freshness"], 99),
             ),
-            -(site["last_observed_pending_updates"] or 0),
+            -(
+                site["pending_updates"]
+                if site["pending_updates"] is not None
+                else (site["last_observed_pending_updates"] or 0)
+            ),
             site["client"].lower(),
             site["name"].lower(),
         )
