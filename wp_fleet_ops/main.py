@@ -3353,9 +3353,14 @@ def api_certificate_renewal_calendar(client: str | None = None):
             )
             latest_snapshot_at = row.get("captured_at")
             last_observed_ssl_days = row["ssl_days"]
-            if freshness == "current" and care_check_freshness == "current":
+            if (
+                freshness == "current"
+                and care_check_freshness == "current"
+                and care_check is not None
+            ):
                 current_evidence_count += 1
-                ssl_days = last_observed_ssl_days
+                # A longer fleet lifetime cannot conceal a paired care renewal.
+                ssl_days = min(last_observed_ssl_days, care_check["ssl_days_remaining"])
                 window = _certificate_renewal_window(ssl_days)
             else:
                 ssl_days = None
@@ -3370,6 +3375,9 @@ def api_certificate_renewal_calendar(client: str | None = None):
                 "client": site.get("client") or "Unassigned",
                 "ssl_days_remaining": ssl_days,
                 "last_observed_ssl_days_remaining": last_observed_ssl_days,
+                "last_observed_care_ssl_days_remaining": (
+                    care_check["ssl_days_remaining"] if care_check else None
+                ),
                 "renewal_window": window,
                 "snapshot_freshness": freshness,
                 "snapshot_age_hours": age_hours,
@@ -3399,9 +3407,13 @@ def api_certificate_renewal_calendar(client: str | None = None):
                 freshness_rank.get(site["snapshot_freshness"], 99),
                 freshness_rank.get(site["care_check_freshness"], 99),
             ),
-            site["last_observed_ssl_days_remaining"]
-            if site["last_observed_ssl_days_remaining"] is not None
-            else float("inf"),
+            site["ssl_days_remaining"]
+            if site["ssl_days_remaining"] is not None
+            else (
+                site["last_observed_ssl_days_remaining"]
+                if site["last_observed_ssl_days_remaining"] is not None
+                else float("inf")
+            ),
             site["client"].lower(),
             site["name"].lower(),
         )

@@ -7019,6 +7019,167 @@ def test_api_certificate_renewal_calendar_groups_expiring_certificates(tmp_path)
     assert payload["sites"][2]["recommended_action"] == "Schedule certificate renewal before the 7-day critical window."
 
 
+@pytest.mark.parametrize(
+    ("fleet_days", "care_days", "expected_window"),
+    [
+        (90, 0, "overdue"),
+        (0, 90, "overdue"),
+        (90, 7, "immediate"),
+        (7, 90, "immediate"),
+        (90, 8, "scheduled"),
+        (8, 90, "scheduled"),
+        (90, 30, "scheduled"),
+        (30, 90, "scheduled"),
+        (90, 31, "healthy"),
+        (31, 90, "healthy"),
+    ],
+)
+def test_api_certificate_renewal_calendar_reconciles_current_paired_expiry(
+    tmp_path, fleet_days, care_days, expected_window,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(ssl_days=str(fleet_days)),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = ?", (care_days,))
+
+    response = client.get("/api/certificate-renewal-calendar")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 1
+    assert payload["renewal_evidence_percent"] == 100
+    assert payload["unknown_count"] == 0
+    assert payload["renewal_count"] == int(expected_window != "healthy")
+    for window in ("overdue", "immediate", "scheduled"):
+        assert payload[f"{window}_count"] == int(window == expected_window)
+    assert payload["status"] == {
+        "overdue": "red", "immediate": "red",
+        "scheduled": "yellow", "healthy": "green",
+    }[expected_window]
+    if expected_window == "healthy":
+        assert payload["sites"] == []
+        return
+
+    site = payload["sites"][0]
+    assert site["evidence_status"] == "current"
+    assert site["renewal_window"] == expected_window
+    assert site["ssl_days_remaining"] == min(fleet_days, care_days)
+    assert site["last_observed_ssl_days_remaining"] == fleet_days
+    assert site["last_observed_care_ssl_days_remaining"] == care_days
+    assert site["recommended_action"] == {
+        "overdue": "Replace the expired certificate and verify HTTPS immediately.",
+        "immediate": "Renew the certificate this week and confirm post-renewal expiry.",
+        "scheduled": "Schedule certificate renewal before the 7-day critical window.",
+    }[expected_window]
+
+
+@pytest.mark.parametrize("fleet_days,care_days", [(7, 1), (20, 8)])
+def test_api_certificate_renewal_calendar_orders_by_shorter_paired_expiry(
+    tmp_path, fleet_days, care_days,
+):
+    client = make_test_client(tmp_path)
+    for name, fleet, care in (
+        ("Fleet Earlier", fleet_days, 90),
+        ("Care Earlier", 90, care_days),
+    ):
+        url = f"https://{name.lower().replace(' ', '-')}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, ssl_days=str(fleet)),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set ssl_days_remaining = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care, url),
+            )
+
+    payload = client.get("/api/certificate-renewal-calendar").json()
+    assert [site["name"] for site in payload["sites"]] == ["Care Earlier", "Fleet Earlier"]
+    assert [site["ssl_days_remaining"] for site in payload["sites"]] == [care_days, fleet_days]
+    assert payload["renewal_count"] == 2
+    assert payload["current_evidence_count"] == 2
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_certificate_renewal_calendar_keeps_conflicting_incomplete_evidence_unknown(
+    tmp_path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(ssl_days="90"), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = 0")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/certificate-renewal-calendar").json()
+    site = payload["sites"][0]
+    assert site["evidence_status"] == "incomplete"
+    assert site["renewal_window"] == "unknown"
+    assert site["ssl_days_remaining"] is None
+    assert site["last_observed_ssl_days_remaining"] == (
+        None if source == "snapshots" and freshness == "missing" else 90
+    )
+    assert site["last_observed_care_ssl_days_remaining"] == (
+        None if source == "care_checks" and freshness == "missing" else 0
+    )
+    assert payload["current_evidence_count"] == 0
+    assert payload["renewal_count"] == 0
+    assert payload["overdue_count"] == 0
+    assert payload["immediate_count"] == 0
+    assert payload["scheduled_count"] == 0
+    assert payload["unknown_count"] == 1
+    assert payload["status"] == "yellow"
+
+
+def test_api_certificate_renewal_calendar_scopes_conflicting_expiry_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account, care_days in (("Safe Account", 90), ("Expired Account", 0), ("", 7)):
+        url = f"https://{account.lower().replace(' ', '-') or 'unassigned'}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=account or "Unassigned", url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set ssl_days_remaining = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_days, url),
+            )
+
+    for account, expected_window, expected_status in (
+        ("Safe Account", "healthy", "green"),
+        ("Expired Account", "overdue", "red"),
+        ("unassigned", "immediate", "red"),
+    ):
+        response = client.get("/api/certificate-renewal-calendar", params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["status"] == expected_status
+        assert payload["renewal_count"] == int(expected_window != "healthy")
+        if expected_window == "healthy":
+            assert payload["sites"] == []
+        else:
+            assert payload["sites"][0]["renewal_window"] == expected_window
+
+
 def test_api_certificate_renewal_calendar_filters_counts_and_evidence_by_client(tmp_path):
     client = make_test_client(tmp_path)
     for name, url, account, ssl_days in (
