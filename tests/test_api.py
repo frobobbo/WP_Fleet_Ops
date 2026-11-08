@@ -5564,6 +5564,140 @@ def test_api_restore_drill_queue_empty_inventory_is_unverified(tmp_path, remove_
         assert payload[field] == 0, field
 
 
+@pytest.mark.parametrize(
+    ("fleet_age", "care_age", "expected_priority"),
+    [
+        (12, 240, "urgent"),
+        (240, 12, "urgent"),
+        (12, 169, "urgent"),
+        (12, 168, "high"),
+        (12, 73, "high"),
+        (12, 72, "watch"),
+        (12, 25, "watch"),
+        (12, 24, "routine"),
+        (0, 0, "routine"),
+    ],
+)
+def test_api_restore_drill_queue_reconciles_current_paired_backup_ages(
+    tmp_path, fleet_age, care_age, expected_priority,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(backup_age_hours=str(fleet_age)),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = ?", (care_age,))
+
+    response = client.get("/api/restore-drill-queue")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == {
+        "urgent": "red", "high": "yellow", "watch": "yellow", "routine": "green",
+    }[expected_priority]
+    assert payload["current_evidence_count"] == 1
+    assert payload["unknown_count"] == 0
+    assert payload["restore_evidence_percent"] == 100
+    for priority in ("urgent", "high", "watch", "routine"):
+        assert payload[f"{priority}_count"] == int(priority == expected_priority)
+    site = payload["sites"][0]
+    assert site["backup_age_hours"] == max(fleet_age, care_age)
+    assert site["restore_drill_priority"] == expected_priority
+    assert site["last_observed_backup_age_hours"] == fleet_age
+    assert site["last_observed_care_backup_age_hours"] == care_age
+    assert site["evidence_status"] == "current"
+    assert site["recommended_action"] == {
+        "urgent": "Run an immediate restore drill and verify a recent usable backup exists.",
+        "high": "Schedule a restore drill after creating and validating a fresh backup.",
+        "watch": "Confirm the next scheduled backup and include the site in the next drill rotation.",
+        "routine": "Keep the site in the normal quarterly restore-drill rotation.",
+    }[expected_priority]
+
+
+def test_api_restore_drill_queue_orders_and_scopes_older_paired_backups(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, account, fleet_age, care_age in (
+        ("Fleet Older", "Recovery", 120, 12),
+        ("Care Older", "Recovery", 12, 144),
+        ("Other Account", "Other", 12, 240),
+    ):
+        url = f"https://{name.lower().replace(' ', '-')}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name, url=url, client=account, backup_age_hours=str(fleet_age),
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set backup_age_hours = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_age, url),
+            )
+
+    all_accounts = client.get("/api/restore-drill-queue").json()
+    assert all_accounts["urgent_count"] == 1
+    assert all_accounts["high_count"] == 2
+    assert [site["name"] for site in all_accounts["sites"]] == [
+        "Other Account", "Care Older", "Fleet Older",
+    ]
+    response = client.get("/api/restore-drill-queue", params={"client": " Recovery "})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["client"] == "Recovery"
+    assert payload["site_count"] == payload["high_count"] == 2
+    assert payload["urgent_count"] == 0
+    assert [site["name"] for site in payload["sites"]] == ["Care Older", "Fleet Older"]
+    assert [site["backup_age_hours"] for site in payload["sites"]] == [144, 120]
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_restore_drill_queue_keeps_conflicting_incomplete_evidence_unknown(
+    tmp_path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(backup_age_hours="12"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set backup_age_hours = 240")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get("/api/restore-drill-queue")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["unknown_count"] == payload["monitoring_gap_count"] == 1
+    assert payload["restore_evidence_percent"] == 0
+    for priority in ("urgent", "high", "watch", "routine"):
+        assert payload[f"{priority}_count"] == 0
+    site = payload["sites"][0]
+    assert site["evidence_status"] == "incomplete"
+    assert site["restore_drill_priority"] == "unknown"
+    assert site["backup_age_hours"] is None
+    assert site["last_observed_backup_age_hours"] == (
+        None if source == "snapshots" and freshness == "missing" else 12
+    )
+    assert site["last_observed_care_backup_age_hours"] == (
+        None if source == "care_checks" and freshness == "missing" else 240
+    )
+
+
 def test_api_restore_drill_queue_prioritizes_backup_recovery_risk(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
