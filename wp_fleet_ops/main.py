@@ -3862,6 +3862,24 @@ def api_risk_register(client: str | None = None):
     }
 
 
+def _current_maintenance_rows(
+    rows: list[dict], care_checks: list[dict], now: datetime,
+) -> list[dict]:
+    """Plan with the larger update backlog from current paired observations."""
+    care_checks_by_url = {check["url"]: check for check in care_checks}
+    # Reconcile only after both sources pass freshness checks, and copy each
+    # row so planning cannot alter the stored fleet evidence or its score.
+    return [
+        {
+            **row,
+            "wp_updates": max(
+                row["wp_updates"], care_checks_by_url[row["url"]]["update_count"],
+            ),
+        }
+        for row in _current_paired_snapshot_rows(rows, care_checks, now)
+    ]
+
+
 @app.get("/api/maintenance-windows")
 def api_maintenance_windows(client: str | None = None):
     """Return maintenance work from current paired evidence, optionally by client."""
@@ -3886,7 +3904,7 @@ def api_maintenance_windows(client: str | None = None):
     care_checks = [check for check in store.latest_care_checks() if check["url"] in tracked_urls]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
-    current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
+    current_rows = _current_maintenance_rows(dashboard_rows, care_checks, now)
     monitored_site_count = len(dashboard_rows)
     current_snapshot_count = len(current_snapshot_rows)
     current_care_check_count = len(current_care_urls)
@@ -4048,7 +4066,7 @@ def api_maintenance_calendar(client: str | None = None):
     care_checks = [check for check in store.latest_care_checks() if check["url"] in tracked_urls]
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
-    current_rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
+    current_rows = _current_maintenance_rows(dashboard_rows, care_checks, now)
     monitored_site_count = len(dashboard_rows)
     current_snapshot_count = len(current_snapshot_rows)
     current_care_check_count = len(current_care_urls)
