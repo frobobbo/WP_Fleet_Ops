@@ -8888,6 +8888,125 @@ def test_maintenance_views_scope_conflicting_backup_ages_to_client(tmp_path, pat
     assert client.get(path, params={"client": "Unknown Account"}).status_code == 404
 
 
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize(
+    ("fleet_ms", "care_ms", "expected_window"),
+    [
+        (250, 250, "none"),
+        (250, 750, "none"),
+        (250, 751, "scheduled"),
+        (250, 1500, "scheduled"),
+        (250, 2501, "scheduled"),
+        (750, 250, "none"),
+        (751, 250, "scheduled"),
+        (2501, 250, "scheduled"),
+    ],
+)
+def test_maintenance_views_reconcile_current_paired_response_times(
+    tmp_path, path, fleet_ms, care_ms, expected_window,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(response_ms=str(fleet_ms)),
+        follow_redirects=False,
+    ).status_code == 303
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set latency_ms = ?", (care_ms,))
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == ("green" if expected_window == "none" else "yellow")
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == 0
+    assert payload[f"scheduled_{prefix}count"] == int(expected_window == "scheduled")
+    if path.endswith("windows"):
+        sites = payload["sites"]
+        if sites:
+            assert sites[0]["maintenance_window"] == expected_window
+    else:
+        assert [window["window"] for window in payload["windows"]] == (
+            [] if expected_window == "none" else [expected_window]
+        )
+        sites = [site for window in payload["windows"] for site in window["sites"]]
+    assert len(sites) == int(expected_window != "none")
+    if sites:
+        assert sites[0]["reasons"] == ["performance tuning"]
+        assert sites[0]["risk_count"] == 1
+        assert sites[0]["score"] == original_snapshot["score"]
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    care_check = client.get("/api/care-check-history").json()["care_checks"][0]
+    assert care_check["latency_ms"] == care_ms
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_maintenance_views_keep_conflicting_incomplete_latency_out_of_planning(
+    tmp_path, path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set latency_ms = 2501")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["window_count"] == 0
+    assert payload["sites" if path.endswith("windows") else "windows"] == []
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == payload[f"scheduled_{prefix}count"] == 0
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+def test_maintenance_views_scope_conflicting_response_times_to_client(tmp_path, path):
+    client = make_test_client(tmp_path)
+    for account, care_ms in (("Fast Account", 750), ("Slow Account", 751), ("", 2501)):
+        url = f"https://{account.lower().replace(' ', '-') or 'unassigned'}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=account or "Unassigned", url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set latency_ms = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_ms, url),
+            )
+
+    for account, expected_count in (("Fast Account", 0), ("Slow Account", 1), ("unassigned", 1)):
+        response = client.get(path, params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["status"] == ("yellow" if expected_count else "green")
+        prefix = "" if path.endswith("windows") else "site_"
+        assert payload[f"immediate_{prefix}count"] == 0
+        assert payload[f"scheduled_{prefix}count"] == expected_count
+    assert client.get(path, params={"client": "Unknown Account"}).status_code == 404
+
+
 def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
