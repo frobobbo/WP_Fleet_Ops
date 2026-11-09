@@ -8236,6 +8236,103 @@ def test_api_risk_register_rejects_unknown_client_instead_of_reporting_green(tmp
     }
 
 
+@pytest.mark.parametrize("fleet_uptime", [True, False])
+@pytest.mark.parametrize("http_status", [0, 200, 201, 203, 204, 206, 299, 302, 304, 503])
+def test_risk_register_reconciles_current_paired_availability(tmp_path, fleet_uptime, http_status):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(uptime_ok=str(fleet_uptime).lower()),
+        follow_redirects=False,
+    ).status_code == 303
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    incident = not fleet_uptime or http_status not in (200, 203)
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == ("red" if incident else "green")
+    assert payload["category_count"] == payload["critical_category_count"] == int(incident)
+    assert payload["warning_category_count"] == 0
+    assert [entry["category"] for entry in payload["entries"]] == (["availability"] if incident else [])
+    if incident:
+        entry = payload["entries"][0]
+        assert entry["highest_severity"] == "critical"
+        assert entry["affected_site_count"] == 1
+        assert entry["sites"][0]["score"] == original_snapshot["score"]
+        assert entry["sites"][0]["recommended_action"].startswith("Confirm hosting availability")
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_risk_register_excludes_incomplete_conflicting_availability(tmp_path, source, freshness):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = 503")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["snapshot_gap_count"] == int(source == "snapshots")
+    assert payload["care_check_gap_count"] == int(source == "care_checks")
+    assert payload["category_count"] == payload["critical_category_count"] == 0
+    assert payload["entries"] == []
+
+
+def test_risk_register_scopes_conflicting_paired_availability_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for account, http_status in (("Safe Account", 200), ("Outage Account", 503), ("", 204)):
+        url = f"https://{account.lower().replace(' ', '-') or 'unassigned'}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=account or "Unassigned", url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set http_status = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (http_status, url),
+            )
+
+    for account, incident in (("Safe Account", False), ("Outage Account", True), ("Unassigned", True)):
+        response = client.get("/api/risk-register", params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["status"] == ("red" if incident else "green")
+        assert payload["critical_category_count"] == int(incident)
+        if incident:
+            assert [site["client"] for site in payload["entries"][0]["sites"]] == [account]
+    assert client.get("/api/risk-register", params={"client": "Unknown Account"}).status_code == 404
+    combined = client.get("/api/risk-register").json()
+    assert combined["status"] == "red"
+    assert combined["entries"][0]["affected_site_count"] == 2
+
+
 def test_api_risk_register_groups_current_risks_by_category(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
