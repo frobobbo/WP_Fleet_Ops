@@ -3865,13 +3865,16 @@ def api_risk_register(client: str | None = None):
 def _current_maintenance_rows(
     rows: list[dict], care_checks: list[dict], now: datetime,
 ) -> list[dict]:
-    """Plan with the worst update, TLS, backup, and latency evidence from current pairs."""
+    """Plan with the worst availability, update, TLS, backup, and latency evidence from current pairs."""
     care_checks_by_url = {check["url"]: check for check in care_checks}
     # Reconcile only after both sources pass freshness checks, and copy each
     # row so planning cannot alter the stored fleet evidence or its score.
     return [
         {
             **row,
+            "uptime_ok": row["uptime_ok"] and homepage_response_usable(
+                care_checks_by_url[row["url"]]["http_status"],
+            ),
             "ssl_days": min(
                 row["ssl_days"], care_checks_by_url[row["url"]]["ssl_days_remaining"],
             ),

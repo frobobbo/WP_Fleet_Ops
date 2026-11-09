@@ -8385,6 +8385,145 @@ def test_api_risk_register_requires_current_paired_care_evidence(tmp_path):
 
 
 @pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize("fleet_uptime", [True, False])
+@pytest.mark.parametrize("http_status", [0, 200, 201, 203, 204, 206, 299, 302, 304, 503])
+def test_maintenance_views_reconcile_current_paired_availability(
+    tmp_path, path, fleet_uptime, http_status,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(uptime_ok=str(fleet_uptime).lower()),
+        follow_redirects=False,
+    ).status_code == 303
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    incident = not fleet_uptime or http_status not in (200, 203)
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == ("red" if incident else "green")
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == int(incident)
+    assert payload[f"scheduled_{prefix}count"] == 0
+    if path.endswith("windows"):
+        sites = payload["sites"]
+        if sites:
+            assert sites[0]["maintenance_window"] == "immediate"
+    else:
+        assert [window["window"] for window in payload["windows"]] == (
+            ["immediate"] if incident else []
+        )
+        sites = [site for window in payload["windows"] for site in window["sites"]]
+    assert len(sites) == int(incident)
+    if sites:
+        assert sites[0]["reasons"] == ["site availability incident"]
+        assert sites[0]["risk_count"] == 1
+        assert sites[0]["score"] == original_snapshot["score"]
+    # Planning must preserve both observations and the original fleet score.
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0]["http_status"] == http_status
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_maintenance_views_keep_incomplete_availability_out_of_planning(
+    tmp_path, path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = 503")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["window_count"] == 0
+    assert payload["sites" if path.endswith("windows") else "windows"] == []
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == 0
+    assert payload[f"scheduled_{prefix}count"] == 0
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+def test_maintenance_views_prioritize_failed_paired_homepage(tmp_path, path):
+    client = make_test_client(tmp_path)
+    for name, updates, http_status in (
+        ("Fleet Routine", 1, 200),
+        ("Care Outage", 0, 503),
+    ):
+        url = f"https://{name.lower().replace(' ', '-')}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, wp_updates=str(updates)),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set http_status = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (http_status, url),
+            )
+
+    payload = client.get(path).json()
+    sites = payload["sites"] if path.endswith("windows") else [
+        site for window in payload["windows"] for site in window["sites"]
+    ]
+    assert [site["name"] for site in sites] == ["Care Outage", "Fleet Routine"]
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == payload[f"scheduled_{prefix}count"] == 1
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+def test_maintenance_views_scope_paired_availability_to_client(tmp_path, path):
+    client = make_test_client(tmp_path)
+    for account, http_status in (("Safe Account", 200), ("Outage Account", 503), ("", 204)):
+        url = f"https://{account.lower().replace(' ', '-') or 'unassigned'}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=account or "Unassigned", url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set http_status = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (http_status, url),
+            )
+
+    for account, incident in (("Safe Account", False), ("Outage Account", True), ("Unassigned", True)):
+        response = client.get(path, params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["status"] == ("red" if incident else "green")
+        prefix = "" if path.endswith("windows") else "site_"
+        assert payload[f"immediate_{prefix}count"] == int(incident)
+        assert payload[f"scheduled_{prefix}count"] == 0
+    assert client.get(path, params={"client": "Unknown Account"}).status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
 @pytest.mark.parametrize(
     ("fleet_days", "care_days", "expected_window"),
     [
