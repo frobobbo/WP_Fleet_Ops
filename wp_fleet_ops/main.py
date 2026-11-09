@@ -3865,7 +3865,7 @@ def api_risk_register(client: str | None = None):
 def _current_maintenance_rows(
     rows: list[dict], care_checks: list[dict], now: datetime,
 ) -> list[dict]:
-    """Plan with the worst update backlog and TLS lifetime from current pairs."""
+    """Plan with the worst update, TLS, and backup evidence from current pairs."""
     care_checks_by_url = {check["url"]: check for check in care_checks}
     # Reconcile only after both sources pass freshness checks, and copy each
     # row so planning cannot alter the stored fleet evidence or its score.
@@ -3877,6 +3877,9 @@ def _current_maintenance_rows(
             ),
             "wp_updates": max(
                 row["wp_updates"], care_checks_by_url[row["url"]]["update_count"],
+            ),
+            "backup_age_hours": max(
+                row["backup_age_hours"], care_checks_by_url[row["url"]]["backup_age_hours"],
             ),
         }
         for row in _current_paired_snapshot_rows(rows, care_checks, now)
