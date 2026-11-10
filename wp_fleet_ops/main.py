@@ -3814,7 +3814,7 @@ def api_risk_register(client: str | None = None):
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
     care_checks_by_url = {check["url"]: check for check in care_checks}
-    # Either current source can prove availability, certificate, or backup risk.
+    # Either current source can prove availability, TLS, backup, or update risk.
     # Reconcile copies only after freshness validation, preserving evidence/scores.
     current_rows = [
         {
@@ -3827,6 +3827,9 @@ def api_risk_register(client: str | None = None):
             ),
             "backup_age_hours": max(
                 row["backup_age_hours"], care_checks_by_url[row["url"]]["backup_age_hours"],
+            ),
+            "wp_updates": max(
+                row["wp_updates"], care_checks_by_url[row["url"]]["update_count"],
             ),
         }
         for row in _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
