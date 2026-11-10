@@ -8781,6 +8781,140 @@ def test_risk_register_scopes_conflicting_update_backlogs_to_client(tmp_path):
     assert client.get("/api/risk-register", params={"client": "Unknown Account"}).status_code == 404
 
 
+@pytest.mark.parametrize(
+    ("fleet_ms", "care_ms", "expected_severity"),
+    [
+        (250, 250, None),
+        (250, 750, None),
+        (250, 751, "warning"),
+        (250, 2500, "warning"),
+        (250, 2501, "critical"),
+        (750, 250, None),
+        (751, 250, "warning"),
+        (2500, 250, "warning"),
+        (2501, 250, "critical"),
+        (751, 2501, "critical"),
+        (2501, 751, "critical"),
+    ],
+)
+def test_risk_register_reconciles_current_paired_response_times(
+    tmp_path, fleet_ms, care_ms, expected_severity,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(response_ms=str(fleet_ms)),
+        follow_redirects=False,
+    ).status_code == 303
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set latency_ms = ?", (care_ms,))
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == {None: "green", "warning": "yellow", "critical": "red"}[expected_severity]
+    assert payload["category_count"] == int(expected_severity is not None)
+    assert payload["critical_category_count"] == int(expected_severity == "critical")
+    assert payload["warning_category_count"] == int(expected_severity == "warning")
+    assert [entry["category"] for entry in payload["entries"]] == (
+        ["performance"] if expected_severity else []
+    )
+    if expected_severity:
+        entry = payload["entries"][0]
+        assert entry["highest_severity"] == expected_severity
+        assert entry["affected_site_count"] == 1
+        assert entry["sites"][0]["severity"] == expected_severity
+        assert entry["sites"][0]["score"] == original_snapshot["score"]
+        assert entry["sites"][0]["recommended_action"].startswith("Review caching")
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_risk_register_excludes_incomplete_conflicting_response_times(tmp_path, source, freshness):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set latency_ms = 3000")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["snapshot_gap_count"] == int(source == "snapshots")
+    assert payload["care_check_gap_count"] == int(source == "care_checks")
+    assert payload["category_count"] == payload["critical_category_count"] == 0
+    assert payload["warning_category_count"] == 0
+    assert payload["entries"] == []
+
+
+def test_risk_register_prioritizes_and_scopes_conflicting_response_times(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, account, fleet_ms, care_ms in (
+        ("Safe Site", "Safe Account", 250, 750),
+        ("Fleet Warning", "Performance Account", 2500, 250),
+        ("Care Critical", "Performance Account", 250, 2501),
+        ("Unassigned Warning", "", 250, 751),
+    ):
+        url = f"https://{name.lower().replace(' ', '-')}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=account, response_ms=str(fleet_ms)),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set latency_ms = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_ms, url),
+            )
+
+    scoped = client.get("/api/risk-register", params={"client": "Performance Account"})
+    assert scoped.status_code == 200
+    payload = scoped.json()
+    assert payload["site_count"] == payload["current_evidence_count"] == 2
+    assert payload["status"] == "red"
+    assert payload["category_count"] == payload["critical_category_count"] == 1
+    entry = payload["entries"][0]
+    assert entry["category"] == "performance"
+    assert entry["affected_site_count"] == 2
+    assert entry["highest_severity"] == "critical"
+    assert [site["name"] for site in entry["sites"]] == ["Care Critical", "Fleet Warning"]
+    assert [site["severity"] for site in entry["sites"]] == ["critical", "warning"]
+    assert all(site["client"] == "Performance Account" for site in entry["sites"])
+    safe = client.get("/api/risk-register", params={"client": "Safe Account"}).json()
+    assert safe["site_count"] == safe["current_evidence_count"] == 1
+    assert safe["status"] == "green"
+    assert safe["entries"] == []
+    unassigned = client.get("/api/risk-register", params={"client": "Unassigned"}).json()
+    assert unassigned["site_count"] == unassigned["current_evidence_count"] == 1
+    assert unassigned["status"] == "yellow"
+    assert unassigned["entries"][0]["sites"][0]["name"] == "Unassigned Warning"
+    assert client.get("/api/risk-register", params={"client": "Unknown Account"}).status_code == 404
+    combined = client.get("/api/risk-register").json()
+    assert combined["status"] == "red"
+    assert combined["entries"][0]["affected_site_count"] == 3
+
+
 def test_api_risk_register_groups_current_risks_by_category(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
