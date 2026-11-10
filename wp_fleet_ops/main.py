@@ -3814,8 +3814,8 @@ def api_risk_register(client: str | None = None):
     current_snapshot_rows = _current_snapshot_rows(dashboard_rows, now)
     current_care_urls = _current_care_check_urls(care_checks, now) & tracked_urls
     care_checks_by_url = {check["url"]: check for check in care_checks}
-    # Either current source can prove availability or certificate risk. Reconcile
-    # copies only after freshness validation, preserving observations and scores.
+    # Either current source can prove availability, certificate, or backup risk.
+    # Reconcile copies only after freshness validation, preserving evidence/scores.
     current_rows = [
         {
             **row,
@@ -3824,6 +3824,9 @@ def api_risk_register(client: str | None = None):
             ),
             "ssl_days": min(
                 row["ssl_days"], care_checks_by_url[row["url"]]["ssl_days_remaining"],
+            ),
+            "backup_age_hours": max(
+                row["backup_age_hours"], care_checks_by_url[row["url"]]["backup_age_hours"],
             ),
         }
         for row in _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
