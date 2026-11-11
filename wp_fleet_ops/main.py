@@ -3738,9 +3738,11 @@ def _risk_register_entries(rows: list[dict]) -> list[dict]:
         (
             "security",
             "Security header coverage gaps",
-            lambda row: row["security_header_count"] < 3,
-            lambda row: "critical" if row["security_header_count"] < 2 else "warning",
-            lambda row: "Add missing HSTS, clickjacking, or content security headers.",
+            lambda row: _security_status(row["security_header_count"], row["url"]) != "covered",
+            lambda row: _security_status(row["security_header_count"], row["url"]),
+            lambda row: _security_recommended_action(
+                _security_status(row["security_header_count"], row["url"]), row["url"],
+            ),
         ),
     ]
     severity_rank = {"critical": 0, "warning": 1, "info": 2}

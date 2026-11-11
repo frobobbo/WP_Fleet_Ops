@@ -8915,6 +8915,123 @@ def test_risk_register_prioritizes_and_scopes_conflicting_response_times(tmp_pat
     assert combined["entries"][0]["affected_site_count"] == 3
 
 
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("header_count", [0, 1, 2, 3])
+def test_risk_register_uses_transport_aware_security_coverage(tmp_path, scheme, header_count):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            url=f"{scheme}://security-risk.example",
+            security_header_count=str(header_count),
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    security = client.get("/api/security").json()
+    expected = "critical" if header_count < 2 else (
+        "warning" if scheme == "http" or header_count == 2 else "covered"
+    )
+    assert security["sites"][0]["security_status"] == expected
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == {"critical": "red", "warning": "yellow", "covered": "green"}[expected]
+    assert payload["category_count"] == int(expected != "covered")
+    assert payload["critical_category_count"] == int(expected == "critical")
+    assert payload["warning_category_count"] == int(expected == "warning")
+    assert [entry["category"] for entry in payload["entries"]] == (
+        ["security"] if expected != "covered" else []
+    )
+    if expected != "covered":
+        entry = payload["entries"][0]
+        assert entry["highest_severity"] == expected
+        assert entry["affected_site_count"] == 1
+        assert entry["sites"][0]["severity"] == expected
+        assert entry["sites"][0]["score"] == original_snapshot["score"]
+        if scheme == "http":
+            assert entry["sites"][0]["recommended_action"].startswith("Serve the site over HTTPS")
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_risk_register_keeps_incomplete_http_security_evidence_unknown(tmp_path, source, freshness):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(url="http://incomplete-security.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get("/api/risk-register")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["snapshot_gap_count"] == int(source == "snapshots")
+    assert payload["care_check_gap_count"] == int(source == "care_checks")
+    assert payload["category_count"] == payload["critical_category_count"] == 0
+    assert payload["warning_category_count"] == 0
+    assert payload["entries"] == []
+
+
+def test_risk_register_scopes_transport_security_risks_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, headers in (
+        ("HTTPS Covered", "https://covered-security.example", "Secure Account", 3),
+        ("HTTP Warning", "http://http-warning.example", "HTTP Account", 3),
+        ("HTTP Critical", "http://http-critical.example", "HTTP Account", 1),
+        ("Unassigned HTTP", "http://unassigned-security.example", "", 3),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name, url=url, client=account, security_header_count=str(headers),
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+
+    scoped = client.get("/api/risk-register", params={"client": "HTTP Account"})
+    assert scoped.status_code == 200
+    payload = scoped.json()
+    assert payload["site_count"] == payload["current_evidence_count"] == 2
+    assert payload["status"] == "red"
+    assert payload["category_count"] == payload["critical_category_count"] == 1
+    entry = payload["entries"][0]
+    assert entry["category"] == "security"
+    assert entry["affected_site_count"] == 2
+    assert [site["name"] for site in entry["sites"]] == ["HTTP Critical", "HTTP Warning"]
+    assert [site["severity"] for site in entry["sites"]] == ["critical", "warning"]
+    assert all(site["client"] == "HTTP Account" for site in entry["sites"])
+    covered = client.get("/api/risk-register", params={"client": "Secure Account"}).json()
+    assert covered["status"] == "green"
+    assert covered["entries"] == []
+    unassigned = client.get("/api/risk-register", params={"client": "Unassigned"}).json()
+    assert unassigned["status"] == "yellow"
+    assert unassigned["entries"][0]["sites"][0]["name"] == "Unassigned HTTP"
+    assert client.get("/api/risk-register", params={"client": "Unknown Account"}).status_code == 404
+    combined = client.get("/api/risk-register").json()
+    assert combined["entries"][0]["affected_site_count"] == 3
+
+
 def test_api_risk_register_groups_current_risks_by_category(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
