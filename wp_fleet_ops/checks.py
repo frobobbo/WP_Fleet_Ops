@@ -297,7 +297,14 @@ def _security_header_is_effective(name: str, value: str) -> bool:
         for directive in value.split(";"):
             directive_name, separator, directive_value = directive.partition("=")
             if directive_name.strip().lower() == "max-age":
-                max_age_values.append(directive_value.strip() if separator else "")
+                max_age = directive_value.strip() if separator else ""
+                # RFC 6797 permits quoted-string values and requires unescaping
+                # before validating delta-seconds. Only ASCII digits (literal or
+                # quoted-pairs) can produce a valid nonzero duration. Preserve
+                # the original header separately as the captured evidence.
+                if re.fullmatch(r'"(?:[0-9]|\\[0-9])*"', max_age):
+                    max_age = re.sub(r"\\([0-9])", r"\1", max_age[1:-1])
+                max_age_values.append(max_age)
         return (
             len(max_age_values) == 1
             # RFC 6797 defines max-age as ASCII DIGIT bytes. ``str.isdigit``
