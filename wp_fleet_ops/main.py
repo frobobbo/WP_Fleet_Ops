@@ -3676,8 +3676,12 @@ def _maintenance_reasons(row: dict) -> list[str]:
         reasons.append("backup freshness verification")
     if row["response_ms"] > 750:
         reasons.append("performance tuning")
-    if row["security_header_count"] < 3:
-        reasons.append("security header hardening")
+    if _security_status(row["security_header_count"], row["url"]) != "covered":
+        reasons.append(
+            "HTTPS enablement and security header hardening"
+            if urlparse(row["url"]).scheme.lower() == "http"
+            else "security header hardening"
+        )
     return reasons
 
 

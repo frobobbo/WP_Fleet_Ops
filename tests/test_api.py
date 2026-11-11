@@ -9942,6 +9942,130 @@ def test_maintenance_views_scope_conflicting_response_times_to_client(tmp_path, 
     assert client.get(path, params={"client": "Unknown Account"}).status_code == 404
 
 
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("header_count", [0, 1, 2, 3])
+def test_maintenance_views_use_transport_aware_security_coverage(
+    tmp_path, path, scheme, header_count,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            url=f"{scheme}://maintenance-security.example",
+            security_header_count=str(header_count),
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    security = client.get("/api/security").json()
+    needs_work = security["sites"][0]["security_status"] != "covered"
+    assert needs_work == (scheme == "http" or header_count < 3)
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["status"] == ("yellow" if needs_work else "green")
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == 0
+    assert payload[f"scheduled_{prefix}count"] == int(needs_work)
+    if path.endswith("windows"):
+        sites = payload["sites"]
+        if sites:
+            assert sites[0]["maintenance_window"] == "scheduled"
+    else:
+        assert [window["window"] for window in payload["windows"]] == (
+            ["scheduled"] if needs_work else []
+        )
+        sites = [site for window in payload["windows"] for site in window["sites"]]
+    assert len(sites) == int(needs_work)
+    if sites:
+        assert sites[0]["reasons"] == [
+            "HTTPS enablement and security header hardening"
+            if scheme == "http" else "security header hardening"
+        ]
+        assert sites[0]["risk_count"] == 1
+        assert sites[0]["score"] == original_snapshot["score"]
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_maintenance_views_keep_incomplete_http_security_out_of_planning(
+    tmp_path, path, source, freshness,
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(url="http://incomplete-maintenance-security.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    response = client.get(path)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert payload["snapshot_gap_count"] == int(source == "snapshots")
+    assert payload["care_check_gap_count"] == int(source == "care_checks")
+    assert payload["window_count"] == 0
+    assert payload["sites" if path.endswith("windows") else "windows"] == []
+    prefix = "" if path.endswith("windows") else "site_"
+    assert payload[f"immediate_{prefix}count"] == payload[f"scheduled_{prefix}count"] == 0
+
+
+@pytest.mark.parametrize("path", ["/api/maintenance-windows", "/api/maintenance-calendar"])
+def test_maintenance_views_scope_transport_security_work_to_client(tmp_path, path):
+    client = make_test_client(tmp_path)
+    for name, url, account, headers in (
+        ("HTTPS Covered", "https://covered-maintenance.example", "Secure Account", 3),
+        ("HTTP Warning", "http://warning-maintenance.example", "HTTP Account", 3),
+        ("HTTP Critical", "http://critical-maintenance.example", "HTTP Account", 1),
+        ("Unassigned HTTP", "http://unassigned-maintenance.example", "", 3),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=name, url=url, client=account, security_header_count=str(headers),
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+
+    for account, expected_count in (("Secure Account", 0), ("HTTP Account", 2), ("Unassigned", 1)):
+        response = client.get(path, params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == max(expected_count, 1)
+        assert payload["status"] == ("yellow" if expected_count else "green")
+        prefix = "" if path.endswith("windows") else "site_"
+        assert payload[f"immediate_{prefix}count"] == 0
+        assert payload[f"scheduled_{prefix}count"] == expected_count
+        sites = payload["sites"] if path.endswith("windows") else [
+            site for window in payload["windows"] for site in window["sites"]
+        ]
+        assert len(sites) == expected_count
+        assert all(site["client"] == account for site in sites)
+        assert all("HTTPS enablement" in site["reasons"][0] for site in sites)
+    assert client.get(path, params={"client": "Unknown Account"}).status_code == 404
+
+
 def test_api_maintenance_windows_prioritizes_sites_needing_safe_work_windows(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
