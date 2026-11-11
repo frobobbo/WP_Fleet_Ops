@@ -11852,6 +11852,114 @@ def test_empty_fleet_brief_and_handoff_do_not_claim_healthy_coverage(tmp_path):
     assert handoff["handoff_notes"] == ["Register a site and capture an initial combined care check and fleet snapshot."]
 
 
+@pytest.mark.parametrize("uptime_ok", [True, False])
+@pytest.mark.parametrize("http_status", [0, 200, 201, 202, 203, 204, 206, 207, 299, 301, 304, 404, 503])
+def test_api_site_scorecards_reconcile_current_paired_availability(tmp_path, uptime_ok, http_status):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(uptime_ok=str(uptime_ok).lower()),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = ?", (http_status,))
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    response = client.get("/api/site-scorecards")
+    assert response.status_code == 200
+    payload = response.json()
+    card = payload["sites"][0]
+    available = uptime_ok and http_status in {200, 203}
+    expected = "healthy" if available else "critical"
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 0
+    assert payload["critical_count"] == int(not available)
+    assert payload["healthy_count"] == int(available)
+    assert payload["warning_count"] == 0
+    assert card["status"] == card["badges"]["availability"] == expected
+    assert card["observed_status"] == card["observed_badges"]["availability"] == (
+        "healthy" if uptime_ok else "critical"
+    )
+    assert card["score"] == card["observed_score"] == original_snapshot["score"]
+    assert card["alert_count"] == card["observed_alert_count"] == original_snapshot["alert_count"]
+    assert card["next_action"] == (
+        "Continue normal maintenance cadence." if available
+        else "Confirm site availability, hosting status, and recent deploys."
+    )
+    availability = client.get("/api/availability").json()
+    assert availability["sites"][0]["reachable"] is available
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_site_scorecards_keep_incomplete_paired_failures_unknown(tmp_path, source, freshness):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set http_status = 503")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/site-scorecards").json()
+    card = payload["sites"][0]
+    assert payload["current_evidence_count"] == payload["critical_count"] == payload["healthy_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert card["status"] == "unknown"
+    assert set(card["badges"].values()) == {"unknown"}
+    assert card["score"] is None
+    assert card["alert_count"] == 0
+    assert card["next_action"] != "Continue normal maintenance cadence."
+    assert not card["next_action"].startswith("Confirm site availability")
+
+
+def test_api_site_scorecards_scope_paired_availability_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for url, account, http_status in (
+        ("https://failed-card.example", "Affected Account", 503),
+        ("https://healthy-card.example", "Healthy Account", 200),
+        ("https://unassigned-card.example", "", 204),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set http_status = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (http_status, url),
+            )
+
+    for account, expected in (("Affected Account", "critical"), ("Healthy Account", "healthy"), ("Unassigned", "critical")):
+        response = client.get("/api/site-scorecards", params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["sites"][0]["client"] == account
+        assert payload["sites"][0]["status"] == expected
+        assert payload["critical_count"] == int(expected == "critical")
+        assert payload["healthy_count"] == int(expected == "healthy")
+    assert client.get("/api/site-scorecards", params={"client": "Unknown Account"}).status_code == 404
+    combined = client.get("/api/site-scorecards").json()
+    assert combined["critical_count"] == 2
+    assert combined["healthy_count"] == 1
+    assert combined["sites"][-1]["url"] == "https://healthy-card.example"
+
+
 def test_api_site_scorecards_empty_inventory_has_no_verified_coverage(tmp_path):
     client = make_test_client(tmp_path)
 

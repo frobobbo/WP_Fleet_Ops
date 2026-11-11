@@ -5168,7 +5168,9 @@ def _site_scorecard_status(row: dict, badges: dict[str, str]) -> str:
 
 
 def _site_scorecard_next_action(row: dict) -> str:
-    """Return the highest-priority next step for a site's latest alert state."""
+    """Prioritize paired availability failures over the recorded fleet alerts."""
+    if not row["uptime_ok"]:
+        return "Confirm site availability, hosting status, and recent deploys."
     if not row["alerts"]:
         return "Continue normal maintenance cadence."
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
@@ -5271,8 +5273,25 @@ def _site_scorecard_rows() -> list[dict]:
         evidence_is_current = (
             freshness == "current" and care_check_freshness == "current"
         )
+        # Reconcile only current paired availability, without changing the
+        # recorded fleet score, alerts, or separately labeled observed badges.
+        current_row = (
+            {
+                **row,
+                "uptime_ok": bool(
+                    row["uptime_ok"]
+                    and care_check is not None
+                    and homepage_response_usable(care_check["http_status"])
+                ),
+            }
+            if evidence_is_current
+            else row
+        )
         badges = (
-            observed_badges
+            {
+                **observed_badges,
+                "availability": "healthy" if current_row["uptime_ok"] else "critical",
+            }
             if evidence_is_current
             else dict.fromkeys(observed_badges, "unknown")
         )
@@ -5283,14 +5302,14 @@ def _site_scorecard_rows() -> list[dict]:
                 "client": row.get("client") or "Unassigned",
                 "score": row["score"] if evidence_is_current else None,
                 "observed_score": row["score"],
-                "status": observed_status if evidence_is_current else "unknown",
+                "status": _site_scorecard_status(current_row, badges) if evidence_is_current else "unknown",
                 "observed_status": observed_status,
                 "badges": badges,
                 "observed_badges": observed_badges,
                 "alert_count": observed_alert_count if evidence_is_current else 0,
                 "observed_alert_count": observed_alert_count,
                 "next_action": (
-                    _site_scorecard_next_action(row)
+                    _site_scorecard_next_action(current_row)
                     if evidence_is_current
                     else _site_scorecard_evidence_action(
                         freshness,
