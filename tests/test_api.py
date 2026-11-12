@@ -11852,6 +11852,102 @@ def test_empty_fleet_brief_and_handoff_do_not_claim_healthy_coverage(tmp_path):
     assert handoff["handoff_notes"] == ["Register a site and capture an initial combined care check and fleet snapshot."]
 
 
+@pytest.mark.parametrize(
+    "fleet_days,care_days,expected",
+    [
+        (60, 0, "critical"), (60, 7, "critical"),
+        (60, 8, "warning"), (60, 30, "warning"),
+        (60, 31, "healthy"), (60, 120, "healthy"),
+        (0, 120, "critical"), (7, 120, "critical"),
+        (8, 120, "warning"), (30, 120, "warning"),
+        (31, 120, "healthy"), (30, 7, "critical"),
+    ],
+)
+def test_api_site_scorecards_reconcile_current_paired_tls(tmp_path, fleet_days, care_days, expected):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(ssl_days=str(fleet_days)),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = ?", (care_days,))
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    response = client.get("/api/site-scorecards")
+    assert response.status_code == 200
+    payload = response.json()
+    card = payload["sites"][0]
+    observed = "critical" if fleet_days <= 7 else ("warning" if fleet_days <= 30 else "healthy")
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 0
+    for status in ("critical", "warning", "healthy"):
+        assert payload[f"{status}_count"] == int(expected == status)
+    assert card["status"] == card["badges"]["tls"] == expected
+    assert card["observed_status"] == card["observed_badges"]["tls"] == observed
+    assert card["score"] == card["observed_score"] == original_snapshot["score"]
+    assert card["alert_count"] == card["observed_alert_count"] == original_snapshot["alert_count"]
+    assert card["next_action"] == (
+        "Continue normal maintenance cadence." if expected == "healthy"
+        else "Renew or replace the TLS certificate before it expires."
+    )
+    certificate = client.get("/api/certificates").json()["sites"][0]
+    assert certificate["certificate_status"] == expected
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_site_scorecards_keep_incomplete_paired_tls_unknown(tmp_path, source, freshness):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = 0")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/site-scorecards").json()
+    card = payload["sites"][0]
+    assert payload["current_evidence_count"] == payload["critical_count"] == payload["healthy_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert card["status"] == "unknown"
+    assert set(card["badges"].values()) == {"unknown"}
+    assert card["score"] is None
+    assert card["alert_count"] == 0
+    assert "certificate" not in card["next_action"].lower()
+    assert card["next_action"] != "Continue normal maintenance cadence."
+
+
+@pytest.mark.parametrize(
+    "overrides,care_days,action",
+    [
+        ({"uptime_ok": "false"}, 0, "Confirm site availability, hosting status, and recent deploys."),
+        ({"wp_updates": "5"}, 30, "Schedule WordPress core, plugin, and theme updates."),
+        ({"wp_updates": "1"}, 7, "Renew or replace the TLS certificate before it expires."),
+    ],
+)
+def test_api_site_scorecards_prioritize_paired_tls_by_severity(tmp_path, overrides, care_days, action):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(**overrides), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set ssl_days_remaining = ?", (care_days,))
+    assert client.get("/api/site-scorecards").json()["sites"][0]["next_action"] == action
+
+
 @pytest.mark.parametrize("uptime_ok", [True, False])
 @pytest.mark.parametrize("http_status", [0, 200, 201, 202, 203, 204, 206, 207, 299, 301, 304, 404, 503])
 def test_api_site_scorecards_reconcile_current_paired_availability(tmp_path, uptime_ok, http_status):

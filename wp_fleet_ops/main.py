@@ -5168,14 +5168,20 @@ def _site_scorecard_status(row: dict, badges: dict[str, str]) -> str:
 
 
 def _site_scorecard_next_action(row: dict) -> str:
-    """Prioritize paired availability failures over the recorded fleet alerts."""
+    """Rank current paired availability and TLS risk alongside fleet alerts."""
     if not row["uptime_ok"]:
         return "Confirm site availability, hosting status, and recent deploys."
-    if not row["alerts"]:
+    alerts = row["alerts"]
+    tls_status = _certificate_status(row["ssl_days"])
+    if tls_status != "healthy":
+        # Reconciled TLS risk must participate in dispatch without changing
+        # the persisted fleet alerts or the scorecard's observed alert count.
+        alerts = [*alerts, {"severity": tls_status, "message": "TLS certificate renewal"}]
+    if not alerts:
         return "Continue normal maintenance cadence."
     severity_rank = {"critical": 0, "warning": 1, "info": 2}
     top_alert = min(
-        enumerate(row["alerts"]),
+        enumerate(alerts),
         key=lambda item: (severity_rank.get(item[1].get("severity", "info"), 99), item[0]),
     )[1]
     return _recommended_action(top_alert)
@@ -5273,7 +5279,7 @@ def _site_scorecard_rows() -> list[dict]:
         evidence_is_current = (
             freshness == "current" and care_check_freshness == "current"
         )
-        # Reconcile only current paired availability, without changing the
+        # Reconcile only current paired availability and TLS, without changing the
         # recorded fleet score, alerts, or separately labeled observed badges.
         current_row = (
             {
@@ -5283,14 +5289,16 @@ def _site_scorecard_rows() -> list[dict]:
                     and care_check is not None
                     and homepage_response_usable(care_check["http_status"])
                 ),
+                "ssl_days": min(row["ssl_days"], care_check["ssl_days_remaining"]),
             }
-            if evidence_is_current
+            if evidence_is_current and care_check is not None
             else row
         )
         badges = (
             {
                 **observed_badges,
                 "availability": "healthy" if current_row["uptime_ok"] else "critical",
+                "tls": _certificate_status(current_row["ssl_days"]),
             }
             if evidence_is_current
             else dict.fromkeys(observed_badges, "unknown")
