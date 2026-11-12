@@ -5168,13 +5168,14 @@ def _site_scorecard_status(row: dict, badges: dict[str, str]) -> str:
 
 
 def _site_scorecard_next_action(row: dict) -> str:
-    """Rank current paired availability, TLS, and backup risk alongside fleet alerts."""
+    """Rank current paired availability, TLS, backup, and update risk with fleet alerts."""
     if not row["uptime_ok"]:
         return "Confirm site availability, hosting status, and recent deploys."
     alerts = row["alerts"]
     for status, message in (
         (_certificate_status(row["ssl_days"]), "TLS certificate renewal"),
         (_backup_status(row["backup_age_hours"]), "Backup freshness needs review"),
+        (_update_status(row["wp_updates"]), "WordPress update backlog"),
     ):
         if status in {"critical", "warning"}:
             # Reconciled risks participate in dispatch without changing the
@@ -5282,7 +5283,7 @@ def _site_scorecard_rows() -> list[dict]:
         evidence_is_current = (
             freshness == "current" and care_check_freshness == "current"
         )
-        # Reconcile current paired availability, TLS, and backup age without
+        # Reconcile current paired availability, TLS, backup age, and updates without
         # changing the recorded fleet score, alerts, or labeled observed badges.
         current_row = (
             {
@@ -5294,6 +5295,7 @@ def _site_scorecard_rows() -> list[dict]:
                 ),
                 "ssl_days": min(row["ssl_days"], care_check["ssl_days_remaining"]),
                 "backup_age_hours": max(row["backup_age_hours"], care_check["backup_age_hours"]),
+                "wp_updates": max(row["wp_updates"], care_check["update_count"]),
             }
             if evidence_is_current and care_check is not None
             else row
@@ -5304,6 +5306,7 @@ def _site_scorecard_rows() -> list[dict]:
                 "availability": "healthy" if current_row["uptime_ok"] else "critical",
                 "tls": _certificate_status(current_row["ssl_days"]),
                 "backups": _backup_status(current_row["backup_age_hours"]),
+                "updates": _update_status(current_row["wp_updates"]),
             }
             if evidence_is_current
             else dict.fromkeys(observed_badges, "unknown")

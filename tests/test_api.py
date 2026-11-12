@@ -11853,6 +11853,133 @@ def test_empty_fleet_brief_and_handoff_do_not_claim_healthy_coverage(tmp_path):
 
 
 @pytest.mark.parametrize(
+    "fleet_updates,care_updates,expected",
+    [
+        (0, 0, "current"), (0, 1, "warning"), (0, 4, "warning"),
+        (0, 5, "critical"), (0, 20, "critical"),
+        (1, 0, "warning"), (4, 0, "warning"), (5, 0, "critical"),
+        (1, 5, "critical"), (5, 1, "critical"),
+    ],
+)
+def test_api_site_scorecards_reconcile_current_paired_updates(tmp_path, fleet_updates, care_updates, expected):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(wp_updates=str(fleet_updates)), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set update_count = ?", (care_updates,))
+    original_snapshot = client.get("/api/snapshot-history").json()["snapshots"][0]
+    original_care = client.get("/api/care-check-history").json()["care_checks"][0]
+
+    payload = client.get("/api/site-scorecards").json()
+    card = payload["sites"][0]
+    expected_status = "healthy" if expected == "current" else expected
+    observed = "critical" if fleet_updates >= 5 else ("warning" if fleet_updates else "current")
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 0
+    for status in ("critical", "warning", "healthy"):
+        assert payload[f"{status}_count"] == int(expected_status == status)
+    assert card["status"] == expected_status
+    assert card["badges"]["updates"] == expected
+    assert card["observed_badges"]["updates"] == observed
+    assert card["observed_status"] == ("healthy" if observed == "current" else observed)
+    assert card["score"] == card["observed_score"] == original_snapshot["score"]
+    assert card["alert_count"] == card["observed_alert_count"] == original_snapshot["alert_count"]
+    assert card["next_action"] == (
+        "Continue normal maintenance cadence." if expected == "current"
+        else "Schedule WordPress core, plugin, and theme updates."
+    )
+    assert client.get("/api/updates").json()["sites"][0]["update_status"] == expected
+    assert client.get("/api/snapshot-history").json()["snapshots"][0] == original_snapshot
+    assert client.get("/api/care-check-history").json()["care_checks"][0] == original_care
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_site_scorecards_keep_incomplete_paired_updates_unknown(tmp_path, source, freshness):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set update_count = 5")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/site-scorecards").json()
+    card = payload["sites"][0]
+    assert payload["current_evidence_count"] == payload["critical_count"] == payload["healthy_count"] == 0
+    assert payload["monitoring_gap_count"] == payload["unknown_count"] == 1
+    assert card["status"] == "unknown"
+    assert set(card["badges"].values()) == {"unknown"}
+    assert card["score"] is None
+    assert card["alert_count"] == 0
+    assert card["next_action"] != "Schedule WordPress core, plugin, and theme updates."
+    assert card["next_action"] != "Continue normal maintenance cadence."
+
+
+@pytest.mark.parametrize(
+    "overrides,care_updates,action",
+    [
+        ({"uptime_ok": "false"}, 5, "Confirm site availability, hosting status, and recent deploys."),
+        ({"ssl_days": "7"}, 5, "Renew or replace the TLS certificate before it expires."),
+        ({"backup_age_hours": "73"}, 5, "Run and verify a fresh backup, then confirm backup scheduling."),
+        ({"ssl_days": "30"}, 5, "Schedule WordPress core, plugin, and theme updates."),
+        ({"backup_age_hours": "72"}, 5, "Schedule WordPress core, plugin, and theme updates."),
+        ({"response_ms": "3000"}, 1, "Review performance, caching, and upstream response time."),
+    ],
+)
+def test_api_site_scorecards_prioritize_paired_updates_by_severity(tmp_path, overrides, care_updates, action):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(**overrides), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set update_count = ?", (care_updates,))
+    assert client.get("/api/site-scorecards").json()["sites"][0]["next_action"] == action
+
+
+def test_api_site_scorecards_scope_paired_updates_to_client(tmp_path):
+    client = make_test_client(tmp_path)
+    for url, account, care_updates in (
+        ("https://critical-updates-card.example", "Affected Account", 5),
+        ("https://current-updates-card.example", "Healthy Account", 0),
+        ("https://unassigned-updates-card.example", "", 1),
+    ):
+        assert client.post(
+            "/snapshot", data=valid_snapshot_payload(url=url, client=account), follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update care_checks set update_count = ? "
+                "where site_id = (select id from sites where url = ?)",
+                (care_updates, url),
+            )
+
+    for account, expected in (("Affected Account", "critical"), ("Healthy Account", "healthy"), ("Unassigned", "warning")):
+        response = client.get("/api/site-scorecards", params={"client": account})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["site_count"] == payload["current_evidence_count"] == 1
+        assert payload["sites"][0]["client"] == account
+        assert payload["sites"][0]["status"] == expected
+        for status in ("critical", "warning", "healthy"):
+            assert payload[f"{status}_count"] == int(expected == status)
+    assert client.get("/api/site-scorecards", params={"client": "Unknown Account"}).status_code == 404
+    combined = client.get("/api/site-scorecards").json()
+    assert combined["critical_count"] == combined["warning_count"] == combined["healthy_count"] == 1
+    assert [card["status"] for card in combined["sites"]] == ["critical", "warning", "healthy"]
+
+
+@pytest.mark.parametrize(
     "fleet_age,care_age,expected",
     [
         (24, 0, "fresh"), (24, 36, "fresh"),
