@@ -1409,6 +1409,84 @@ def test_current_warning_alert_prevents_healthy_site_and_account_status(tmp_path
     assert "— Watch" in client.get("/report").text
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status"),
+    [
+        (64, "green", "red"),
+        (65, "green", "yellow"),
+        (84, "green", "yellow"),
+        (85, "green", "green"),
+        (100, "yellow", "yellow"),
+        (100, "red", "red"),
+    ],
+)
+def test_site_inventories_reconcile_current_care_score_and_status(
+    tmp_path, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Corrected Care Score", url="https://corrected-care.example",
+            client="Corrected Client",
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = ?, status = ?", (care_score, care_status))
+
+    assert client.get("/api/summary").json()["overall_status"] == expected_status
+    for path in ("/api/sites", "/api/site-directory"):
+        for params in ({}, {"client": "Corrected Client"}):
+            response = client.get(path, params=params)
+            assert response.status_code == 200
+            site = response.json()["sites"][0]
+            assert site["evidence_status"] == "current"
+            assert site["status"] == expected_status
+            assert site["score"] == site["observed_score"] == 100
+            assert site["observed_status"] == "green"
+            if path == "/api/site-directory":
+                assert (site["recommended_action"] == "Continue normal monitoring cadence.") == (
+                    expected_status == "green"
+                )
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        assert con.execute("select score, status from care_checks").fetchone() == (
+            care_score, care_status,
+        )
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_site_inventories_do_not_escalate_corrected_care_score_without_current_pair(
+    tmp_path, table, column, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Incomplete Correction", url="https://incomplete-correction.example"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+
+    for path in ("/api/sites", "/api/site-directory"):
+        response = client.get(path)
+        assert response.status_code == 200
+        if path == "/api/sites" and table == "snapshots" and timestamp is None:
+            assert response.json()["sites"] == []
+            continue
+        site = response.json()["sites"][0]
+        assert site["evidence_status"] == "incomplete"
+        assert site["status"] == "unknown"
+        assert site["score"] is None
+        if path == "/api/site-directory":
+            assert site["recommended_action"] != "Continue normal monitoring cadence."
+
+
 @pytest.mark.parametrize("care_status", ["red", "yellow"])
 def test_site_apis_reflect_current_care_risk_without_changing_snapshot_score(tmp_path, care_status):
     client = make_test_client(tmp_path)

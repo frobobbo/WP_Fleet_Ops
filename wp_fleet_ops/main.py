@@ -630,7 +630,10 @@ def api_sites(client: str | None = None):
             1 for alert in row["alerts"] if alert.get("severity") == "critical"
         )
         paired_status = (
-            _paired_site_status(observed_status, care_check["status"])
+            _paired_site_status(
+                observed_status,
+                _paired_site_status(care_check["status"], _dashboard_status(care_check["score"])),
+            )
             if evidence_is_current and care_check is not None else "unknown"
         )
         sites.append(
@@ -715,7 +718,10 @@ def api_site_directory(client: str | None = None):
                 freshness == "current" and care_check_freshness == "current"
             )
             paired_status = (
-                _paired_site_status(observed_status, care_check["status"])
+                _paired_site_status(
+                    observed_status,
+                    _paired_site_status(care_check["status"], _dashboard_status(care_check["score"])),
+                )
                 if evidence_is_current and care_check is not None else "unknown"
             )
             recommended_action = (
