@@ -7096,16 +7096,18 @@ def _combined_report_status(
     monitoring_gap_count: int,
 ) -> str:
     """Return the highest current risk represented by the combined report."""
-    if any(check.status == "red" for check in care_checks) or any(
+    care_statuses = [
+        _paired_site_status(check.status, _dashboard_status(check.score))
+        for check in care_checks
+    ]
+    if "red" in care_statuses or any(
         _dashboard_status(row["score"]) == "red"
         or any(alert.get("severity") == "critical" for alert in row["alerts"])
         for row in fleet_rows
     ):
         return "red"
     # An empty inventory has no evidence of health, just like the summary API.
-    if (not care_checks and not fleet_rows) or monitoring_gap_count or any(
-        check.status == "yellow" for check in care_checks
-    ) or any(
+    if (not care_checks and not fleet_rows) or monitoring_gap_count or "yellow" in care_statuses or any(
         _dashboard_status(row["score"]) == "yellow"
         or any(alert.get("severity") == "warning" for alert in row["alerts"])
         for row in fleet_rows
@@ -7213,7 +7215,12 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
             fleet_sites,
             saved_evidence=saved_evidence,
             captured_at_by_url={row["url"]: row["captured_at"] for row in current_fleet_rows},
-            paired_care_status_by_url={check.url: check.status for check in care_checks},
+            # Match the care section's score/label reconciliation without
+            # rewriting the saved care check or the fleet's observed score.
+            paired_care_status_by_url={
+                check.url: _paired_site_status(check.status, _dashboard_status(check.score))
+                for check in care_checks
+            },
             tracked_site_count=len(tracked_sites),
         )
     )

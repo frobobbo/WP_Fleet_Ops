@@ -139,6 +139,101 @@ def test_health_and_report_endpoints(tmp_path):
     assert "WP FleetOps Maintenance Report" in report
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status"),
+    [
+        (64, "green", "red"),
+        (65, "green", "yellow"),
+        (84, "green", "yellow"),
+        (85, "green", "green"),
+        (100, "yellow", "yellow"),
+        (100, "red", "red"),
+    ],
+)
+def test_combined_reports_reconcile_current_care_score_and_status(
+    tmp_path, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    response = client.get("/api/report")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == expected_status
+    assert payload["current_evidence_count"] == payload["care_check_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    care_heading = {"green": "Healthy", "yellow": "Maintenance scheduled", "red": "Needs attention"}[expected_status]
+    fleet_heading = {"green": "Healthy", "yellow": "Watch", "red": "Needs attention"}[expected_status]
+    for text in (payload["report"], client.get("/report").text):
+        care, fleet = text.split("# WP FleetOps Maintenance Report", 1)
+        assert f"## Test Site — {care_heading}" in care
+        assert f"Score: {care_score}/100" in care
+        assert f"## Test Site — {fleet_heading}" in fleet
+        assert "Score: 100/100" in fleet
+        assert f"Critical sites: {int(expected_status == 'red')}" in fleet
+        if expected_status != "green":
+            assert "Paired care finding escalates this site" in fleet
+            assert "Review the paired care check and resolve its findings." in fleet
+            assert "Continue normal maintenance cadence." not in fleet
+            assert "looks healthy" not in care
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_combined_reports_exclude_corrected_care_scores_with_incomplete_evidence(
+    tmp_path, table, column, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40, status = 'green'")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/report").json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == payload["care_check_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    for text in (payload["report"], client.get("/report").text):
+        assert "Monitoring gaps: 1" in text
+        assert "Critical sites: 0" in text
+        assert "## Test Site" not in text
+        assert "Score: 40/100" not in text
+        assert "Paired care finding escalates this site" not in text
+
+
+def test_combined_reports_preserve_critical_fleet_risk_over_care_warning(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(uptime_ok="false"), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 80, status = 'green'")
+
+    payload = client.get("/api/report").json()
+    assert payload["status"] == "red"
+    for text in (payload["report"], client.get("/report").text):
+        care, fleet = text.split("# WP FleetOps Maintenance Report", 1)
+        assert "## Test Site — Needs attention" in care
+        assert "## Test Site — Needs attention" in fleet
+        assert "Critical sites: 1" in fleet
+
+
 def test_text_report_counts_monitoring_evidence_gaps(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post(
