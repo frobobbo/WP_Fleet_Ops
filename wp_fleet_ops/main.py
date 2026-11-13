@@ -1573,7 +1573,11 @@ def _site_watchlist_rows(
     for row in _current_paired_snapshot_rows(rows, paired_care_checks, observed_at):
         alerts = row["alerts"]
         care_check = care_by_url[row["url"]]
-        care_status = care_check["status"]
+        # Corrected care scores may disagree with their saved labels. Honor
+        # the worse current finding, matching summary and account rollups.
+        care_status = _paired_site_status(
+            care_check["status"], _dashboard_status(care_check["score"])
+        )
         fleet_status = _alert_aware_status(row["score"], alerts)
         paired_status = _paired_site_status(fleet_status, care_status)
         if paired_status == "green" and not alerts:

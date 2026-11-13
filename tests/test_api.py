@@ -4109,6 +4109,115 @@ def test_site_watchlist_includes_current_care_only_risk(
     assert payload["sites"][0]["recommended_action"] == "Review the care check finding."
     assert payload["sites"][0]["top_alert"] == "Care check needs attention."
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status"),
+    [
+        (64, "green", "red"),
+        (65, "green", "yellow"),
+        (84, "green", "yellow"),
+        (85, "green", "green"),
+        (100, "yellow", "yellow"),
+        (100, "red", "red"),
+    ],
+)
+def test_site_watchlist_reconciles_current_care_score_and_status(
+    tmp_path, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(client="Corrected Client"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = ?",
+            (care_score, care_status, '["Investigate the corrected care finding."]'),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    response = client.get("/api/site-watchlist", params={"client": "Corrected Client"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == expected_status
+    assert payload["current_evidence_count"] == 1
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["watchlist_count"] == int(expected_status != "green")
+    assert payload["critical_watch_count"] == int(expected_status == "red")
+    if expected_status != "green":
+        site = payload["sites"][0]
+        assert site["score"] == 100
+        assert site["alert_count"] == 0
+        assert site["care_status"] == expected_status
+        assert site["watch_status"] == ("critical" if expected_status == "red" else "warning")
+        assert site["top_alert_severity"] == site["watch_status"]
+        assert site["top_alert"] == "Care check needs attention."
+        assert site["recommended_action"] == "Investigate the corrected care finding."
+    else:
+        assert payload["sites"] == []
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_site_watchlist_keeps_corrected_care_score_out_of_incomplete_evidence(
+    tmp_path, table, column, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/site-watchlist").json()
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["watchlist_count"] == payload["critical_watch_count"] == 0
+    assert payload["sites"] == []
+
+
+def test_site_watchlist_prioritizes_corrected_care_score_and_preserves_account_scope(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account in (
+        ("Corrected Critical", "https://corrected-critical.example", "Corrected Client"),
+        ("Fleet Warning", "https://fleet-warning.example", "Other Client"),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=account, wp_updates="1"),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = 40, status = 'green', actions_json = ? "
+            "where site_id = (select id from sites where url = ?)",
+            ('["Investigate care before updates."]', "https://corrected-critical.example"),
+        )
+
+    payload = client.get("/api/site-watchlist").json()
+    assert payload["status"] == "red"
+    assert payload["watchlist_count"] == 2
+    assert payload["critical_watch_count"] == 1
+    assert [site["name"] for site in payload["sites"]] == ["Corrected Critical", "Fleet Warning"]
+    critical = payload["sites"][0]
+    assert critical["alert_count"] == 1
+    assert critical["top_alert_severity"] == "critical"
+    assert critical["recommended_action"] == "Investigate care before updates."
+    for account, expected in (("Corrected Client", "red"), ("Other Client", "yellow")):
+        scoped = client.get("/api/site-watchlist", params={"client": account}).json()
+        assert scoped["status"] == expected
+        assert scoped["watchlist_count"] == scoped["current_evidence_count"] == 1
+        assert scoped["sites"][0]["client"] == account
+
+
 def test_site_watchlist_prioritizes_red_care_over_fleet_warning(tmp_path):
     client = make_test_client(tmp_path)
     assert client.post(
