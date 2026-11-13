@@ -2534,6 +2534,86 @@ def test_api_clients_reflects_current_risky_care_check(tmp_path, care_status):
     assert client.get("/api/summary").json()["overall_status"] == care_status
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status"),
+    [
+        (64, "green", "red"),
+        (65, "green", "yellow"),
+        (84, "green", "yellow"),
+        (85, "green", "green"),
+        (100, "yellow", "yellow"),
+        (100, "red", "red"),
+    ],
+)
+def test_api_clients_reconciles_current_care_score_and_status(
+    tmp_path, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    for name, url, account in (
+        ("Corrected", "https://corrected-account.example", "Corrected Client"),
+        ("Stable Sibling", "https://stable-sibling.example", "Corrected Client"),
+        ("Stable Account", "https://stable-account.example", "A Stable Client"),
+    ):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(name=name, url=url, client=account),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ? "
+            "where site_id = (select id from sites where url = ?)",
+            (care_score, care_status, "https://corrected-account.example"),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    response = client.get("/api/clients")
+    assert response.status_code == 200
+    accounts = response.json()["clients"]
+    account = next(row for row in accounts if row["client"] == "Corrected Client")
+    scoped = client.get("/api/summary", params={"client": "Corrected Client"}).json()
+    assert account["status"] == scoped["overall_status"] == expected_status
+    assert account["current_evidence_count"] == 2
+    assert account["monitoring_gap_count"] == 0
+    assert account["average_score"] == account["observed_average_score"] == 100
+    assert account["critical_alerts"] == 0
+    assert account["healthy_sites"] == scoped["healthy_sites"] == (2 if expected_status == "green" else 1)
+    assert account["needs_attention"] == scoped["needs_attention"] == int(expected_status == "red")
+    assert accounts[0]["client"] == ("A Stable Client" if expected_status == "green" else "Corrected Client")
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_api_clients_keeps_corrected_care_score_out_of_incomplete_account_health(
+    tmp_path, table, column, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(client="Incomplete Client"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+
+    response = client.get("/api/clients")
+    assert response.status_code == 200
+    account = response.json()["clients"][0]
+    assert account["status"] == "yellow"
+    assert account["healthy_sites"] == account["needs_attention"] == 0
+    assert account["current_evidence_count"] == 0
+    assert account["monitoring_gap_count"] == 1
+    assert account["average_score"] is None
+    assert account["observed_average_score"] == (None if table == "snapshots" and timestamp is None else 100)
+
+
 def test_api_clients_warns_about_account_monitoring_gaps(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

@@ -1036,9 +1036,14 @@ def api_clients():
             continue
         assert row is not None
         assert care_check is not None
+        # Corrected/imported care scores can outlive their recorded label.
+        # Match the scoped summary without downgrading existing care findings.
+        care_status = _paired_site_status(
+            care_check["status"], _dashboard_status(care_check["score"])
+        )
         summary["current_evidence_count"] += 1
-        summary["_red_care_checks"] += care_check["status"] == "red"
-        summary["_yellow_care_checks"] += care_check["status"] == "yellow"
+        summary["_red_care_checks"] += care_status == "red"
+        summary["_yellow_care_checks"] += care_status == "yellow"
         summary["score_total"] += row["score"] or 0
         summary["lowest_score"] = min(
             summary["lowest_score"] if summary["lowest_score"] is not None else row["score"],
@@ -1047,7 +1052,7 @@ def api_clients():
         # Account site counts must reflect both halves of the same current
         # observation, just as the client status and scoped fleet summary do.
         site_status = _paired_site_status(
-            _alert_aware_status(row["score"], row["alerts"]), care_check["status"]
+            _alert_aware_status(row["score"], row["alerts"]), care_status
         )
         summary["healthy_sites"] += site_status == "green"
         summary["needs_attention"] += site_status == "red"
