@@ -6889,6 +6889,7 @@ def index(request: Request):
         snapshot_freshness_by_url[row["url"]] = freshness
     care_checks = store.latest_care_checks()
     care_check_freshness_by_url = {}
+    current_care_status_by_url = {}
     for check in care_checks:
         freshness, age_hours = _snapshot_freshness(
             check.get("checked_at"),
@@ -6898,6 +6899,12 @@ def index(request: Request):
         check["check_freshness"] = freshness
         check["check_age_hours"] = age_hours
         care_check_freshness_by_url[check["url"]] = freshness
+        if freshness == "current":
+            # Corrected scores may outlive their saved label. Match summary and
+            # report severity without changing either piece of recorded evidence.
+            current_care_status_by_url[check["url"]] = _paired_site_status(
+                check["status"], _dashboard_status(check["score"])
+            )
     for row in fleet_rows:
         row["care_check_freshness"] = care_check_freshness_by_url.get(
             row["url"],
@@ -6908,6 +6915,13 @@ def index(request: Request):
             if row["snapshot_freshness"] == row["care_check_freshness"] == "current"
             else "incomplete"
         )
+        row["current_status"] = (
+            _paired_site_status(
+                _alert_aware_status(row["score"], row["alerts"]),
+                current_care_status_by_url[row["url"]],
+            )
+            if row["evidence_status"] == "current" else "unknown"
+        )
     for check in care_checks:
         check["snapshot_freshness"] = snapshot_freshness_by_url.get(
             check["url"],
@@ -6917,6 +6931,10 @@ def index(request: Request):
             "current"
             if check["snapshot_freshness"] == check["check_freshness"] == "current"
             else "incomplete"
+        )
+        check["current_status"] = (
+            current_care_status_by_url[check["url"]]
+            if check["evidence_status"] == "current" else "unknown"
         )
     sites = store.list_sites()
     return templates.TemplateResponse(

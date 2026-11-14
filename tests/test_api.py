@@ -411,6 +411,99 @@ def test_dashboard_displays_running_revision_safely(tmp_path):
     assert "sha-123<unsafe>" not in response.text
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status"),
+    [
+        (64, "green", "red"),
+        (65, "green", "yellow"),
+        (84, "green", "yellow"),
+        (85, "green", "green"),
+        (100, "yellow", "yellow"),
+        (100, "red", "red"),
+    ],
+)
+def test_dashboard_tables_reconcile_current_care_score_and_status(
+    tmp_path, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    response = client.get("/")
+    assert response.status_code == 200
+    fleet, care = response.text.split('<div class="table-card" id="care">', 1)
+    fleet = fleet.split('<div class="table-card" id="fleet">', 1)[1]
+    assert f'<span class="score {expected_status}"><span class="dot"></span>100</span>' in fleet
+    assert f'<span class="tag {expected_status}">{expected_status}</span>' in care
+    assert f'<span class="score {expected_status}"><span class="dot"></span>{care_score}</span>' in care
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_dashboard_tables_keep_incomplete_corrected_scores_historical(
+    tmp_path, table, column, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40, status = 'green'")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+
+    response = client.get("/")
+    assert response.status_code == 200
+    fleet, care = response.text.split('<div class="table-card" id="care">', 1)
+    fleet = fleet.split('<div class="table-card" id="fleet">', 1)[1]
+    assert '<span class="score red">' not in fleet + care
+    assert '<span class="tag red">red</span>' not in care
+    if table != "care_checks" or timestamp is not None:
+        assert '<span class="mono">observed green</span>' in care
+        assert '<span class="mono">observed 40</span>' in care
+    if table != "snapshots" or timestamp is not None:
+        assert '<span class="mono">observed 100</span>' in fleet
+
+
+@pytest.mark.parametrize(
+    ("fleet_score", "alerts", "expected_status"),
+    [
+        (100, '[{"severity":"critical","message":"Investigate outage"}]', "red"),
+        (100, '[{"severity":"warning","message":"Review backup"}]', "yellow"),
+        (64, '[]', "red"),
+        (80, '[]', "yellow"),
+    ],
+)
+def test_dashboard_fleet_table_preserves_fleet_findings_over_green_care(
+    tmp_path, fleet_score, alerts, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set score = ?, alerts_json = ?", (fleet_score, alerts))
+
+    response = client.get("/")
+    assert response.status_code == 200
+    fleet, care = response.text.split('<div class="table-card" id="care">', 1)
+    fleet = fleet.split('<div class="table-card" id="fleet">', 1)[1]
+    assert f'<span class="score {expected_status}"><span class="dot"></span>{fleet_score}</span>' in fleet
+    assert '<span class="tag green">green</span>' in care
+
+
 def test_dashboard_banner_warns_when_paired_care_evidence_is_stale(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
