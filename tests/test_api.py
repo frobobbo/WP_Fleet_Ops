@@ -14246,6 +14246,56 @@ def test_api_client_priorities_rolls_up_dispatch_priority_by_account(tmp_path):
     assert client_a["latest_snapshot_at"]
 
 
+@pytest.mark.parametrize("newest_first", [False, True])
+@pytest.mark.parametrize("sqlite_older", [False, True])
+def test_client_priorities_latest_snapshot_compares_instants(
+    tmp_path, newest_first, sqlite_older,
+):
+    client = make_test_client(tmp_path)
+    now = datetime.now(timezone.utc)
+    older_instant = now - timedelta(hours=2)
+    older = (
+        older_instant.strftime("%Y-%m-%d %H:%M:%S")
+        if sqlite_older else older_instant.astimezone(
+            timezone(timedelta(hours=5))
+        ).isoformat(timespec="seconds")
+    )
+    newer = (now - timedelta(minutes=30)).astimezone(
+        timezone(timedelta(hours=-4))
+    ).isoformat(sep=" " if sqlite_older else "T", timespec="seconds")
+    assert older > newer  # Text order contradicts the actual UTC instants.
+    stamps = [newer, older] if newest_first else [older, newer]
+    for index, stamp in enumerate(stamps):
+        url = f"https://priority-offset-{index}.example"
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"Priority {index}", url=url, client="Offset Client", wp_updates="2",
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+        with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+            con.execute(
+                "update snapshots set captured_at = ? where site_id = "
+                "(select id from sites where url = ?)",
+                (stamp, url),
+            )
+
+    response = client.get("/api/client-priorities")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_evidence_count"] == 2
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["client_count"] == 1
+    account = payload["clients"][0]
+    assert account["priority_site_count"] == 2
+    assert account["latest_snapshot_at"] == newer
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        assert [row[0] for row in con.execute(
+            "select captured_at from snapshots order by id"
+        )] == stamps  # Reporting must not rewrite recorded evidence.
+
+
 def test_api_client_priorities_surfaces_incomplete_monitoring_coverage(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

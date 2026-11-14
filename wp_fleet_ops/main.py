@@ -6097,9 +6097,11 @@ def api_client_priorities(limit: int = 10):
         summary["critical_alert_count"] += critical_alerts
         summary["warning_alert_count"] += warning_alerts
         summary["lowest_score"] = min(summary["lowest_score"], row["score"])
-        captured_at = row.get("captured_at")
-        if captured_at and (summary["latest_snapshot_at"] is None or captured_at > summary["latest_snapshot_at"]):
-            summary["latest_snapshot_at"] = captured_at
+        # Compare actual UTC instants, not wall-clock text: imported snapshots
+        # may mix SQLite timestamps and ISO timestamps with different offsets.
+        summary["latest_snapshot_at"] = _latest_trusted_timestamp(
+            [{"captured_at": summary["latest_snapshot_at"]}, row], "captured_at", now,
+        )
         if priority_score > summary["top_site_priority_score"]:
             summary["top_site"] = row["name"]
             summary["top_site_priority_score"] = priority_score
