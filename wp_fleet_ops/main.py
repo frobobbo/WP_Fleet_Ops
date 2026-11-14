@@ -4440,6 +4440,7 @@ def api_client_digest():
 
     account_summaries = api_clients()["clients"]
     latest_by_url = {row["url"]: row for row in store.latest_dashboard()}
+    latest_care_by_url = {row["url"]: row for row in store.latest_care_checks()}
     coverage = api_monitoring_coverage()
     # An unfiltered coverage read always returns a payload; only an unknown
     # explicit client filter can produce the endpoint's 404 JSONResponse.
@@ -4448,6 +4449,7 @@ def api_client_digest():
     clients = {
         account["client"]: {
             "client": account["client"],
+            "status": account["status"],
             "site_count": account["site_count"],
             "monitored_site_count": account["monitored_site_count"],
             "current_snapshot_count": account["current_snapshot_count"],
@@ -4503,12 +4505,21 @@ def api_client_digest():
             1 for alert in row["alerts"] if alert.get("severity") == "critical"
         )
         has_current_paired_evidence = coverage_site["coverage_status"] == "current"
+        current_status = "unknown"
+        if has_current_paired_evidence:
+            care_check = latest_care_by_url[row["url"]]
+            care_status = _paired_site_status(
+                care_check["status"], _dashboard_status(care_check["score"])
+            )
+            current_status = _paired_site_status(
+                _alert_aware_status(observed_score, row["alerts"]), care_status
+            )
         digest["sites"].append(
             {
                 "name": row["name"],
                 "url": row["url"],
                 "score": observed_score if has_current_paired_evidence else None,
-                "status": observed_status if has_current_paired_evidence else "unknown",
+                "status": current_status,
                 "critical_alerts": observed_critical_alerts if has_current_paired_evidence else 0,
                 "observed_score": observed_score,
                 "observed_status": observed_status,
@@ -4546,11 +4557,16 @@ def api_client_digest():
         )
         top_action = actions[0] if actions else None
         top_gap = gap_sites[0] if gap_sites else None
-        status = _client_digest_status(
-            immediate_count,
-            scheduled_count,
-            digest["average_score"],
-            monitoring_gap_count,
+        # Action counts and averages must not downgrade the account's worst
+        # current paired finding, including a corrected care score or label.
+        status = _paired_site_status(
+            digest["status"],
+            _client_digest_status(
+                immediate_count,
+                scheduled_count,
+                digest["average_score"],
+                monitoring_gap_count,
+            ),
         )
         digest["status"] = status
         digest["immediate_action_count"] = immediate_count

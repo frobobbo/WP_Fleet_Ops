@@ -11513,6 +11513,125 @@ def test_api_remediation_plan_surfaces_missing_and_stale_care_check_evidence(tmp
     )
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status"),
+    [
+        (64, "green", "red"),
+        (65, "green", "yellow"),
+        (84, "green", "yellow"),
+        (85, "green", "green"),
+        (100, "yellow", "yellow"),
+        (100, "red", "red"),
+    ],
+)
+def test_api_client_digest_reconciles_current_care_score_and_status(
+    tmp_path, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Z Risk"), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(url="https://healthy-digest.example", client="A Healthy"),
+        follow_redirects=False,
+    ).status_code == 303
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    response = client.get("/api/client-digest")
+    assert response.status_code == 200
+    payload = response.json()
+    digest = next(row for row in payload["clients"] if row["client"] == "Z Risk")
+    account = next(row for row in client.get("/api/clients").json()["clients"] if row["client"] == "Z Risk")
+    assert digest["status"] == account["status"] == expected_status
+    assert digest["current_evidence_count"] == 1
+    assert digest["monitoring_gap_count"] == 0
+    assert digest["average_score"] == digest["observed_average_score"] == 100
+    assert payload[f"{expected_status}_count"] == (2 if expected_status == "green" else 1)
+    assert [row["client"] for row in payload["clients"]] == (
+        ["A Healthy", "Z Risk"] if expected_status == "green" else ["Z Risk", "A Healthy"]
+    )
+    site = digest["sites"][0]
+    assert site["status"] == expected_status
+    assert site["score"] == site["observed_score"] == 100
+    assert site["observed_status"] == "green"
+    assert site["critical_alerts"] == site["observed_critical_alerts"] == 0
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(
+    ("fleet_score", "alerts", "expected_status"),
+    [
+        (64, "[]", "red"),
+        (84, "[]", "yellow"),
+        (100, '[{"severity":"warning","message":"Review site"}]', "yellow"),
+        (100, '[{"severity":"critical","message":"Review site"}]', "red"),
+    ],
+)
+def test_api_client_digest_preserves_current_fleet_findings_over_green_care(
+    tmp_path, fleet_score, alerts, expected_status
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set score = ?, alerts_json = ?", (fleet_score, alerts))
+
+    payload = client.get("/api/client-digest").json()
+    assert payload["clients"][0]["status"] == expected_status
+    site = payload["clients"][0]["sites"][0]
+    assert site["status"] == expected_status
+    assert site["score"] == site["observed_score"] == fleet_score
+    assert site["observed_status"] == ("green" if fleet_score == 100 else expected_status)
+
+
+@pytest.mark.parametrize("source", ["snapshots", "care_checks"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_client_digest_keeps_incomplete_care_risk_out_of_current_status(
+    tmp_path, source, freshness
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 64, status = 'green', actions_json = '[]'")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp_column = "captured_at" if source == "snapshots" else "checked_at"
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/client-digest").json()
+    assert payload["yellow_count"] == 1
+    assert payload["red_count"] == payload["green_count"] == 0
+    digest = payload["clients"][0]
+    assert digest["status"] == "yellow"
+    assert digest["current_evidence_count"] == digest["open_action_count"] == 0
+    assert digest["monitoring_gap_count"] == 1
+    assert digest["average_score"] is None
+    site = digest["sites"][0]
+    assert site["status"] == "unknown"
+    assert site["score"] is None
+    assert site["critical_alerts"] == 0
+    assert site["coverage_status"] == "gap"
+    assert site["observed_score"] == (None if source == "snapshots" and freshness == "missing" else 100)
+    assert site["observed_status"] == (None if source == "snapshots" and freshness == "missing" else "green")
+
+
 def test_api_client_digest_returns_account_checkin_summaries(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
