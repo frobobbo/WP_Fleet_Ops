@@ -12155,6 +12155,104 @@ def test_stale_evidence_queues_reject_unknown_client(tmp_path, path):
     }
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status", "expected_risk"),
+    [
+        (64, "green", "red", "critical"),
+        (65, "green", "yellow", "elevated"),
+        (84, "green", "yellow", "elevated"),
+        (85, "green", "green", "stable"),
+        (100, "yellow", "yellow", "elevated"),
+        (100, "red", "red", "critical"),
+    ],
+)
+def test_executive_summaries_reconcile_current_paired_care_risk(
+    tmp_path, care_score, care_status, expected_status, expected_risk
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Executive Client"), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    account = client.get("/api/clients").json()["clients"][0]
+    assert account["status"] == expected_status
+    risks = client.get("/api/executive-risks").json()
+    risk = risks["clients"][0]
+    assert risk["risk_level"] == expected_risk
+    assert risks[f"{expected_risk}_client_count"] == 1
+    assert risk["critical_site_count"] == account["needs_attention"] == int(expected_status == "red")
+    assert risk["average_score"] == risk["lowest_score"] == 100
+    assert risk["open_action_count"] == 0
+    assert all(not key.startswith("_") for key in risk)
+    for path in ("/api/fleet-brief", "/api/operator-handoff"):
+        payload = client.get(path).json()
+        assert payload["status"] == expected_status
+        assert payload["top_clients"][0]["risk_level"] == expected_risk
+        assert payload["critical_client_count"] == int(expected_status == "red")
+        assert payload["monitoring_gap_count"] == 0
+        assert payload["open_action_count"] == 0
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_executive_summaries_keep_unpaired_corrected_care_risk_historical(
+    tmp_path, table, column, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Incomplete Executive"), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40, status = 'green'")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+
+    risks = client.get("/api/executive-risks").json()
+    assert risks["critical_client_count"] == 0
+    assert risks["elevated_client_count"] == 1
+    assert risks["clients"][0]["critical_site_count"] == 0
+    for path in ("/api/fleet-brief", "/api/operator-handoff"):
+        payload = client.get(path).json()
+        assert payload["status"] == "yellow"
+        assert payload["critical_client_count"] == 0
+        assert payload["current_evidence_count"] == 0
+        assert payload["monitoring_gap_count"] == 1
+
+
+@pytest.mark.parametrize(("score", "risk_level"), [(64, "critical"), (84, "elevated")])
+def test_executive_summaries_do_not_average_away_current_fleet_score_risk(tmp_path, score, risk_level):
+    client = make_test_client(tmp_path)
+    for index in range(5):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"Executive Site {index}", url=f"https://executive-{index}.example",
+                client="Mixed Executive",
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set score = ? where site_id = 1", (score,))
+
+    risk = client.get("/api/executive-risks").json()["clients"][0]
+    assert risk["average_score"] >= 85
+    assert risk["lowest_score"] == score
+    assert risk["open_action_count"] == 0
+    assert risk["risk_level"] == risk_level
+    assert risk["critical_site_count"] == int(risk_level == "critical")
+
+
 def test_api_executive_risks_summarizes_client_risk_levels(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

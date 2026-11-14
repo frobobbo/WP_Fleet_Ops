@@ -4923,7 +4923,12 @@ def _executive_risk_rows() -> list[dict]:
             "stale_snapshot_count": account["stale_snapshot_count"],
             "average_score": account["average_score"],
             "lowest_score": None,
-            "critical_site_count": 0,
+            # Reuse the account's paired-evidence decision instead of allowing
+            # fleet-only alerts or an average to conceal a current care risk.
+            "critical_site_count": account["needs_attention"],
+            "risk_level": {"red": "critical", "yellow": "elevated", "green": "stable"}[
+                account["status"]
+            ],
             "latest_snapshot_at": account["latest_snapshot_at"],
         }
         for account in api_clients()["clients"]
@@ -4959,29 +4964,14 @@ def _executive_risk_rows() -> list[dict]:
             if summary["lowest_score"] is None
             else min(summary["lowest_score"], row["score"])
         )
-        summary["critical_site_count"] += 1 if any(alert.get("severity") == "critical" for alert in row["alerts"]) else 0
 
     rows = []
     for client_name, summary in clients.items():
         counts = action_counts.get(client_name, {"critical": 0, "warning": 0, "info": 0})
         open_action_count = sum(counts.values())
         summary["lowest_score"] = summary["lowest_score"] if summary["lowest_score"] is not None else 100
-        if counts.get("critical", 0) or summary["critical_site_count"]:
-            risk_level = "critical"
-        elif (
-            counts.get("warning", 0)
-            or summary["monitoring_gap_count"]
-            or (
-                summary["average_score"] is not None
-                and summary["average_score"] < 85
-            )
-        ):
-            risk_level = "elevated"
-        else:
-            risk_level = "stable"
         summary.update(
             {
-                "risk_level": risk_level,
                 "open_action_count": open_action_count,
                 "critical_action_count": counts.get("critical", 0),
                 "warning_action_count": counts.get("warning", 0),
@@ -5028,11 +5018,12 @@ def _fleet_brief_status(
     immediate_actions: int,
     open_actions: int,
     monitoring_gap_count: int = 0,
+    elevated_clients: int = 0,
 ) -> str:
     """Return a single operating status for the current fleet brief."""
     if critical_clients or immediate_actions:
         return "red"
-    if not site_count or open_actions or monitoring_gap_count:
+    if not site_count or open_actions or monitoring_gap_count or elevated_clients:
         return "yellow"
     return "green"
 
@@ -5052,7 +5043,10 @@ def api_fleet_brief():
     care_check_gap_count = sum(client["care_check_gap_count"] for client in client_risks)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "status": _fleet_brief_status(fleet_summary["sites"], critical_clients, immediate_actions, len(actions), monitoring_gap_count),
+        "status": _fleet_brief_status(
+            fleet_summary["sites"], critical_clients, immediate_actions, len(actions), monitoring_gap_count,
+            elevated_clients=sum(client["risk_level"] == "elevated" for client in client_risks),
+        ),
         "site_count": fleet_summary["sites"],
         "client_count": len(client_risks),
         "critical_client_count": critical_clients,
@@ -5119,7 +5113,10 @@ def api_operator_handoff():
     monitoring_gap_count = sum(client["monitoring_gap_count"] for client in client_risks)
     snapshot_gap_count = sum(client["snapshot_gap_count"] for client in client_risks)
     care_check_gap_count = sum(client["care_check_gap_count"] for client in client_risks)
-    status = _fleet_brief_status(fleet_summary["sites"], critical_clients, immediate_actions, len(actions), monitoring_gap_count)
+    status = _fleet_brief_status(
+        fleet_summary["sites"], critical_clients, immediate_actions, len(actions), monitoring_gap_count,
+        elevated_clients=sum(client["risk_level"] == "elevated" for client in client_risks),
+    )
     top_clients = client_risks[:3]
     priority_clients = [client for client in client_risks if client["risk_level"] != "stable"]
     top_actions = actions[:5]
