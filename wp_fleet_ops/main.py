@@ -6265,6 +6265,9 @@ def _client_update_brief_rows() -> list[dict]:
     actions_by_client: dict[str, list[dict]] = {}
     for action in _current_actions():
         actions_by_client.setdefault(action.get("client") or "Unassigned", []).append(action)
+    attention_by_client: dict[str, list[dict]] = {}
+    for site in _site_watchlist_rows():
+        attention_by_client.setdefault(site["client"], []).append(site)
 
     coverage_payload = api_monitoring_coverage()
     # An unfiltered coverage read always returns a payload; only an unknown
@@ -6298,23 +6301,27 @@ def _client_update_brief_rows() -> list[dict]:
             1
             for site in digest["sites"]
             if site["url"] in current_evidence_urls
-            and site["score"] is not None
-            and site["score"] >= 85
+            and site["status"] == "green"
         )
-        status = _client_digest_status(
-            len(immediate_actions),
-            len(scheduled_actions),
-            digest["average_score"],
-            monitoring_gap_count,
-        )
+        # The digest already reconciles current care and fleet findings. Do not
+        # downgrade them by rebuilding status from an average and fleet actions.
+        status = digest["status"]
+        attention_sites = attention_by_client.get(client_name, [])
+        top_attention = attention_sites[0] if attention_sites else None
         top_action = actions[0] if actions else None
         gap_site = gap_sites[0] if gap_sites else None
-        if top_action:
+        if top_attention and top_attention["watch_status"] == "critical" and not immediate_actions:
+            next_action = top_attention["recommended_action"]
+            top_site = top_attention["name"]
+        elif top_action:
             next_action = top_action["recommended_action"]
             top_site = top_action["site"]
         elif gap_site:
             next_action = gap_site["recommended_action"]
             top_site = gap_site["name"] if gap_site else None
+        elif top_attention:
+            next_action = top_attention["recommended_action"]
+            top_site = top_attention["name"]
         else:
             next_action = "Continue normal monitoring cadence."
             top_site = None

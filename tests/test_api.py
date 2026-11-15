@@ -14764,6 +14764,121 @@ def test_api_operations_kpis_warns_when_care_check_evidence_is_stale(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status", "healthy_count"),
+    [
+        (64, "green", "red", 0),
+        (65, "green", "yellow", 0),
+        (84, "green", "yellow", 0),
+        (85, "green", "green", 1),
+        (100, "yellow", "yellow", 0),
+        (100, "red", "red", 0),
+    ],
+)
+def test_client_update_briefs_reconcile_current_paired_care_risk(
+    tmp_path, care_score, care_status, expected_status, healthy_count
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Care Account"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    payload = client.get("/api/client-update-briefs").json()
+    brief = payload["clients"][0]
+    assert brief["status"] == expected_status
+    assert brief["status"] == client.get("/api/client-digest").json()["clients"][0]["status"]
+    assert payload[f"{expected_status}_count"] == 1
+    assert brief["healthy_site_count"] == healthy_count
+    assert brief["average_score"] == 100
+    assert brief["open_action_count"] == 0
+    assert brief["immediate_action_count"] == brief["scheduled_action_count"] == 0
+    assert brief["current_evidence_count"] == 1
+    assert brief["monitoring_gap_count"] == 0
+    if expected_status != "green":
+        assert brief["client_message"] == "0 sites are healthy; 0 open actions remain in the work queue."
+        assert brief["top_site"] == "Test Site"
+        assert brief["next_action"] == "Review the latest care check and resolve reported risks."
+    else:
+        assert brief["top_site"] is None
+        assert brief["next_action"] == "Continue normal monitoring cadence."
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize("source", ["care_checks", "snapshots"])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_client_update_briefs_do_not_escalate_incomplete_paired_care_risk(
+    tmp_path, source, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Care Account"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "checked_at" if source == "care_checks" else "captured_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 10, status = 'red', actions_json = '[]'")
+        if timestamp is None:
+            con.execute(f"delete from {source}")
+        else:
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    payload = client.get("/api/client-update-briefs").json()
+    brief = payload["clients"][0]
+    assert brief["status"] == "yellow"
+    assert payload["red_count"] == 0
+    assert brief["healthy_site_count"] == 0
+    assert brief["current_evidence_count"] == 0
+    assert brief["monitoring_gap_count"] == 1
+    assert brief["open_action_count"] == 0
+    assert brief["next_action"] != "Review the latest care check and resolve reported risks."
+    assert "monitoring gap requires follow-up" in brief["client_message"]
+
+
+def test_client_update_briefs_prioritize_critical_care_over_scheduled_fleet_work(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, updates in [
+        ("Urgent Care", "https://urgent-care.example", "Risk Account", "0"),
+        ("Scheduled Fleet", "https://scheduled-fleet.example", "Risk Account", "1"),
+        ("Healthy Site", "https://healthy-account.example", "Healthy Account", "0"),
+    ]:
+        assert client.post(
+            "/snapshot", data=valid_snapshot_payload(
+                name=name, url=url, client=account, wp_updates=updates,
+            ), follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = 10, status = 'green', "
+            "actions_json = '[\"Investigate the urgent care finding.\"]' "
+            "where site_id = (select id from sites where url = ?)",
+            ("https://urgent-care.example",),
+        )
+
+    payload = client.get("/api/client-update-briefs").json()
+    risk, healthy = payload["clients"]
+    assert risk["client"] == "Risk Account"
+    assert risk["status"] == "red"
+    assert risk["healthy_site_count"] == 0
+    assert risk["average_score"] >= 85
+    assert risk["open_action_count"] == risk["scheduled_action_count"] == 1
+    assert risk["immediate_action_count"] == 0
+    assert risk["top_site"] == "Urgent Care"
+    assert risk["next_action"] == "Investigate the urgent care finding."
+    assert healthy["client"] == "Healthy Account"
+    assert healthy["status"] == "green"
+    assert healthy["healthy_site_count"] == 1
+    assert healthy["next_action"] == "Continue normal monitoring cadence."
+
+
 def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -14828,7 +14943,8 @@ def test_api_client_update_briefs_returns_client_facing_status_notes(tmp_path):
     warning = payload["clients"][1]
     assert warning["status"] == "yellow"
     assert warning["open_action_count"] == 1
-    assert warning["client_message"] == "1 site is healthy; 1 open action remains in the work queue."
+    assert warning["healthy_site_count"] == 0
+    assert warning["client_message"] == "0 sites are healthy; 1 open action remains in the work queue."
     healthy = payload["clients"][2]
     assert healthy["status"] == "green"
     assert healthy["healthy_site_count"] == 1
