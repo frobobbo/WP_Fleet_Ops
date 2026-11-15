@@ -15059,6 +15059,163 @@ def test_client_account_workflows_fail_closed_on_stale_care_evidence(tmp_path):
     assert agenda["next_action"] == "Capture a fresh care check before relying on site health."
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status", "priority", "focus"),
+    [
+        (64, "green", "red", "urgent", "incident response"),
+        (65, "green", "yellow", "scheduled", "health improvement"),
+        (84, "green", "yellow", "scheduled", "health improvement"),
+        (85, "green", "green", "routine", "routine review"),
+        (100, "yellow", "yellow", "scheduled", "health improvement"),
+        (100, "red", "red", "urgent", "incident response"),
+    ],
+)
+def test_client_checkins_route_current_paired_care_risk(
+    tmp_path, care_score, care_status, expected_status, priority, focus
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Care Account"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+    brief = client.get("/api/client-update-briefs").json()["clients"][0]
+
+    reviews = client.get("/api/client-service-reviews").json()
+    review = reviews["clients"][0]
+    assert review["review_priority"] == priority
+    assert reviews[f"{priority}_review_count"] == 1
+    assert review["status"] == brief["status"] == expected_status
+    assert review["average_score"] == 100
+    assert review["open_action_count"] == 0
+    assert review["immediate_action_count"] == review["scheduled_action_count"] == 0
+    assert review["current_evidence_count"] == 1
+    assert review["monitoring_gap_count"] == 0
+    assert review["next_action"] == brief["next_action"]
+
+    follow_ups = client.get("/api/client-follow-ups").json()
+    follow_up = follow_ups["follow_ups"][0]
+    assert follow_up["priority"] == priority
+    assert follow_ups[f"{priority}_count"] == 1
+    assert follow_up["status"] == expected_status
+    assert follow_up["next_action"] == review["next_action"]
+    due, channel = {
+        "urgent": ("today", "phone"),
+        "scheduled": ("this week", "ticket"),
+        "routine": ("next account review", "email"),
+    }[priority]
+    assert follow_up["due"] == due
+    assert follow_up["channel"] == channel
+
+    agenda_payload = client.get("/api/account-agenda").json()
+    agenda = agenda_payload["agenda"][0]
+    assert agenda["priority"] == priority
+    assert agenda_payload[f"{priority}_count"] == 1
+    assert agenda["focus"] == focus
+    assert agenda["status"] == expected_status
+    assert agenda["next_action"] == review["next_action"]
+
+    # Escalating a check-in must not invent maintenance work or permission.
+    packets = client.get("/api/maintenance-approval-packets").json()
+    assert packets["needed_count"] == 0
+    assert packets["packets"][0]["packet_needed"] is False
+    assert client.get("/api/maintenance-ticket-drafts").json()["draft_count"] == 0
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize("source", ["care_checks", "snapshots"])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_client_checkins_do_not_escalate_incomplete_paired_care_risk(
+    tmp_path, source, timestamp
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(client="Care Account"),
+        follow_redirects=False,
+    ).status_code == 303
+    timestamp_column = "checked_at" if source == "care_checks" else "captured_at"
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 10, status = 'red', actions_json = '[]'")
+        if timestamp is None:
+            con.execute(f"delete from {source}")
+        else:
+            con.execute(f"update {source} set {timestamp_column} = ?", (timestamp,))
+
+    reviews = client.get("/api/client-service-reviews").json()
+    review = reviews["clients"][0]
+    assert reviews["urgent_review_count"] == 0
+    assert reviews["scheduled_review_count"] == 1
+    assert review["status"] == "yellow"
+    assert review["review_priority"] == "scheduled"
+    assert review["current_evidence_count"] == 0
+    assert review["monitoring_gap_count"] == 1
+    assert review["open_action_count"] == 0
+    assert review["talking_point"] == "Restore monitoring coverage before the next client review."
+    assert review["next_action"] != "Review the latest care check and resolve reported risks."
+    follow_up = client.get("/api/client-follow-ups").json()["follow_ups"][0]
+    assert (follow_up["priority"], follow_up["channel"], follow_up["due"]) == (
+        "scheduled", "ticket", "this week",
+    )
+    agenda = client.get("/api/account-agenda").json()["agenda"][0]
+    assert agenda["priority"] == "scheduled"
+    assert agenda["focus"] == "monitoring restoration"
+    assert client.get("/api/maintenance-approval-packets").json()["needed_count"] == 0
+    assert client.get("/api/maintenance-ticket-drafts").json()["draft_count"] == 0
+
+
+def test_client_checkins_prioritize_critical_care_over_scheduled_fleet_work(tmp_path):
+    client = make_test_client(tmp_path)
+    for name, url, account, updates in [
+        ("Urgent Care", "https://urgent-care.example", "Z Risk Account", "0"),
+        ("Scheduled Fleet", "https://scheduled-fleet.example", "Z Risk Account", "1"),
+        ("Other Scheduled", "https://other-scheduled.example", "A Scheduled Account", "1"),
+        ("Healthy Site", "https://healthy-account.example", "Healthy Account", "0"),
+    ]:
+        assert client.post(
+            "/snapshot", data=valid_snapshot_payload(
+                name=name, url=url, client=account, wp_updates=updates,
+            ), follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = 10, status = 'green', "
+            "actions_json = '[\"Investigate the urgent care finding.\"]' "
+            "where site_id = (select id from sites where url = ?)",
+            ("https://urgent-care.example",),
+        )
+
+    reviews = client.get("/api/client-service-reviews").json()
+    assert [row["client"] for row in reviews["clients"]] == [
+        "Z Risk Account", "A Scheduled Account", "Healthy Account",
+    ]
+    assert reviews["urgent_review_count"] == 1
+    assert reviews["scheduled_review_count"] == 1
+    assert reviews["routine_review_count"] == 1
+    risk = reviews["clients"][0]
+    assert risk["status"] == "red"
+    assert risk["review_priority"] == "urgent"
+    assert risk["average_score"] >= 85
+    assert risk["open_action_count"] == risk["scheduled_action_count"] == 1
+    assert risk["immediate_action_count"] == 0
+    assert risk["top_site"] == "Urgent Care"
+    assert risk["next_action"] == "Investigate the urgent care finding."
+    follow_up = client.get("/api/client-follow-ups").json()["follow_ups"][0]
+    assert follow_up["client"] == "Z Risk Account"
+    assert follow_up["priority"] == "urgent"
+    assert follow_up["channel"] == "phone"
+    agenda = client.get("/api/account-agenda").json()["agenda"][0]
+    assert agenda["client"] == "Z Risk Account"
+    assert agenda["priority"] == "urgent"
+    assert agenda["focus"] == "incident response"
+
+
 def test_api_client_service_reviews_prioritizes_account_checkins(tmp_path):
     client = make_test_client(tmp_path)
     client.post(

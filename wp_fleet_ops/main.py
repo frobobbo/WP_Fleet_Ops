@@ -6425,10 +6425,13 @@ def _client_service_review_rows() -> list[dict]:
     for brief in _client_update_brief_rows():
         action_count = brief["open_action_count"]
         monitoring_gap_count = brief["monitoring_gap_count"]
-        if brief["immediate_action_count"]:
+        # Paired account risk can require follow-up even without a fleet action
+        # or a low fleet average. Preserve the brief's reconciled severity.
+        if brief["immediate_action_count"] or brief["status"] == "red":
             review_priority = "urgent"
         elif (
-            brief["scheduled_action_count"]
+            brief["status"] == "yellow"
+            or brief["scheduled_action_count"]
             or monitoring_gap_count
             or (
                 brief["average_score"] is not None
@@ -6841,13 +6844,15 @@ def api_daily_ops_brief():
 
 def _account_agenda_focus(review: dict) -> str:
     """Return the primary agenda theme for an account follow-up."""
-    if review["immediate_action_count"]:
+    if review["immediate_action_count"] or review["status"] == "red":
         return "incident response"
     if review["scheduled_action_count"]:
         return "maintenance planning"
     if review["monitoring_gap_count"]:
         return "monitoring restoration"
-    if review["average_score"] is not None and review["average_score"] < 85:
+    if review["status"] == "yellow" or (
+        review["average_score"] is not None and review["average_score"] < 85
+    ):
         return "health improvement"
     return "routine review"
 
