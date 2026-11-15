@@ -14513,6 +14513,126 @@ def test_api_operations_kpis_warns_when_no_sites_are_registered(tmp_path):
     )
 
 
+@pytest.mark.parametrize(
+    ("fleet_score", "care_score", "care_status", "expected_status"),
+    [
+        (100, 64, "green", "red"),
+        (100, 65, "green", "yellow"),
+        (100, 84, "green", "yellow"),
+        (100, 85, "green", "green"),
+        (100, 100, "yellow", "yellow"),
+        (100, 100, "red", "red"),
+        (64, 100, "green", "red"),
+        (65, 100, "green", "yellow"),
+        (84, 100, "green", "yellow"),
+    ],
+)
+def test_api_operations_kpis_reconciles_current_paired_risk(
+    tmp_path, fleet_score, care_score, care_status, expected_status
+):
+    client = make_test_client(tmp_path)
+    for index in range(4):
+        assert client.post(
+            "/snapshot",
+            data=valid_snapshot_payload(
+                name=f"KPI Paired Site {index}",
+                url=f"https://kpi-paired-{index}.example",
+            ),
+            follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set score = ? where site_id = 1", (fleet_score,))
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]' where site_id = 1",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/api/operations-kpis")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == summary["overall_status"] == expected_status
+    assert payload["red_site_count"] == summary["needs_attention"] == int(expected_status == "red")
+    assert payload["yellow_site_count"] == summary["maintenance_sites"] == int(expected_status == "yellow")
+    assert payload["green_site_count"] == summary["healthy_sites"] == (4 if expected_status == "green" else 3)
+    assert payload["average_score"] == summary["average_score"] >= 85
+    assert payload["current_evidence_count"] == 4
+    assert payload["monitoring_gap_count"] == 0
+    assert payload["open_action_count"] == 0
+    assert payload["immediate_action_count"] == 0
+    assert payload["scheduled_action_count"] == 0
+    if expected_status == "green":
+        assert payload["recommended_focus"] == "Continue normal monitoring cadence."
+    else:
+        watchlist = client.get("/api/site-watchlist").json()["sites"]
+        assert payload["recommended_focus"] == watchlist[0]["recommended_action"]
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize("source", ["care_checks", "snapshots"])
+@pytest.mark.parametrize("freshness", ["missing", "stale", "invalid", "clock_skew"])
+def test_api_operations_kpis_does_not_escalate_incomplete_paired_care_risk(
+    tmp_path, source, freshness
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 10, status = 'red', actions_json = '[]'")
+        if freshness == "missing":
+            con.execute(f"delete from {source}")
+        else:
+            timestamp = {
+                "stale": "2000-01-01 00:00:00",
+                "invalid": "not-a-timestamp",
+                "clock_skew": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            }[freshness]
+            column = "checked_at" if source == "care_checks" else "captured_at"
+            con.execute(f"update {source} set {column} = ?", (timestamp,))
+
+    payload = client.get("/api/operations-kpis").json()
+
+    assert payload["status"] == "yellow"
+    assert payload["current_evidence_count"] == 0
+    assert payload["monitoring_gap_count"] == 1
+    assert payload["average_score"] is None
+    assert payload["green_site_count"] == payload["yellow_site_count"] == payload["red_site_count"] == 0
+    assert payload["open_action_count"] == 0
+    assert payload["recommended_focus"] != "Continue normal monitoring cadence."
+    assert "latest care check" not in payload["recommended_focus"]
+
+
+def test_api_operations_kpis_prioritizes_current_care_risk_over_scheduled_work(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Scheduled KPI Work", url="https://kpi-scheduled.example", wp_updates="1",
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 10, status = 'green', actions_json = '[]' where site_id = 1")
+
+    payload = client.get("/api/operations-kpis").json()
+
+    assert payload["status"] == "red"
+    assert payload["red_site_count"] == 1
+    assert payload["yellow_site_count"] == 1
+    assert payload["green_site_count"] == 0
+    assert payload["immediate_action_count"] == 0
+    assert payload["scheduled_action_count"] == 1
+    assert payload["recommended_focus"] == "Review the latest care check and resolve reported risks."
+
+
 def test_api_operations_kpis_returns_management_rollup(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
@@ -14558,7 +14678,8 @@ def test_api_operations_kpis_returns_management_rollup(tmp_path):
     assert payload["status"] == "red"
     assert payload["site_count"] == 3
     assert payload["red_site_count"] == 1
-    assert payload["green_site_count"] == 2
+    assert payload["yellow_site_count"] == 1
+    assert payload["green_site_count"] == 1
     assert payload["open_action_count"] >= 6
     assert payload["immediate_action_count"] >= 1
     assert payload["scheduled_action_count"] >= 1

@@ -6164,10 +6164,12 @@ def _operations_kpi_status(
 @app.get("/api/operations-kpis")
 def api_operations_kpis():
     """Return compact fleet KPIs backed by paired monitoring evidence."""
+    now = datetime.now(timezone.utc)
     dashboard_rows = store.latest_dashboard()
     care_checks = store.latest_care_checks()
-    rows = _current_paired_snapshot_rows(dashboard_rows, care_checks)
-    fleet_summary = api_summary()
+    rows = _current_paired_snapshot_rows(dashboard_rows, care_checks, now)
+    fleet_summary = _summary_payload(dashboard_rows, care_checks, store.list_sites(), now)
+    attention_sites = _site_watchlist_rows(dashboard_rows, now, care_checks)
     coverage = api_monitoring_coverage()
     # An unfiltered coverage read always returns a payload; only an unknown
     # explicit client filter can produce the endpoint's 404 JSONResponse.
@@ -6193,17 +6195,24 @@ def api_operations_kpis():
     priority_sites = [row for row in rows if _site_priority_score(row) > 0]
     priority_sites.sort(key=lambda row: (-_site_priority_score(row), row["score"], row["name"].lower()))
     monitoring_gap_count = coverage["monitoring_gap_count"]
-    status = _operations_kpi_status(
-        len(immediate_actions),
-        len(scheduled_actions),
-        average_score,
-        monitoring_gap_count,
-        fleet_summary["sites"],
+    # Reuse paired site health instead of letting an empty fleet-action queue
+    # or a healthy average hide a current care finding or one low-scoring site.
+    status = _paired_site_status(
+        _operations_kpi_status(
+            len(immediate_actions),
+            len(scheduled_actions),
+            average_score,
+            monitoring_gap_count,
+            fleet_summary["sites"],
+        ),
+        fleet_summary["overall_status"],
     )
     if not fleet_summary["sites"]:
         recommended_focus = "Register a site and capture its first paired care check and fleet snapshot."
     elif immediate_actions:
         recommended_focus = immediate_actions[0]["recommended_action"]
+    elif attention_sites and attention_sites[0]["watch_status"] == "critical":
+        recommended_focus = attention_sites[0]["recommended_action"]
     elif scheduled_actions:
         recommended_focus = scheduled_actions[0]["recommended_action"]
     elif fleet_summary["missing_snapshot_count"]:
@@ -6216,6 +6225,8 @@ def api_operations_kpis():
             for site in coverage["sites"]
             if site["coverage_status"] == "gap"
         )
+    elif fleet_summary["maintenance_sites"] and attention_sites:
+        recommended_focus = attention_sites[0]["recommended_action"]
     else:
         recommended_focus = "Continue normal monitoring cadence."
     return {
@@ -6234,9 +6245,9 @@ def api_operations_kpis():
         "paired_coverage_percent": coverage["combined_coverage_percent"],
         "average_score": average_score,
         "observed_average_score": observed_average_score,
-        "green_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "green"),
-        "yellow_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "yellow"),
-        "red_site_count": sum(1 for row in rows if _dashboard_status(row["score"]) == "red"),
+        "green_site_count": fleet_summary["healthy_sites"],
+        "yellow_site_count": fleet_summary["maintenance_sites"],
+        "red_site_count": fleet_summary["needs_attention"],
         "open_action_count": len(actions),
         "immediate_action_count": len(immediate_actions),
         "scheduled_action_count": len(scheduled_actions),
