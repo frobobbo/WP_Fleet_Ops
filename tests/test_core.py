@@ -1548,12 +1548,15 @@ def test_store_health_counts_bounds_database_lock_wait(tmp_path, monkeypatch):
     store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
     connection = store._connect()
     assert connection.execute("pragma busy_timeout").fetchone()[0] == 30_000
+    statements = []
+    connection.set_trace_callback(statements.append)
     monkeypatch.setattr(store, "_connect", lambda: connection)
 
     store.health_counts()
 
-    assert connection.execute("pragma busy_timeout").fetchone()[0] == 1_000
-    connection.close()
+    assert "pragma busy_timeout = 1000" in statements
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        connection.execute("select 1")
 
 
 def test_store_indexes_per_site_history_queries(tmp_path):

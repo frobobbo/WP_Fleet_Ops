@@ -47,6 +47,7 @@ WP FleetOps is a combined WordPress client-care and fleet-operations dashboard. 
 - Self-contained dashboard assets, a restrictive Content Security Policy, same-origin opener/resource isolation, disabled legacy cross-domain policies, and suppressed application-server banners avoid third-party font/CDN requests, cross-origin embedding, and unnecessary runtime fingerprinting of the internal operations UI.
 - Conditional gzip compression reduces transfer size for growing fleet inventories and reports while leaving small health probes uncompressed.
 - Readiness checks at `/ready` verify both SQLite reads and a rolled-back no-op write transaction, preventing read-only or mis-mounted data volumes from receiving traffic; database-lock waits are bounded below the Kubernetes probe timeout so abandoned checks cannot accumulate blocked worker threads.
+- SQLite connections close explicitly after initialization and every store operation, including read, write, and commit failures, rather than waiting for garbage collection; successful writes still commit and failed writes roll back before cleanup.
 - Container image and Helm chart for Kubernetes deployment.
 
 ## Local development

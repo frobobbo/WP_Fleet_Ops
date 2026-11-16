@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -15,6 +16,9 @@ class FleetOpsStore:
         self._init()
 
     def _connect(self) -> sqlite3.Connection:
+        # SQLite's context manager commits/rolls back but does not close. Store
+        # operations use closing() outside that context so transaction exit,
+        # including a failed commit, always precedes connection cleanup.
         # FastAPI runs synchronous handlers in a thread pool, so brief overlap
         # between dashboard reads and snapshot writes is expected. Give the
         # active writer time to finish instead of surfacing transient lock errors.
@@ -28,7 +32,7 @@ class FleetOpsStore:
         return con
 
     def _init(self):
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             # WAL lets readers continue while a snapshot or care check is being
             # persisted. The setting is durable for this database and applies to
             # subsequent connections after initialization.
@@ -110,7 +114,7 @@ class FleetOpsStore:
         name = normalize_site_name(name)
         client = normalize_client_name(client)
         url = normalize_site_url(url)
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             return self._upsert_site(con, name, url, client)
 
     @staticmethod
@@ -129,7 +133,7 @@ class FleetOpsStore:
         return int(con.execute("select id from sites where url=?", (url,)).fetchone()["id"])
 
     def list_sites(self) -> list[dict]:
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             # A display name is not unique. Use the canonical URL to keep
             # directories and exports stable regardless of insertion order.
             return [dict(r) for r in con.execute("select * from sites order by name, url")]
@@ -142,7 +146,7 @@ class FleetOpsStore:
         Acquire a write transaction and execute a no-op update, then roll it back
         so the probe validates write authority without changing application data.
         """
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             # Ordinary writes may wait up to 30 seconds for brief contention, but
             # Kubernetes gives /ready two seconds. Bound this connection's wait so
             # the endpoint can return 503 instead of leaving a timed-out probe's
@@ -161,7 +165,7 @@ class FleetOpsStore:
             return counts
 
     def save_care_check(self, site_id: int, check: SiteCheck) -> int:
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             return self._insert_care_check(con, site_id, check)
 
     @staticmethod
@@ -204,7 +208,7 @@ class FleetOpsStore:
         where c.id in (select max(id) from care_checks group by site_id)
         order by s.name, s.url
         """
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             rows = []
             for r in con.execute(sql):
                 d = dict(r)
@@ -239,7 +243,7 @@ class FleetOpsStore:
             sql += " where " + " and ".join(filters)
         sql += " order by c.id desc limit ? offset ?"
         params.extend((limit, offset))
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             rows = []
             for r in con.execute(sql, params):
                 d = dict(r)
@@ -263,11 +267,11 @@ class FleetOpsStore:
             params.append(client)
         if filters:
             sql += " where " + " and ".join(filters)
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             return int(con.execute(sql, params).fetchone()[0])
 
     def save_snapshot(self, site_id: int, site: FleetSite, score: int, alerts: list[Alert]) -> int:
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             return self._insert_snapshot(con, site_id, site, score, alerts)
 
     @staticmethod
@@ -327,7 +331,7 @@ class FleetOpsStore:
         if normalize_site_url(site.url) != url or normalize_site_url(check.url) != url:
             raise ValueError("Paired observation URLs must match the tracked site.")
 
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             site_id = self._upsert_site(con, name, url, client)
             snapshot_id = self._insert_snapshot(con, site_id, site, score, alerts)
             care_check_id = self._insert_care_check(con, site_id, check)
@@ -344,7 +348,7 @@ class FleetOpsStore:
         where sn.id in (select max(id) from snapshots group by site_id)
         order by sn.score asc, s.name, s.url
         """
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             rows = []
             for r in con.execute(sql):
                 d = dict(r)
@@ -378,7 +382,7 @@ class FleetOpsStore:
             sql += " where " + " and ".join(filters)
         sql += " order by sn.id desc limit ? offset ?"
         params.extend((limit, offset))
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             rows = []
             for r in con.execute(sql, params):
                 d = dict(r)
@@ -401,7 +405,7 @@ class FleetOpsStore:
             params.append(client)
         if filters:
             sql += " where " + " and ".join(filters)
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             return int(con.execute(sql, params).fetchone()[0])
 
     def recent_trend_snapshots(
@@ -431,7 +435,7 @@ class FleetOpsStore:
         limit ?
         """
         params.append(limit)
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             rows = []
             for r in con.execute(sql, params):
                 d = dict(r)
@@ -461,7 +465,7 @@ class FleetOpsStore:
         Returns ``True`` if a site was found and removed, ``False`` if no site
         with that URL exists.
         """
-        with self._connect() as con:
+        with closing(self._connect()) as con, con:
             row = con.execute("select id from sites where url=?", (url,)).fetchone()
             if row is None:
                 return False
