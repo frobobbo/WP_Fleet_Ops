@@ -23,13 +23,19 @@ class FleetOpsStore:
         # between dashboard reads and snapshot writes is expected. Give the
         # active writer time to finish instead of surfacing transient lock errors.
         con = sqlite3.connect(self.path, timeout=30)
-        con.row_factory = sqlite3.Row
-        # SQLite declares foreign keys in the schema but does not enforce them
-        # unless every connection opts in. Keep checks and snapshots tied to a
-        # real site so orphan history cannot silently disappear from reports.
-        con.execute("pragma foreign_keys = on")
-        con.execute("pragma busy_timeout = 30000")
-        return con
+        try:
+            con.row_factory = sqlite3.Row
+            # SQLite declares foreign keys in the schema but does not enforce them
+            # unless every connection opts in. Keep checks and snapshots tied to a
+            # real site so orphan history cannot silently disappear from reports.
+            con.execute("pragma foreign_keys = on")
+            con.execute("pragma busy_timeout = 30000")
+            return con
+        except BaseException:
+            # Until setup returns, the caller's closing() context cannot own the
+            # connection. Release it here on setup failures or interruption.
+            con.close()
+            raise
 
     def _init(self):
         with closing(self._connect()) as con, con:

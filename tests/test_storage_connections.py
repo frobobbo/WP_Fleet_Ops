@@ -107,3 +107,34 @@ def test_store_closes_connection_after_read_failure(tmp_path, monkeypatch):
         with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
             store.list_sites()
         assert_closed(connection)
+
+
+@pytest.mark.parametrize("failed_pragma", ["foreign_keys", "busy_timeout"])
+def test_store_closes_connection_after_setup_failure(tmp_path, monkeypatch, failed_pragma):
+    store = FleetOpsStore(tmp_path / "fleetops.sqlite3")
+    original_connect = sqlite3.connect
+    connections = []
+
+    def tracked_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_authorizer(
+            lambda action, name, *_args: (
+                sqlite3.SQLITE_DENY
+                if action == sqlite3.SQLITE_PRAGMA and name == failed_pragma
+                else sqlite3.SQLITE_OK
+            )
+        )
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
+    try:
+        with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+            store.list_sites()
+        assert len(connections) == 1
+        # Setup failed before _connect() returned, so the caller's closing()
+        # context was never entered. _connect() must release its own resource.
+        assert_closed(connections[0])
+    finally:
+        for connection in connections:
+            connection.close()
