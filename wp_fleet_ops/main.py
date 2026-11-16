@@ -6690,6 +6690,14 @@ def api_dispatch_summary():
     priority_sites = priority_payload["sites"][:5]
     client_workload = _client_workload_rows()
     top_action = actions[0] if actions else None
+    attention_sites = _site_watchlist_rows()
+    top_attention_site = attention_sites[0] if attention_sites else None
+    # Care-only findings and low scores may not create a fleet action. Route
+    # them without manufacturing work counts; real immediate actions still win.
+    attention_drives_dispatch = top_attention_site is not None and (
+        not top_action
+        or (top_attention_site["watch_status"] == "critical" and not immediate_actions)
+    )
     monitoring_payload = api_monitoring_coverage()
     # An unfiltered coverage read always returns a payload; only an unknown
     # explicit client filter can produce the endpoint's 404 JSONResponse.
@@ -6717,7 +6725,15 @@ def api_dispatch_summary():
         for site in monitoring_payload["sites"]
         if site["care_check_freshness"] not in {"current", "missing"}
     )
-    if top_action:
+    if attention_drives_dispatch and top_attention_site is not None:
+        dispatch_top_client = top_attention_site["client"]
+        dispatch_top_site = top_attention_site["name"]
+        dispatch_top_action = top_attention_site["recommended_action"]
+        top_client = next(
+            (row for row in client_workload if row["client"] == dispatch_top_client),
+            None,
+        )
+    elif top_action:
         # Workload and site-priority rankings can disagree with action order.
         # Keep all top routing fields tied to the action actually recommended.
         dispatch_top_client = top_action.get("client") or "Unassigned"
@@ -6742,9 +6758,9 @@ def api_dispatch_summary():
         )
         top_client = None
 
-    if immediate_actions:
+    if immediate_actions or (top_attention_site and top_attention_site["watch_status"] == "critical"):
         next_queue = "immediate"
-    elif scheduled_actions:
+    elif scheduled_actions or attention_drives_dispatch:
         next_queue = "scheduled"
     elif monitoring_gap_count:
         next_queue = "monitoring"
@@ -6757,11 +6773,14 @@ def api_dispatch_summary():
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "status": _dispatch_summary_status(
-            len(immediate_actions),
-            len(scheduled_actions),
-            monitoring_gap_count,
-            monitoring_payload["tracked_site_count"],
+        "status": _paired_site_status(
+            _dispatch_summary_status(
+                len(immediate_actions),
+                len(scheduled_actions),
+                monitoring_gap_count,
+                monitoring_payload["tracked_site_count"],
+            ),
+            api_summary()["overall_status"],
         ),
         "open_action_count": len(actions),
         "immediate_action_count": len(immediate_actions),
@@ -6794,6 +6813,9 @@ def _daily_ops_headline(
     if immediate_count:
         site_fragment = f" Start with {top_site}." if top_site else ""
         return f"Red shift brief: {immediate_count} immediate action{'s' if immediate_count != 1 else ''} need follow-up.{site_fragment}"
+    if status == "red":
+        site_fragment = f" Start with {top_site}." if top_site else ""
+        return f"Red shift brief: current paired site risk needs follow-up.{site_fragment}"
     if scheduled_count:
         return f"Yellow shift brief: {scheduled_count} scheduled action{'s' if scheduled_count != 1 else ''} should be planned."
     if monitoring_gap_count:
@@ -6802,6 +6824,8 @@ def _daily_ops_headline(
         return f"Yellow shift brief: {monitoring_gap_count} monitoring {gap_label} follow-up.{site_fragment}"
     if status == "green":
         return "Green shift brief: no urgent or scheduled FleetOps actions are open."
+    if top_site:
+        return f"Yellow shift brief: current paired site findings need review. Start with {top_site}."
     return "FleetOps shift brief: review current monitoring status and open work."
 
 
@@ -6811,7 +6835,7 @@ def api_daily_ops_brief():
     summary = api_summary()
     dispatch = api_dispatch_summary()
     priority_sites = dispatch["priority_sites"][:3]
-    status = dispatch["status"] if dispatch["status"] != "green" else summary["overall_status"]
+    status = _paired_site_status(dispatch["status"], summary["overall_status"])
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "status": status,

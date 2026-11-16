@@ -15621,6 +15621,145 @@ def test_dispatch_healthy_populated_inventory_remains_clear(tmp_path):
     assert dispatch["top_action"] == "Continue normal monitoring cadence."
 
 
+@pytest.mark.parametrize(
+    ("care_score", "care_status", "expected_status", "expected_queue"),
+    [
+        (64, "green", "red", "immediate"),
+        (65, "green", "yellow", "scheduled"),
+        (84, "green", "yellow", "scheduled"),
+        (85, "green", "green", "none"),
+        (100, "yellow", "yellow", "scheduled"),
+        (100, "red", "red", "immediate"),
+    ],
+)
+def test_dispatch_and_daily_brief_route_paired_care_risk_without_inventing_actions(
+    tmp_path, care_score, care_status, expected_status, expected_queue
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(client="Care Dispatch Client"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute(
+            "update care_checks set score = ?, status = ?, actions_json = '[]'",
+            (care_score, care_status),
+        )
+    original_care = client.get("/api/care-check-history").json()["care_checks"]
+    original_snapshots = client.get("/api/snapshot-history").json()["snapshots"]
+
+    dispatch = client.get("/api/dispatch-summary").json()
+    brief = client.get("/api/daily-ops-brief").json()
+    for payload in (dispatch, brief):
+        assert payload["status"] == expected_status
+        assert payload["next_queue"] == expected_queue
+        assert payload["open_action_count"] == payload["immediate_action_count"] == 0
+        assert payload["scheduled_action_count"] == payload["monitoring_gap_count"] == 0
+        assert payload["top_site"] == ("Test Site" if expected_status != "green" else None)
+        assert payload["top_client"] == ("Care Dispatch Client" if expected_status != "green" else None)
+    assert dispatch["top_client_open_action_count"] == dispatch["watch_action_count"] == 0
+    assert brief["average_score"] == 100
+    assert brief["headline"].startswith(f"{expected_status.title()} shift brief:")
+    if expected_status != "green":
+        watch = client.get("/api/site-watchlist").json()["sites"][0]
+        assert dispatch["top_action"] == brief["recommended_focus"] == watch["recommended_action"]
+        assert "Start with Test Site." in brief["headline"]
+        assert "Continue normal monitoring" not in dispatch["top_action"]
+    assert client.get("/api/care-check-history").json()["care_checks"] == original_care
+    assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
+
+
+@pytest.mark.parametrize(
+    ("care_status", "fleet_overrides", "expected_site", "expected_queue"),
+    [
+        ("red", {"wp_updates": "1"}, "Paired Risk Site", "immediate"),
+        ("red", {"uptime_ok": "false"}, "Fleet Work Site", "immediate"),
+        ("yellow", {"uptime_ok": "false"}, "Fleet Work Site", "immediate"),
+        ("yellow", {"wp_updates": "1"}, "Fleet Work Site", "scheduled"),
+    ],
+)
+def test_dispatch_ranks_current_paired_risk_alongside_real_fleet_actions(
+    tmp_path, care_status, fleet_overrides, expected_site, expected_queue
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(name="Paired Risk Site", client="Paired Risk Client"),
+        follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set status = ?, actions_json = '[]'", (care_status,))
+    assert client.post(
+        "/snapshot",
+        data=valid_snapshot_payload(
+            name="Fleet Work Site", url="https://fleet-work.example",
+            client="Fleet Work Client", **fleet_overrides,
+        ),
+        follow_redirects=False,
+    ).status_code == 303
+    actions = client.get("/api/actions").json()["actions"]
+    watch = client.get("/api/site-watchlist").json()["sites"]
+    expected_focus = (
+        next(site["recommended_action"] for site in watch if site["name"] == expected_site)
+        if expected_site == "Paired Risk Site" else actions[0]["recommended_action"]
+    )
+    for path in ("/api/dispatch-summary", "/api/daily-ops-brief"):
+        payload = client.get(path).json()
+        assert payload["status"] == ("red" if expected_queue == "immediate" else "yellow")
+        assert payload["next_queue"] == expected_queue
+        assert payload["top_site"] == expected_site
+        assert payload["top_client"] == ("Paired Risk Client" if expected_site == "Paired Risk Site" else "Fleet Work Client")
+        assert payload["open_action_count"] == len(actions)
+        assert payload.get("top_action", payload.get("recommended_focus")) == expected_focus
+        if path.endswith("daily-ops-brief"):
+            assert payload["headline"].startswith("Red shift brief:" if expected_queue == "immediate" else "Yellow shift brief:")
+
+
+@pytest.mark.parametrize(("table", "column"), [("snapshots", "captured_at"), ("care_checks", "checked_at")])
+@pytest.mark.parametrize("timestamp", ["2000-01-01 00:00:00", "invalid", "9999-01-01 00:00:00", None])
+def test_dispatch_keeps_unpaired_care_risk_in_monitoring_restoration(tmp_path, table, column, timestamp):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40, status = 'red'")
+        if timestamp is None:
+            con.execute(f"delete from {table}")
+        else:
+            con.execute(f"update {table} set {column} = ?", (timestamp,))
+    for path in ("/api/dispatch-summary", "/api/daily-ops-brief"):
+        payload = client.get(path).json()
+        assert payload["status"] == "yellow"
+        assert payload["next_queue"] == "monitoring"
+        assert payload["monitoring_gap_count"] == 1
+        assert payload["open_action_count"] == 0
+        if path.endswith("daily-ops-brief"):
+            assert "1 monitoring gap needs follow-up" in payload["headline"]
+
+
+def test_daily_brief_keeps_paired_critical_risk_ahead_of_another_sites_monitoring_gap(tmp_path):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set score = 40, status = 'green', actions_json = '[]'")
+    assert client.post(
+        "/sites", data={"name": "Gap Site", "url": "https://gap-dispatch.example"},
+        follow_redirects=False,
+    ).status_code == 303
+    brief = client.get("/api/daily-ops-brief").json()
+    assert brief["status"] == "red"
+    assert brief["next_queue"] == "immediate"
+    assert brief["top_site"] == "Test Site"
+    assert brief["monitoring_gap_count"] == 1
+    assert brief["immediate_action_count"] == brief["open_action_count"] == 0
+    assert brief["headline"].startswith("Red shift brief:")
+    assert "Start with Test Site." in brief["headline"]
+
+
 def test_api_dispatch_summary_returns_queue_level_operator_routing(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
