@@ -99,6 +99,22 @@ async def invalid_input_error(_request: Request, exc: ValueError):
     return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
+@app.exception_handler(sqlite3.OperationalError)
+async def database_operational_error(_request: Request, exc: sqlite3.OperationalError):
+    """Expose exhausted lock waits as retryable, not generic server failures."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    # Extended result codes (for example SQLITE_BUSY_SNAPSHOT) retain the
+    # primary code in the low byte. Do not infer retryability from error text:
+    # read-only volumes, broken SQL, and other faults still need investigation.
+    if isinstance(code, int) and (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "1"},
+            content={"detail": "Database is busy. Retry the request shortly."},
+        )
+    raise exc
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "app": "wp-fleet-ops", "revision": APP_REVISION}

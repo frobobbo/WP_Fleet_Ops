@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import warnings
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -123,6 +124,93 @@ def test_fetched_non_page_response_marks_paired_uptime_down(tmp_path, monkeypatc
     assert snapshot["observed_score"] == check.score == 47
     assert snapshot["observed_status"] == "red"
     assert any("down or unreachable" in alert["message"] for alert in snapshot["observed_alerts"])
+
+
+def test_snapshot_lock_contention_is_retryable_and_recovers_atomically(tmp_path, monkeypatch):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    original_connect = main.store._connect
+
+    def short_wait_connect():
+        connection = original_connect()
+        # Exercise an actual SQLite writer lock without the normal 30s wait.
+        connection.execute("pragma busy_timeout = 0")
+        return connection
+
+    monkeypatch.setattr(main.store, "_connect", short_wait_connect)
+
+    with closing(original_connect()) as writer:
+        writer.execute("begin immediate")
+        try:
+            response = client.post(
+                "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+            )
+            assert response.status_code == 503
+            assert response.headers["Retry-After"] == "1"
+            assert response.headers["Cache-Control"] == "no-store"
+            assert response.json() == {
+                "detail": "Database is busy. Retry the request shortly.",
+            }
+            assert client.get("/health").status_code == 200
+            readiness = client.get("/ready")
+            assert readiness.status_code == 503
+            assert readiness.json()["database"] == "unavailable"
+            assert "Retry-After" not in readiness.headers
+            for table in ("sites", "care_checks", "snapshots"):
+                assert writer.execute(f"select count(*) from {table}").fetchone()[0] == 0
+        finally:
+            writer.rollback()
+
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    readiness = client.get("/ready")
+    assert readiness.status_code == 200
+    assert {key: readiness.json()[key] for key in ("sites", "care_checks", "fleet_snapshots")} == {
+        "sites": 1, "care_checks": 1, "fleet_snapshots": 1,
+    }
+
+
+@pytest.mark.parametrize("path", ["/", "/report", "/api/sites"])
+@pytest.mark.parametrize(
+    "error_code",
+    [sqlite3.SQLITE_BUSY, sqlite3.SQLITE_BUSY_SNAPSHOT, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_LOCKED_SHAREDCACHE],
+)
+def test_read_lock_errors_use_codes_not_database_error_text(tmp_path, monkeypatch, path, error_code):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    error = sqlite3.OperationalError("private database details must not reach the response")
+    error.sqlite_errorcode = error_code
+
+    def blocked_read():
+        raise error
+
+    monkeypatch.setattr(main.store, "latest_dashboard", blocked_read)
+    response = client.get(path)
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "1"
+    assert response.json() == {"detail": "Database is busy. Retry the request shortly."}
+    assert "private database details" not in response.text
+
+
+@pytest.mark.parametrize("error_code", [sqlite3.SQLITE_ERROR, sqlite3.SQLITE_READONLY, None])
+def test_other_operational_errors_are_not_reported_as_retryable(tmp_path, monkeypatch, error_code):
+    client = make_test_client(tmp_path)
+    import wp_fleet_ops.main as main
+
+    error = sqlite3.OperationalError("database is locked")
+    if error_code is not None:
+        error.sqlite_errorcode = error_code
+
+    def broken_read():
+        raise error
+
+    monkeypatch.setattr(main.store, "latest_dashboard", broken_read)
+    with pytest.raises(sqlite3.OperationalError) as raised:
+        client.get("/api/sites")
+    assert raised.value is error
 
 
 def test_health_and_report_endpoints(tmp_path):
