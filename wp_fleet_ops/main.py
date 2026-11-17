@@ -18,6 +18,7 @@ from .checks import (
     MAX_SITE_URL_LENGTH,
     MAX_WORDPRESS_VERSION_LENGTH,
     MONITORED_SECURITY_HEADERS,
+    SQLITE_INTEGER_MAX,
     SiteCheck,
     evaluate_site,
     fetch_basic_site_check,
@@ -71,9 +72,6 @@ CONTENT_SECURITY_POLICY = (
     "connect-src 'self'"
 )
 SNAPSHOT_FRESHNESS_HOURS = 168
-# SQLite INTEGER columns store signed 64-bit values. Reject larger telemetry at
-# request validation so persistence cannot fail after a site has been upserted.
-SQLITE_INTEGER_MAX = (1 << 63) - 1
 
 
 @app.middleware("http")

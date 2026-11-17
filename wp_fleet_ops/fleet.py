@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from .checks import _report_checked_at, markdown_literal
+from .checks import SQLITE_INTEGER_MAX, _report_checked_at, markdown_literal
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,8 @@ class FleetSite:
                 raise ValueError(f"{field} must be an integer.")
             if value < 0:
                 raise ValueError(f"{field} must not be negative.")
+            if value > SQLITE_INTEGER_MAX:
+                raise ValueError(f"{field} must be at most {SQLITE_INTEGER_MAX}.")
         if self.security_header_count > 3:
             raise ValueError("security_header_count must be between 0 and 3.")
 

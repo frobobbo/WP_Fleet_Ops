@@ -17,6 +17,8 @@ MAX_SITE_NAME_LENGTH = 200
 MAX_SITE_URL_LENGTH = 2048
 MAX_CLIENT_NAME_LENGTH = 200
 MAX_WORDPRESS_VERSION_LENGTH = 100
+# HTTP forms and direct integrations persist to signed 64-bit SQLite INTEGERs.
+SQLITE_INTEGER_MAX = (1 << 63) - 1
 MONITORED_SECURITY_HEADERS = (
     "strict-transport-security",
     "x-frame-options",
@@ -462,6 +464,8 @@ def evaluate_site(
     ):
         if value < 0:
             raise ValueError(f"{field} must not be negative.")
+        if value > SQLITE_INTEGER_MAX:
+            raise ValueError(f"{field} must be at most {SQLITE_INTEGER_MAX}.")
     name = normalize_site_name(name)
     normalized_url = normalize_site_url(url)
     wordpress_version = normalize_wordpress_version(wordpress_version)
@@ -599,6 +603,9 @@ def fetch_basic_site_check(
             raise ValueError(f"{field} must be an integer.")
         if value < 0:
             raise ValueError(f"{field} must not be negative.")
+        if value > SQLITE_INTEGER_MAX:
+            # Reject invalid operator metadata before either network probe.
+            raise ValueError(f"{field} must be at most {SQLITE_INTEGER_MAX}.")
     effective_url = url
     started = time.monotonic()
     status = 0
