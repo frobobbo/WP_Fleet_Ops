@@ -30,6 +30,30 @@ CARE_FIELDS = ("latency_ms", "ssl_days_remaining", "update_count", "backup_age_h
 FLEET_FIELDS = ("ssl_days", "wp_updates", "backup_age_hours", "response_ms")
 
 
+@pytest.mark.parametrize("field", ("http_status", *CARE_FIELDS))
+def test_direct_care_check_rejects_missing_required_telemetry(field):
+    metrics: dict[str, Any] = CARE_METRICS | {field: None}
+    with pytest.raises(ValueError, match=rf"^{field} must be an integer\.$"):
+        checks.evaluate_site(
+            "Missing Care", "https://missing-care.example",
+            **metrics,
+        )
+
+
+def test_direct_care_check_allows_unspecified_optional_header_count():
+    headers = {
+        "strict-transport-security": "max-age=31536000",
+        "x-frame-options": "DENY",
+    }
+    check = checks.evaluate_site(
+        "Named Evidence", "https://named-evidence.example",
+        **CARE_METRICS, security_headers=headers, security_header_count=None,
+    )
+    assert check.score == 100
+    assert check.actions == []
+    assert check.security_headers == headers
+
+
 @pytest.mark.parametrize("field", CARE_FIELDS)
 @pytest.mark.parametrize("value", [SQLITE_MAX + 1, 10**100])
 def test_direct_care_check_rejects_unpersistable_telemetry(field, value):

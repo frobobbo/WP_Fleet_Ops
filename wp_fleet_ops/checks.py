@@ -450,7 +450,11 @@ def evaluate_site(
         ("backup_age_hours", backup_age_hours),
         ("security_header_count", security_header_count),
     ):
-        if value is not None and type(value) is not int:
+        # Only the optional header count may be absent: None selects named
+        # header evidence. Required metrics must fail validation before scoring.
+        if field == "security_header_count" and value is None:
+            continue
+        if type(value) is not int:
             # bool is an int subclass; neither booleans nor fractional counts
             # are valid observations for scoring and SQLite history.
             raise ValueError(f"{field} must be an integer.")
