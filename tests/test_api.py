@@ -20,6 +20,60 @@ def make_test_client(tmp_path, revision="test-revision"):
     return TestClient(main.app)
 
 
+@pytest.mark.parametrize("client_name", ["Bad\nClient", "Bad\x00Client", "Bad\u202eClient"])
+def test_fetch_check_rejects_invalid_client_before_network_io(tmp_path, monkeypatch, client_name):
+    from unittest.mock import Mock
+    from wp_fleet_ops.checks import evaluate_site
+    import wp_fleet_ops.main as main
+
+    client = make_test_client(tmp_path)
+    check = evaluate_site(
+        "Fetch Validation", "https://fetch-validation.example",
+        200, 250, 60, "unknown", 0, 24,
+    )
+    fetch = Mock(return_value=check)
+    monkeypatch.setattr(main, "fetch_basic_site_check", fetch)
+
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": check.name, "url": check.url, "client": client_name},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Client name must contain only printable characters."}
+    fetch.assert_not_called()
+    assert main.store.health_counts() == {"sites": 0, "care_checks": 0, "fleet_snapshots": 0}
+
+
+@pytest.mark.parametrize("client_name, expected", [("  Church Client  ", "Church Client"), ("", "")])
+def test_fetch_check_preserves_valid_client_capture(tmp_path, monkeypatch, client_name, expected):
+    from unittest.mock import Mock
+    from wp_fleet_ops.checks import evaluate_site
+    import wp_fleet_ops.main as main
+
+    client = make_test_client(tmp_path)
+    check = evaluate_site(
+        "Fetch Validation", "https://fetch-validation.example",
+        200, 250, 60, "unknown", 0, 24,
+    )
+    fetch = Mock(return_value=check)
+    monkeypatch.setattr(main, "fetch_basic_site_check", fetch)
+
+    response = client.post(
+        "/care/fetch-check",
+        data={"name": check.name, "url": check.url, "client": client_name},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    fetch.assert_called_once_with(
+        check.name, check.url, wordpress_version="unknown", update_count=0, backup_age_hours=24,
+    )
+    assert main.store.list_sites()[0]["client"] == expected
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+
+
 def valid_snapshot_payload(**overrides):
     payload = {
         "name": "Test Site",

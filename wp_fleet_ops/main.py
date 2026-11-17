@@ -7104,6 +7104,10 @@ def fetch_care_check(
     backup_age_hours: int = Form(24, ge=0, le=SQLITE_INTEGER_MAX),
 ):
     name = normalize_site_name(name)
+    # Validate account metadata before contacting the monitored origin. The
+    # store rechecks it at persistence, but that is too late to avoid a wasted
+    # HTTP/TLS probe for a request that cannot be saved.
+    client = normalize_client_name(client)
     check = fetch_basic_site_check(
         name,
         url,
