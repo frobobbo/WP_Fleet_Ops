@@ -7021,6 +7021,11 @@ def index(request: Request):
             "fleet_rows": fleet_rows,
             "care_checks": care_checks,
             "sites": sites,
+            # Registry-only accounts still need reports explaining evidence gaps.
+            "report_clients": sorted(
+                {site.get("client") or "Unassigned" for site in sites},
+                key=lambda label: (label.casefold(), label),
+            ),
             "fleet_summary": _summary_payload(fleet_rows, care_checks, sites, now),
         },
     )

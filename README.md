@@ -66,6 +66,17 @@ Environment variables:
 - `WP_FLEET_OPS_REVISION`: deployed Git revision reported by `/health` and `/ready`; defaults to `unknown`.
 - `PORT`: used by the console script runner.
 
+### Client report exports
+
+Use the dashboard's **Client report** selector to open an account-scoped Markdown
+report without editing a URL. The list is sorted and deduplicated from the site
+registry, includes **Unassigned**, and includes accounts with no observations yet
+so their monitoring gaps can be reported. Labels are HTML-escaped and submitted
+through a normal GET form, preserving Unicode and query-special characters.
+The existing **Open combined Markdown report** link still exports the full fleet.
+The selector is hidden until at least one site is registered. Account scoping is
+an export convenience, not an authentication or tenant-authorization boundary.
+
 ### History API pagination
 
 `/api/snapshot-history`, `/api/care-check-history`, and `/api/site-snapshot-history`

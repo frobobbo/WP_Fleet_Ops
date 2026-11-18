@@ -1,6 +1,7 @@
 """Client report exports must not mix another account's evidence into a report."""
 import importlib
 import warnings
+from html.parser import HTMLParser
 
 import pytest
 
@@ -34,6 +35,97 @@ def report_client(tmp_path, monkeypatch):
         main.store.upsert_site("Selected Gap", "https://selected-gap.example", "Church Client")
         main.store.upsert_site("Outside Gap", "https://outside-gap.example", "Other Client")
         yield client, main
+
+
+class ClientReportFormParser(HTMLParser):
+    """Read the actual rendered form, including decoded HTML attribute values."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.form = None
+        self.select = None
+        self.options = []
+        self.labels = []
+        self._in_select = False
+        self._option = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "form" and attrs.get("id") == "client-report-form":
+            self.form = attrs
+        if tag == "label":
+            self.labels.append(attrs.get("for"))
+        if tag == "select" and attrs.get("name") == "client":
+            self.select = attrs
+            self._in_select = True
+        if tag == "option" and self._in_select:
+            self._option = [attrs.get("value"), ""]
+
+    def handle_data(self, data):
+        if self._option is not None:
+            self._option[1] += data
+
+    def handle_endtag(self, tag):
+        if tag == "option" and self._option is not None:
+            self.options.append(tuple(self._option))
+            self._option = None
+        if tag == "select":
+            self._in_select = False
+
+
+def test_dashboard_offers_sorted_unique_report_accounts_including_registry_gaps(report_client):
+    client, _ = report_client
+    response = client.get("/")
+    assert response.status_code == 200
+    form = ClientReportFormParser()
+    form.feed(response.text)
+
+    assert form.form is not None
+    assert form.form["action"] == "/report"
+    assert form.form["method"] == "get"
+    assert form.select is not None
+    assert form.select["id"] in form.labels
+    assert form.options == [(label, label) for label in (
+        "Church Client", "Other Client", "Unassigned",
+    )]
+    assert 'href="/report"' in response.text  # Full-fleet export remains available.
+
+
+@pytest.mark.parametrize("account", [
+    'Church & Mission + Partners / East? #1 = "Care" <ops>',
+    "Église 東京",
+])
+def test_dashboard_report_form_preserves_special_labels_and_scopes_submission(report_client, account):
+    client, main = report_client
+    main.store.upsert_site("Form Only Gap", "https://form-gap.example", account)
+    form = ClientReportFormParser()
+    form.feed(client.get("/").text)
+
+    assert form.form is not None
+    assert form.select is not None
+    assert (account, account) in form.options
+    response = client.get(form.form["action"], params={form.select["name"]: account})
+    assert response.status_code == 200
+    assert "Form Only Gap" in response.text
+    assert "Monitoring gaps: 1" in response.text
+    assert "Selected Site" not in response.text
+    assert "Outside Site" not in response.text
+    assert "Unassigned Site" not in response.text
+
+
+def test_dashboard_hides_client_report_form_without_registered_sites(report_client):
+    client, main = report_client
+    for site in main.store.list_sites():
+        main.store.delete_site(site["url"])
+    response = client.get("/")
+    assert response.status_code == 200
+    form = ClientReportFormParser()
+    form.feed(response.text)
+
+    assert form.form is None
+    assert form.select is None
+    assert form.options == []
+    assert 'href="/report"' in response.text
 
 
 def report_text(response, path):
