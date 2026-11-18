@@ -646,6 +646,84 @@ def test_dashboard_fleet_table_preserves_fleet_findings_over_green_care(
     assert '<span class="tag green">green</span>' in care
 
 
+def test_dashboard_banner_does_not_claim_empty_inventory_is_current(tmp_path):
+    client = make_test_client(tmp_path)
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    nav = response.text.split('<nav class="nav">', 1)[1].split("</nav>", 1)[0]
+    assert '<span class="dot yellow"></span> No sites tracked' in nav
+    assert "Monitoring current" not in nav
+
+
+@pytest.mark.parametrize(
+    ("fleet_score", "care_score", "care_status", "status", "message"),
+    [
+        (100, 64, "green", "red", "1 site needs attention"),
+        (100, 65, "green", "yellow", "1 site needs maintenance"),
+        (100, 84, "green", "yellow", "1 site needs maintenance"),
+        (100, 85, "green", "green", "Monitoring current"),
+        (100, 100, "yellow", "yellow", "1 site needs maintenance"),
+        (100, 100, "red", "red", "1 site needs attention"),
+        (64, 100, "green", "red", "1 site needs attention"),
+        (80, 100, "green", "yellow", "1 site needs maintenance"),
+    ],
+)
+@pytest.mark.parametrize("with_monitoring_gap", [False, True])
+def test_dashboard_banner_honors_paired_risk_without_fleet_alerts(
+    tmp_path, fleet_score, care_score, care_status, status, message, with_monitoring_gap
+):
+    client = make_test_client(tmp_path)
+    assert client.post(
+        "/snapshot", data=valid_snapshot_payload(), follow_redirects=False,
+    ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update snapshots set score = ?, alerts_json = '[]'", (fleet_score,))
+        con.execute(
+            "update care_checks set score = ?, status = ?", (care_score, care_status),
+        )
+    import wp_fleet_ops.main as main
+
+    if with_monitoring_gap:
+        main.store.upsert_site("Gap Site", "https://banner-gap.example", "Client")
+        if status != "red":
+            status, message = "yellow", "1 missing snapshot"
+    original_care = main.store.latest_care_checks()
+    original_fleet = main.store.latest_dashboard()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    nav = response.text.split('<nav class="nav">', 1)[1].split("</nav>", 1)[0]
+    assert f'<span class="dot {status}"></span> {message}' in nav
+    if status != "green":
+        assert "Monitoring current" not in nav
+    assert main.store.latest_care_checks() == original_care
+    assert main.store.latest_dashboard() == original_fleet
+
+
+@pytest.mark.parametrize(("care_status", "message"), [
+    ("red", "2 sites need attention"),
+    ("yellow", "2 sites need maintenance"),
+])
+def test_dashboard_banner_pluralizes_paired_site_risks(tmp_path, care_status, message):
+    client = make_test_client(tmp_path)
+    for url in ("https://banner-one.example", "https://banner-two.example"):
+        assert client.post(
+            "/snapshot", data=valid_snapshot_payload(url=url), follow_redirects=False,
+        ).status_code == 303
+    with sqlite3.connect(tmp_path / "test.sqlite3") as con:
+        con.execute("update care_checks set status = ?", (care_status,))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    nav = response.text.split('<nav class="nav">', 1)[1].split("</nav>", 1)[0]
+    assert message in nav
+    assert "Monitoring current" not in nav
+
+
 def test_dashboard_banner_warns_when_paired_care_evidence_is_stale(tmp_path):
     client = make_test_client(tmp_path)
     client.post(
