@@ -7214,12 +7214,24 @@ def _combined_report_status(
     return "green"
 
 
-def _build_text_report() -> tuple[str, str, int, int, int, int]:
-    """Build a report only from sites with current paired monitoring evidence."""
+def _build_text_report(client: str | None = None) -> tuple[str, str, int, int, int, int]:
+    """Build a fleet or client report from current paired monitoring evidence."""
+    normalized_client = _normalize_client_filter(client)
     now = datetime.now(timezone.utc)
-    tracked_sites = store.list_sites()
-    latest_snapshots = store.latest_dashboard()
-    latest_care_checks = store.latest_care_checks()
+    tracked_sites = [
+        site
+        for site in store.list_sites()
+        if normalized_client is None
+        or (site.get("client") or "Unassigned") == normalized_client
+    ]
+    if normalized_client is not None and not tracked_sites:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No tracked sites found for client '{normalized_client}'.",
+        )
+    tracked_urls = {site["url"] for site in tracked_sites}
+    latest_snapshots = [row for row in store.latest_dashboard() if row["url"] in tracked_urls]
+    latest_care_checks = [row for row in store.latest_care_checks() if row["url"] in tracked_urls]
     snapshots_by_url = {row["url"]: row for row in latest_snapshots}
     care_checks_by_url = {row["url"]: row for row in latest_care_checks}
     current_urls: set[str] = set()
@@ -7353,8 +7365,8 @@ def _build_text_report() -> tuple[str, str, int, int, int, int]:
 
 
 @app.get("/api/report")
-def api_report():
-    """Return the combined care/fleet report with metadata for integrations."""
+def api_report(client: str | None = None):
+    """Return a fleet or client care/fleet report with integration metadata."""
     (
         report_text,
         report_status,
@@ -7362,9 +7374,10 @@ def api_report():
         site_count,
         tracked_site_count,
         monitoring_gap_count,
-    ) = _build_text_report()
+    ) = _build_text_report(client)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "client": _normalize_client_filter(client),
         "status": report_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,
         "tracked_site_count": tracked_site_count,
@@ -7378,8 +7391,8 @@ def api_report():
 
 
 @app.get("/report", response_class=PlainTextResponse)
-def report():
-    report_text, _, _, _, _, _ = _build_text_report()
+def report(client: str | None = None):
+    report_text, _, _, _, _, _ = _build_text_report(client)
     return report_text
 
 
