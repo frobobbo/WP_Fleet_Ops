@@ -7334,6 +7334,10 @@ def _build_text_report(client: str | None = None) -> tuple[str, str, int, int, i
             tracked_site_count=len(tracked_sites),
         )
     )
+    if normalized_client is not None:
+        # Keep the account identity when the Markdown is copied without its URL
+        # or JSON metadata, including reports with no current observations.
+        report_text = f"Client: {markdown_literal(normalized_client)}\n\n" + report_text
     if evidence_gaps:
         evidence_gaps.sort(key=lambda row: (row["client"].lower(), row["name"].lower(), row["url"]))
         gap_lines = [

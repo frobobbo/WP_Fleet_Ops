@@ -41,6 +41,47 @@ def report_text(response, path):
 
 
 @pytest.mark.parametrize("path", ["/report", "/api/report"])
+@pytest.mark.parametrize("account, label", [
+    ("  Church Client  ", "Church Client"),
+    ("  uNaSsIgNeD  ", "Unassigned"),
+])
+def test_scoped_report_identifies_client_in_exported_text(report_client, path, account, label):
+    client, _ = report_client
+    response = client.get(path, params={"client": account})
+
+    assert response.status_code == 200
+    text = report_text(response, path)
+    assert text.startswith(f"Client: {label}\n\n# Monthly WordPress Care Report\n")
+    if path == "/api/report":
+        assert response.json()["client"] == label
+        assert response.json()["line_count"] == len(text.splitlines())
+
+
+@pytest.mark.parametrize("path", ["/report", "/api/report"])
+def test_scoped_report_escapes_client_label_without_current_observations(report_client, path):
+    client, main = report_client
+    account = "[Church](https://client.example) &copy; <ops> **team**"
+    escaped = r"\[Church\]\(https://client\.example\) \&copy; \<ops\> \*\*team\*\*"
+    main.store.upsert_site("Label Test", "https://label.example", account)
+    response = client.get(path, params={"client": account})
+
+    assert response.status_code == 200
+    text = report_text(response, path)
+    assert text.startswith(f"Client: {escaped}\n\n# Monthly WordPress Care Report\n")
+    assert "Sites reviewed: 0" in text
+    assert "Monitoring gaps: 1" in text
+    assert "Health unverified" in text
+    assert account not in text
+    assert "Selected Site" not in text
+    assert "Outside Site" not in text
+    if path == "/api/report":
+        payload = response.json()
+        assert payload["client"] == account
+        assert payload["status"] == "yellow"
+        assert payload["line_count"] == len(text.splitlines())
+
+
+@pytest.mark.parametrize("path", ["/report", "/api/report"])
 def test_reports_scope_observations_gaps_and_status_to_client(report_client, path):
     client, _ = report_client
     response = client.get(path, params={"client": "  Church Client  "})
@@ -91,6 +132,7 @@ def test_reports_without_client_keep_complete_fleet_export(report_client, path):
 
     assert response.status_code == 200
     text = report_text(response, path)
+    assert text.startswith("# Monthly WordPress Care Report\n")
     for name in ("Selected Site", "Selected Gap", "Outside Site", "Outside Gap", "Unassigned Site"):
         assert name in text
     if path == "/api/report":
