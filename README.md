@@ -66,6 +66,16 @@ Environment variables:
 - `WP_FLEET_OPS_REVISION`: deployed Git revision reported by `/health` and `/ready`; defaults to `unknown`.
 - `PORT`: used by the console script runner.
 
+### Dashboard monitoring evidence
+
+The **Monitoring evidence** summary shows how many registered sites have both a
+current fleet snapshot and a current care check, plus independent source counts.
+It includes sites with no observations yet; missing, stale, invalid-timestamp,
+and future-dated sources remain gaps. Empty inventories show 0% coverage and an
+onboarding step, not complete monitoring. Coverage measures evidence completeness,
+not site health: even 100% coverage can accompany critical findings. Gap states
+link to the existing observation forms without starting network checks or writes.
+
 ### Client report exports
 
 Use the dashboard's **Client report** selector to open an account-scoped Markdown

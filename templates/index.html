@@ -140,6 +140,28 @@
       <div class="metric"><label>Current client risks</label><strong class="{{ 'red' if fleet_summary.client_risks else 'green' }}">{{ fleet_summary.client_risks }}</strong><small>current red care statuses</small></div>
     </section>
 
+    <section class="card" id="monitoring-evidence" aria-label="Monitoring evidence" style="margin-bottom:22px">
+      <div class="card-head">
+        <div>
+          <h3>Monitoring evidence</h3>
+          <p>{{ fleet_summary.current_evidence_count }} of {{ site_count }} sites have current paired evidence.</p>
+          <p>Both a fleet snapshot and a care check must be current within {{ fleet_summary.snapshot_freshness_threshold_hours }} hours.</p>
+        </div>
+        <strong class="{{ 'green' if site_count and not fleet_summary.monitoring_gap_count else 'yellow' }}">{{ fleet_summary.paired_coverage_percent }}%</strong>
+      </div>
+      <p>Current fleet snapshots: {{ fleet_summary.current_snapshot_count }} of {{ site_count }} · Current care checks: {{ fleet_summary.current_care_check_count }} of {{ site_count }}</p>
+      {% if not site_count %}
+      <p class="yellow">No sites tracked. Add the first combined observation to begin monitoring.</p>
+      {% elif fleet_summary.monitoring_gap_count %}
+      <p class="yellow">{{ fleet_summary.monitoring_gap_count }} {{ 'site needs' if fleet_summary.monitoring_gap_count == 1 else 'sites need' }} monitoring evidence before {{ 'its' if fleet_summary.monitoring_gap_count == 1 else 'their' }} health can be verified.</p>
+      {% else %}
+      <p>Monitoring is complete; site health is reported separately.</p>
+      {% endif %}
+      {% if not site_count or fleet_summary.monitoring_gap_count %}
+      <div class="hero-actions"><a class="btn" href="#snapshot">Capture fleet snapshot</a><a class="btn" href="#care-form">Capture care check</a></div>
+      {% endif %}
+    </section>
+
     <section class="grid">
       <div class="card" id="care-form">
         <div class="card-head"><div><h3>Care check</h3><p>Capture client-report numbers manually or run a live HTTP, TLS, and security-header check.</p></div><span class="tag">CarePulse</span></div>
