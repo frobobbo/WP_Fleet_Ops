@@ -224,3 +224,50 @@ def test_dashboard_omits_gap_list_when_paired_evidence_is_complete(coverage_clie
         main.store.delete_site(site["url"])
     section, _ = evidence_section(client)
     assert 'id="monitoring-gaps"' not in section
+
+
+@pytest.mark.parametrize("table, timestamp, label", [
+    ("snapshots", "captured_at", "Recorded fleet timestamp"),
+    ("care_checks", "checked_at", "Recorded care timestamp"),
+])
+@pytest.mark.parametrize("value", [
+    "2000-01-01 00:00:00", "invalid timestamp", "9999-01-01T00:00:00+02:00",
+    '<script>gap_timestamp()</script>', None, "",
+])
+def test_dashboard_gap_timestamps_preserve_recorded_values_without_trusting_them(
+    coverage_client, table, timestamp, label, value,
+):
+    client, main = coverage_client
+    with closing(main.store._connect()) as connection, connection:
+        if value is None:
+            connection.execute(f"delete from {table} where site_id = 1")
+        else:
+            connection.execute(f"update {table} set {timestamp} = ? where site_id = 1", (value,))
+    text = dashboard_gap_rows(client)["https://first.example"]
+    assert f"{label}: {value or 'Unavailable'}" in text
+    # The current paired source is still visible beside the source with a gap.
+    if table == "snapshots":
+        other_label = "Recorded care timestamp"
+        other_rows = main.store.latest_care_checks()
+        other_timestamp = "checked_at"
+    else:
+        other_label = "Recorded fleet timestamp"
+        other_rows = main.store.latest_dashboard()
+        other_timestamp = "captured_at"
+    other_value = next(row[other_timestamp] for row in other_rows if row["url"] == "https://first.example")
+    assert f"{other_label}: {other_value}" in text
+    section, _ = evidence_section(client)
+    assert "1 of 2 sites have current paired evidence." in section
+    assert "<script>gap_timestamp()" not in section
+    if value and value.startswith("<script>"):
+        assert "&lt;script&gt;gap_timestamp()&lt;/script&gt;" in section
+
+
+def test_dashboard_gap_timestamps_do_not_invent_observations(coverage_client):
+    client, main = coverage_client
+    main.store.upsert_site("New site", "https://third.example", "Care Client")
+    text = dashboard_gap_rows(client)["https://third.example"]
+    assert "Recorded fleet timestamp: Unavailable" in text
+    assert "Recorded care timestamp: Unavailable" in text
+    assert "Fleet snapshot: missing" in text
+    assert "Care check: missing" in text

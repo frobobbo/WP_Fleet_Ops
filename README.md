@@ -80,6 +80,10 @@ client, including registry-only sites, see both sources' freshness, and follow
 the minimum recommended evidence-restoration step. The read-only list reuses
 the dashboard's existing inventory reads and clock, omits fully current sites,
 and escapes site/client labels and URLs.
+Each gap also shows both recorded source timestamps as stored, including timezone
+offsets and invalid values for investigation. Missing or blank timestamps display
+**Unavailable**. These escaped historical values do not change freshness decisions
+or turn invalid or future-dated observations into current evidence.
 
 ### Client report exports
 

@@ -7015,6 +7015,8 @@ def index(request: Request):
     sites = store.list_sites()
     # Reuse the dashboard's existing reads and observation clock so this list
     # agrees with the summary, including sites with no observations yet.
+    snapshot_timestamps_by_url = {row["url"]: row.get("captured_at") for row in fleet_rows}
+    care_timestamps_by_url = {check["url"]: check.get("checked_at") for check in care_checks}
     monitoring_gaps = []
     for site in sites:
         snapshot_freshness = snapshot_freshness_by_url.get(site["url"], "missing")
@@ -7027,6 +7029,8 @@ def index(request: Request):
             "client": site.get("client") or "Unassigned",
             "snapshot_freshness": snapshot_freshness,
             "care_check_freshness": care_check_freshness,
+            "latest_snapshot_at": snapshot_timestamps_by_url.get(site["url"]),
+            "latest_care_check_at": care_timestamps_by_url.get(site["url"]),
             "recommended_action": _monitoring_coverage_action(snapshot_freshness, care_check_freshness),
         })
     monitoring_gaps.sort(key=lambda site: (site["client"].casefold(), site["name"].casefold(), site["url"]))

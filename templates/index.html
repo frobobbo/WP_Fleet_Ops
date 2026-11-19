@@ -167,6 +167,8 @@
             <strong>{{ site.name }}</strong> · {{ site.client }}
             <p class="mono">{{ site.url }}</p>
             <p>Fleet snapshot: {{ site.snapshot_freshness|replace('_', ' ') }} · Care check: {{ site.care_check_freshness|replace('_', ' ') }}</p>
+            <p>Recorded fleet timestamp: <span class="mono">{{ site.latest_snapshot_at or 'Unavailable' }}</span></p>
+            <p>Recorded care timestamp: <span class="mono">{{ site.latest_care_check_at or 'Unavailable' }}</span></p>
             <p>{{ site.recommended_action }}</p>
           </li>
           {% endfor %}
