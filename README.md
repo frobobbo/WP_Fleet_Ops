@@ -77,6 +77,15 @@ The existing **Open combined Markdown report** link still exports the full fleet
 The selector is hidden until at least one site is registered. Account scoping is
 an export convenience, not an authentication or tenant-authorization boundary.
 
+Use **Download client Markdown report** to save the selected account's report as
+`wp-fleetops-client-report.md`, or **Download combined Markdown report** to save
+the full fleet as `wp-fleetops-report.md`. Integrations can request the same
+downloads with `/report?download=true` and an optional `client` filter. Downloads
+use UTF-8 Markdown and fixed filenames; account labels remain in the escaped
+report body, never in response headers. They preserve the inline report's account
+validation, paired-evidence freshness checks, and monitoring gaps. Omitting
+`download` (or setting it to `false`) keeps the existing inline plain-text view.
+
 ### History API pagination
 
 `/api/snapshot-history`, `/api/care-check-history`, and `/api/site-snapshot-history`

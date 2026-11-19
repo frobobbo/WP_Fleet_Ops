@@ -46,6 +46,8 @@ class ClientReportFormParser(HTMLParser):
         self.select = None
         self.options = []
         self.labels = []
+        self.buttons = []
+        self._in_form = False
         self._in_select = False
         self._option = None
 
@@ -53,6 +55,9 @@ class ClientReportFormParser(HTMLParser):
         attrs = dict(attrs)
         if tag == "form" and attrs.get("id") == "client-report-form":
             self.form = attrs
+            self._in_form = True
+        if tag == "button" and self._in_form:
+            self.buttons.append(attrs)
         if tag == "label":
             self.labels.append(attrs.get("for"))
         if tag == "select" and attrs.get("name") == "client":
@@ -66,6 +71,8 @@ class ClientReportFormParser(HTMLParser):
             self._option[1] += data
 
     def handle_endtag(self, tag):
+        if tag == "form":
+            self._in_form = False
         if tag == "option" and self._option is not None:
             self.options.append(tuple(self._option))
             self._option = None
@@ -126,6 +133,89 @@ def test_dashboard_hides_client_report_form_without_registered_sites(report_clie
     assert form.select is None
     assert form.options == []
     assert 'href="/report"' in response.text
+
+
+def test_dashboard_offers_scoped_and_full_fleet_downloads(report_client):
+    client, _ = report_client
+    response = client.get("/")
+    form = ClientReportFormParser()
+    form.feed(response.text)
+
+    assert {"type": "submit", "name": "download", "value": "true"} in form.buttons
+    assert 'href="/report?download=true"' in response.text
+    assert form.form is not None
+    download = client.get(form.form["action"], params={"client": "Church Client", "download": "true"})
+    assert download.status_code == 200
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert "Selected Site" in download.text
+    assert "Outside Site" not in download.text
+
+
+@pytest.mark.parametrize("account, filename, included, excluded", [
+    (None, "wp-fleetops-report.md", "Outside Site", None),
+    ("  Church Client  ", "wp-fleetops-client-report.md", "Selected Site", "Outside Site"),
+    ("  uNaSsIgNeD  ", "wp-fleetops-client-report.md", "Unassigned Site", "Selected Site"),
+    ('Église & "Mission" / 東京', "wp-fleetops-client-report.md", "Download Gap", "Outside Site"),
+])
+def test_markdown_download_preserves_report_content_and_scope(
+    report_client, account, filename, included, excluded,
+):
+    client, main = report_client
+    main.store.upsert_site("Download Gap", "https://download-gap.example", 'Église & "Mission" / 東京')
+    params = {"client": account} if account is not None else {}
+    inline = client.get("/report", params=params)
+    download = client.get("/report", params={**params, "download": "true"})
+
+    assert inline.status_code == download.status_code == 200
+    assert inline.headers["content-type"] == "text/plain; charset=utf-8"
+    assert "content-disposition" not in inline.headers
+    assert download.headers["content-type"] == "text/markdown; charset=utf-8"
+    assert download.headers["content-disposition"] == f'attachment; filename="{filename}"'
+    assert download.headers["cache-control"] == "no-store"
+    assert download.headers["x-content-type-options"] == "nosniff"
+    # Each request generates a new timestamp; all actual report evidence matches.
+    assert [line for line in download.text.splitlines() if not line.startswith("Generated:")] == [
+        line for line in inline.text.splitlines() if not line.startswith("Generated:")
+    ]
+    assert included in download.text
+    if excluded is not None:
+        assert excluded not in download.text
+
+
+def test_false_download_keeps_inline_report(report_client):
+    client, _ = report_client
+    response = client.get("/report", params={"client": "Church Client", "download": "false"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert "content-disposition" not in response.headers
+
+
+@pytest.mark.parametrize("account, status", [("Missing Client", 404), ("", 422), ("Bad\nClient", 422)])
+def test_invalid_download_account_is_not_returned_as_attachment(report_client, account, status):
+    client, _ = report_client
+    response = client.get("/report", params={"client": account, "download": "true"})
+    assert response.status_code == status
+    assert "content-disposition" not in response.headers
+    assert set(response.json()) == {"detail"}
+
+
+@pytest.mark.parametrize("table, timestamp", [("care_checks", "checked_at"), ("snapshots", "captured_at")])
+def test_download_keeps_paired_freshness_gate(report_client, table, timestamp):
+    from contextlib import closing
+
+    client, main = report_client
+    with closing(main.store._connect()) as connection, connection:
+        connection.execute(
+            f"update {table} set {timestamp} = '2000-01-01 00:00:00' "
+            "where site_id = (select id from sites where url = ?)",
+            ("https://selected.example",),
+        )
+    response = client.get("/report", params={"client": "Church Client", "download": "true"})
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert "Sites reviewed: 0" in response.text
+    assert "Monitoring gaps: 2" in response.text
+    assert "Outside Site" not in response.text
 
 
 def report_text(response, path):

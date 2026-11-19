@@ -7400,8 +7400,18 @@ def api_report(client: str | None = None):
 
 
 @app.get("/report", response_class=PlainTextResponse)
-def report(client: str | None = None):
+def report(client: str | None = None, download: bool = False):
+    """View a report inline or download the same scoped evidence as Markdown."""
     report_text, _, _, _, _, _ = _build_text_report(client)
+    if download:
+        # Account labels belong in the escaped report body, never in a filename
+        # or response header (labels may contain Unicode, quotes, and slashes).
+        filename = "wp-fleetops-client-report.md" if client is not None else "wp-fleetops-report.md"
+        return PlainTextResponse(
+            report_text,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     return report_text
 
 

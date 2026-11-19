@@ -217,11 +217,14 @@
             {% endfor %}
           </select>
         </div>
-        <button type="submit">Open client Markdown report</button>
+        <div class="form-actions">
+          <button type="submit">Open client Markdown report</button>
+          <button type="submit" name="download" value="true">Download client Markdown report</button>
+        </div>
       </form>
     </section>
     {% endif %}
-    <div class="report-link"><a class="btn primary" href="/report">Open combined Markdown report</a></div>
+    <div class="report-link"><div class="form-actions"><a class="btn primary" href="/report">Open combined Markdown report</a><a class="btn" href="/report?download=true">Download combined Markdown report</a></div></div>
     <p class="footer-note mono" data-app-revision="{{ app_revision }}">WP FleetOps · Revision {{ app_revision }} · FastAPI · SQLite · Helm · GHCR · Harvester</p>
   </main>
 </body>
