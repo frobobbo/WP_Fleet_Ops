@@ -7013,6 +7013,23 @@ def index(request: Request):
             if check["evidence_status"] == "current" else "unknown"
         )
     sites = store.list_sites()
+    # Reuse the dashboard's existing reads and observation clock so this list
+    # agrees with the summary, including sites with no observations yet.
+    monitoring_gaps = []
+    for site in sites:
+        snapshot_freshness = snapshot_freshness_by_url.get(site["url"], "missing")
+        care_check_freshness = care_check_freshness_by_url.get(site["url"], "missing")
+        if snapshot_freshness == care_check_freshness == "current":
+            continue
+        monitoring_gaps.append({
+            "name": site["name"],
+            "url": site["url"],
+            "client": site.get("client") or "Unassigned",
+            "snapshot_freshness": snapshot_freshness,
+            "care_check_freshness": care_check_freshness,
+            "recommended_action": _monitoring_coverage_action(snapshot_freshness, care_check_freshness),
+        })
+    monitoring_gaps.sort(key=lambda site: (site["client"].casefold(), site["name"].casefold(), site["url"]))
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -7021,6 +7038,7 @@ def index(request: Request):
             "fleet_rows": fleet_rows,
             "care_checks": care_checks,
             "sites": sites,
+            "monitoring_gaps": monitoring_gaps,
             # Registry-only accounts still need reports explaining evidence gaps.
             "report_clients": sorted(
                 {site.get("client") or "Unassigned" for site in sites},

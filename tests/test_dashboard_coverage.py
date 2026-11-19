@@ -110,3 +110,117 @@ def test_empty_dashboard_reports_zero_coverage_and_onboarding_step(coverage_clie
     assert "No sites tracked. Add the first combined observation to begin monitoring." in text
     assert "Monitoring is complete" not in text
     assert 'href="#snapshot"' in section
+
+
+class GapParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.rows = {}
+        self.current_url = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "li":
+            self.current_url = dict(attrs).get("data-site-url")
+            if self.current_url is not None:
+                self.rows[self.current_url] = []
+
+    def handle_data(self, data):
+        if self.current_url is not None:
+            self.rows[self.current_url].append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "li":
+            self.current_url = None
+
+
+def dashboard_gap_rows(client):
+    section, _ = evidence_section(client)
+    parser = GapParser()
+    parser.feed(section)
+    return {
+        url: " ".join(" ".join(parts).split())
+        for url, parts in parser.rows.items()
+    }
+
+
+@pytest.mark.parametrize("table, timestamp, source", [
+    ("snapshots", "captured_at", "Fleet snapshot"),
+    ("care_checks", "checked_at", "Care check"),
+])
+@pytest.mark.parametrize("value, freshness", [
+    ("2000-01-01 00:00:00", "stale"), ("invalid timestamp", "invalid"),
+    ("9999-01-01 00:00:00", "clock_skew"), (None, "missing"),
+])
+def test_dashboard_lists_each_gap_and_its_minimum_repair(
+    coverage_client, table, timestamp, source, value, freshness,
+):
+    client, main = coverage_client
+    with closing(main.store._connect()) as connection, connection:
+        if value is None:
+            connection.execute(f"delete from {table} where site_id = 1")
+        else:
+            connection.execute(f"update {table} set {timestamp} = ? where site_id = 1", (value,))
+    rows = dashboard_gap_rows(client)
+    assert list(rows) == ["https://first.example"]
+    text = rows["https://first.example"]
+    assert "first" in text
+    assert "Care Client" in text
+    assert "https://first.example" in text
+    assert f"{source}: {freshness.replace('_', ' ')}" in text
+    other_source = "Care check" if table == "snapshots" else "Fleet snapshot"
+    assert f"{other_source}: current" in text
+    action = main._monitoring_coverage_action(
+        freshness if table == "snapshots" else "current",
+        freshness if table == "care_checks" else "current",
+    )
+    assert action in text
+    section, _ = evidence_section(client)
+    assert '<details id="monitoring-gaps">' in section
+    assert "Review 1 site with evidence gaps" in section
+
+
+def test_dashboard_gap_list_includes_registry_only_sites_and_escapes_labels(coverage_client):
+    client, main = coverage_client
+    main.store.upsert_site('<img src=x onerror=alert(1)>', 'https://third.example?a=1&b=2', '<script>bad()</script>')
+    main.store.upsert_site("Unassigned site", "https://fourth.example", "")
+    rows = dashboard_gap_rows(client)
+    assert set(rows) == {"https://third.example?a=1&b=2", "https://fourth.example"}
+    for text in rows.values():
+        assert "Fleet snapshot: missing" in text
+        assert "Care check: missing" in text
+        assert "Capture an initial combined care check and fleet snapshot." in text
+    assert "Unassigned" in rows["https://fourth.example"]
+    section, _ = evidence_section(client)
+    assert "Review 2 sites with evidence gaps" in section
+    assert "&lt;img src=x onerror=alert(1)&gt;" in section
+    assert "&lt;script&gt;bad()&lt;/script&gt;" in section
+    assert "<img" not in section
+    assert "<script" not in section
+
+
+def test_dashboard_gap_list_reuses_existing_inventory_reads(coverage_client, monkeypatch):
+    client, main = coverage_client
+    main.store.upsert_site("New site", "https://third.example", "Care Client")
+    calls = {"list_sites": 0, "latest_dashboard": 0, "latest_care_checks": 0}
+    for method in calls:
+        original = getattr(main.store, method)
+
+        def counted(*args, _method=method, _original=original, **kwargs):
+            calls[_method] += 1
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(main.store, method, counted)
+    rows = dashboard_gap_rows(client)
+    assert list(rows) == ["https://third.example"]
+    assert calls == {method: 1 for method in calls}
+
+
+def test_dashboard_omits_gap_list_when_paired_evidence_is_complete(coverage_client):
+    client, main = coverage_client
+    section, _ = evidence_section(client)
+    assert 'id="monitoring-gaps"' not in section
+    assert dashboard_gap_rows(client) == {}
+    for site in main.store.list_sites():
+        main.store.delete_site(site["url"])
+    section, _ = evidence_section(client)
+    assert 'id="monitoring-gaps"' not in section

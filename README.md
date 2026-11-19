@@ -75,6 +75,11 @@ and future-dated sources remain gaps. Empty inventories show 0% coverage and an
 onboarding step, not complete monitoring. Coverage measures evidence completeness,
 not site health: even 100% coverage can accompany critical findings. Gap states
 link to the existing observation forms without starting network checks or writes.
+Expand **Review sites with evidence gaps** to identify each affected site and
+client, including registry-only sites, see both sources' freshness, and follow
+the minimum recommended evidence-restoration step. The read-only list reuses
+the dashboard's existing inventory reads and clock, omits fully current sites,
+and escapes site/client labels and URLs.
 
 ### Client report exports
 
