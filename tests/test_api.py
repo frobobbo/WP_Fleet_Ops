@@ -1107,7 +1107,7 @@ def test_manual_check_records_unreachable_http_sentinel(tmp_path):
         for alert in snapshot["alerts"]
     )
     assert (
-        '<input name="http_status" type="number" min="0" max="599" value="200">'
+        '<input id="care-http-status" name="http_status" type="number" min="0" max="599" value="200">'
         in client.get("/").text
     )
 

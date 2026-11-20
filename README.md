@@ -66,6 +66,13 @@ Environment variables:
 - `WP_FLEET_OPS_REVISION`: deployed Git revision reported by `/health` and `/ready`; defaults to `unknown`.
 - `PORT`: used by the console script runner.
 
+### Dashboard observation forms
+
+Every care-check and fleet-snapshot field has a unique ID and a matching visible
+label, including the uptime checkbox. Care and snapshot IDs are separate so shared
+field names do not produce ambiguous targets. Field names, defaults, validation
+limits, and the manual/live submission actions are unchanged.
+
 ### Dashboard monitoring evidence
 
 The **Monitoring evidence** summary shows how many registered sites have both a
