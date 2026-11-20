@@ -75,6 +75,13 @@ limits, and the manual/live submission actions are unchanged.
 
 ### Dashboard monitoring evidence
 
+The average-score indicator follows the same paired-evidence status as the fleet
+summary: green **Healthy**, amber **Review needed**, or red **Needs attention**.
+The visible status text avoids relying on color alone. A high average cannot hide
+current critical findings. Empty inventories and monitoring gaps prevent a false
+green status, while current critical findings still take precedence over gaps.
+This presentation does not change saved scores, observations, or freshness decisions.
+
 The **Monitoring evidence** summary shows how many registered sites have both a
 current fleet snapshot and a current care check, plus independent source counts.
 It includes sites with no observations yet; missing, stale, invalid-timestamp,

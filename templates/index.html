@@ -58,9 +58,10 @@
     .hero p.lede{font-size:18px;line-height:1.65;color:var(--muted);max-width:740px;margin:0;position:relative}
     .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px;position:relative}
     .insight-panel{padding:26px;display:flex;flex-direction:column;gap:16px}
-    .status-orb{height:170px;border-radius:20px;background:radial-gradient(circle at 50% 45%,rgba(35,197,94,.36),transparent 42%),linear-gradient(135deg,rgba(35,197,94,.18),rgba(109,106,255,.12));border:1px solid var(--line);display:grid;place-items:center;position:relative;overflow:hidden}
+    .status-orb{--status-rgb:245,158,11;height:170px;border-radius:20px;background:radial-gradient(circle at 50% 45%,rgba(var(--status-rgb),.36),transparent 42%),linear-gradient(135deg,rgba(var(--status-rgb),.18),rgba(109,106,255,.12));border:1px solid var(--line);display:grid;place-items:center;position:relative;overflow:hidden}
+    .status-orb.green{--status-rgb:35,197,94}.status-orb.yellow{--status-rgb:245,158,11}.status-orb.red{--status-rgb:244,63,94}
     .status-orb:after{content:"";position:absolute;width:210px;height:210px;border-radius:50%;border:1px solid rgba(255,255,255,.08)}
-    .orb-inner{text-align:center;z-index:1}.orb-inner strong{font-size:46px;letter-spacing:-.06em}.orb-inner span{display:block;color:var(--muted);font-size:13px;margin-top:6px}
+    .orb-inner{text-align:center;z-index:1}.orb-inner strong{font-size:46px;letter-spacing:-.06em}.orb-inner span{display:block;color:var(--muted);font-size:13px;margin-top:6px}.orb-inner .orb-status{color:var(--soft);font-weight:650}
     .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:24px 0}
     .metric{padding:18px}.metric label{display:block;color:var(--muted);font-size:12px;margin-bottom:10px}.metric strong{font-size:30px;letter-spacing:-.05em}.metric small{display:block;color:var(--soft);margin-top:8px;font-size:12px}
     .green{color:var(--green)}.yellow{color:var(--amber)}.red{color:var(--red)}.blue{color:var(--blue)}
@@ -124,8 +125,8 @@
         </div>
       </div>
       <aside class="insight-panel hero-card">
-        <div class="status-orb">
-          <div class="orb-inner"><strong>{{ avg_score if avg_score is not none else '—' }}</strong><span>current average fleet score</span></div>
+        <div class="status-orb {{ fleet_summary.overall_status }}" data-fleet-status="{{ fleet_summary.overall_status }}">
+          <div class="orb-inner"><strong>{{ avg_score if avg_score is not none else '—' }}</strong><span>current average fleet score</span><span class="orb-status">Fleet status: {{ {'green': 'Healthy', 'yellow': 'Review needed', 'red': 'Needs attention'}[fleet_summary.overall_status] }}</span></div>
         </div>
         <div class="metrics" style="grid-template-columns:1fr 1fr;margin:0">
           <div class="metric"><label>Sites</label><strong>{{ site_count }}</strong><small>tracked properties</small></div>
