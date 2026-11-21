@@ -190,11 +190,11 @@
             <div class="field"><label for="care-url">URL</label><input id="care-url" name="url" maxlength="2048" placeholder="https://example.com" required></div>
             <div class="field"><label for="care-client">Client</label><input id="care-client" name="client" maxlength="200" placeholder="Client or brand"></div>
             <div class="field"><label for="care-http-status">HTTP status (0 = unreachable)</label><input id="care-http-status" name="http_status" type="number" min="0" max="599" value="200"></div>
-            <div class="field"><label for="care-latency">Latency ms</label><input id="care-latency" name="latency_ms" type="number" value="250"></div>
-            <div class="field"><label for="care-ssl-days">SSL days</label><input id="care-ssl-days" name="ssl_days_remaining" type="number" value="60"></div>
+            <div class="field"><label for="care-latency">Latency ms</label><input id="care-latency" name="latency_ms" type="number" min="0" max="{{ telemetry_integer_max }}" value="250"></div>
+            <div class="field"><label for="care-ssl-days">SSL days</label><input id="care-ssl-days" name="ssl_days_remaining" type="number" min="0" max="{{ telemetry_integer_max }}" value="60"></div>
             <div class="field"><label for="care-wordpress-version">WP version</label><input id="care-wordpress-version" name="wordpress_version" maxlength="100" value="6.6"></div>
-            <div class="field"><label for="care-updates">Updates</label><input id="care-updates" name="update_count" type="number" value="0"></div>
-            <div class="field"><label for="care-backup-age">Backup age hrs</label><input id="care-backup-age" name="backup_age_hours" type="number" value="24"></div>
+            <div class="field"><label for="care-updates">Updates</label><input id="care-updates" name="update_count" type="number" min="0" max="{{ telemetry_integer_max }}" value="0"></div>
+            <div class="field"><label for="care-backup-age">Backup age hrs</label><input id="care-backup-age" name="backup_age_hours" type="number" min="0" max="{{ telemetry_integer_max }}" value="24"></div>
           </div>
           <div class="form-actions">
             <button type="submit">Save manual check</button>
@@ -211,10 +211,10 @@
             <div class="field"><label for="snapshot-url">URL</label><input id="snapshot-url" name="url" maxlength="2048" type="url" placeholder="https://example.com" pattern="https?://.*" required></div>
             <div class="field"><label for="snapshot-client">Client</label><input id="snapshot-client" name="client" maxlength="200" placeholder="Client"></div>
             <label class="check-field" for="snapshot-uptime"><input id="snapshot-uptime" name="uptime_ok" type="checkbox" checked value="true"> Site is up</label>
-            <div class="field"><label for="snapshot-ssl-days">SSL days</label><input id="snapshot-ssl-days" name="ssl_days" type="number" min="0" value="60"></div>
-            <div class="field"><label for="snapshot-updates">WP updates</label><input id="snapshot-updates" name="wp_updates" type="number" min="0" value="0"></div>
-            <div class="field"><label for="snapshot-backup-age">Backup age hrs</label><input id="snapshot-backup-age" name="backup_age_hours" type="number" min="0" value="24"></div>
-            <div class="field"><label for="snapshot-response">Response ms</label><input id="snapshot-response" name="response_ms" type="number" min="0" value="250"></div>
+            <div class="field"><label for="snapshot-ssl-days">SSL days</label><input id="snapshot-ssl-days" name="ssl_days" type="number" min="0" max="{{ telemetry_integer_max }}" value="60"></div>
+            <div class="field"><label for="snapshot-updates">WP updates</label><input id="snapshot-updates" name="wp_updates" type="number" min="0" max="{{ telemetry_integer_max }}" value="0"></div>
+            <div class="field"><label for="snapshot-backup-age">Backup age hrs</label><input id="snapshot-backup-age" name="backup_age_hours" type="number" min="0" max="{{ telemetry_integer_max }}" value="24"></div>
+            <div class="field"><label for="snapshot-response">Response ms</label><input id="snapshot-response" name="response_ms" type="number" min="0" max="{{ telemetry_integer_max }}" value="250"></div>
             <div class="field"><label for="snapshot-security-headers">Security headers</label><input id="snapshot-security-headers" name="security_header_count" type="number" min="0" max="3" value="0"></div>
           </div>
           <button>Save snapshot</button>

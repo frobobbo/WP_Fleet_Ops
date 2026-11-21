@@ -73,6 +73,13 @@ label, including the uptime checkbox. Care and snapshot IDs are separate so shar
 field names do not produce ambiguous targets. Field names, defaults, validation
 limits, and the manual/live submission actions are unchanged.
 
+Numeric observation controls advertise the same nonnegative ranges as server
+validation. Latency, certificate lifetime, update counts, and backup age use the
+shared signed 64-bit SQLite maximum; HTTP status keeps its 0–599 bounds and
+security-header counts keep their 0–3 bounds. Defaults and submission actions
+are unchanged. Browser constraints are an input aid, not a replacement for exact
+server-side integer and domain validation (including rejecting HTTP values 1–99).
+
 ### Dashboard monitoring evidence
 
 The average-score indicator follows the same paired-evidence status as the fleet

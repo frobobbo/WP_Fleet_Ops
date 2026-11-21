@@ -117,3 +117,38 @@ def test_labeled_observation_forms_preserve_default_submission_contract(form_cli
     assert response.headers["location"] == "/"
     assert len(main.store.latest_dashboard()) == len(main.store.latest_care_checks()) == 1
     assert main.store.list_sites()[0]["name"] == "Accessible Site"
+
+
+@pytest.mark.parametrize("action", ["/care/manual-check", "/snapshot"])
+def test_dashboard_numeric_ranges_match_server_validation(form_client, action):
+    client, main = form_client
+    form = next(form for form in dashboard_forms(client).forms if form["attrs"]["action"] == action)
+    numeric_controls = [control for control in form["controls"] if control.get("type") == "number"]
+    assert len(numeric_controls) == 5
+    for control in numeric_controls:
+        maximum = {"http_status": 599, "security_header_count": 3}.get(
+            control["name"], main.SQLITE_INTEGER_MAX,
+        )
+        assert control.get("min") == "0", control["name"]
+        assert control.get("max") == str(maximum), control["name"]
+
+
+@pytest.mark.parametrize("action", ["/care/manual-check", "/snapshot"])
+@pytest.mark.parametrize("boundary", [0, (1 << 63) - 1])
+def test_dashboard_telemetry_boundaries_remain_accepted(form_client, action, boundary):
+    client, main = form_client
+    form = next(form for form in dashboard_forms(client).forms if form["attrs"]["action"] == action)
+    payload = {control["name"]: control.get("value", "") for control in form["controls"]}
+    fields = (
+        ("latency_ms", "ssl_days_remaining", "update_count", "backup_age_hours")
+        if action == "/care/manual-check" else
+        ("ssl_days", "wp_updates", "backup_age_hours", "response_ms")
+    )
+    payload.update(name="Boundary Site", url="https://boundary.example", client="Care Client")
+    payload.update(dict.fromkeys(fields, str(boundary)))
+    response = client.post(action, data=payload, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    saved = main.store.latest_care_checks()[0] if action == "/care/manual-check" else main.store.latest_dashboard()[0]
+    assert {field: saved[field] for field in fields} == dict.fromkeys(fields, boundary)
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}

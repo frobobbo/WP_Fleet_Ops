@@ -7039,6 +7039,7 @@ def index(request: Request):
         "index.html",
         {
             "app_revision": APP_REVISION,
+            "telemetry_integer_max": SQLITE_INTEGER_MAX,
             "fleet_rows": fleet_rows,
             "care_checks": care_checks,
             "sites": sites,
