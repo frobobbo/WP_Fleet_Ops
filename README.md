@@ -89,6 +89,11 @@ current critical findings. Empty inventories and monitoring gaps prevent a false
 green status, while current critical findings still take precedence over gaps.
 This presentation does not change saved scores, observations, or freshness decisions.
 
+Both observation tables include a **Recorded** column showing that row's exact
+stored timestamp, including timezone offsets and invalid values for investigation.
+Empty timestamps display **Unavailable**. These HTML-escaped values are visible for
+both current and historical evidence; they do not change scores or freshness.
+
 The **Monitoring evidence** summary shows how many registered sites have both a
 current fleet snapshot and a current care check, plus independent source counts.
 It includes sites with no observations yet; missing, stale, invalid-timestamp,
