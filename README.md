@@ -89,6 +89,11 @@ current critical findings. Empty inventories and monitoring gaps prevent a false
 green status, while current critical findings still take precedence over gaps.
 This presentation does not change saved scores, observations, or freshness decisions.
 
+Both observation tables show each site's URL beneath its name, so identically
+named sites can be distinguished without leaving the dashboard. URLs are escaped,
+read-only text (not external links), wrap within the site cell, and remain visible
+for historical evidence without changing stored observations or health decisions.
+
 Both observation tables include a **Recorded** column showing that row's exact
 stored timestamp, including timezone offsets and invalid values for investigation.
 Empty timestamps display **Unavailable**. These HTML-escaped values are visible for
