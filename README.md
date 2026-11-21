@@ -94,6 +94,12 @@ named sites can be distinguished without leaving the dashboard. URLs are escaped
 read-only text (not external links), wrap within the site cell, and remain visible
 for historical evidence without changing stored observations or health decisions.
 
+The care-check table includes a **Response** column showing its own recorded
+latency in milliseconds, separate from the fleet snapshot's response time.
+Zero and large accepted measurements display without rounding. Historical care
+measurements remain visible alongside their existing evidence labels; displaying
+them does not change stored observations, scores, or freshness decisions.
+
 Both observation tables include a **Recorded** column showing that row's exact
 stored timestamp, including timezone offsets and invalid values for investigation.
 Empty timestamps display **Unavailable**. These HTML-escaped values are visible for

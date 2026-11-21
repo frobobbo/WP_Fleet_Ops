@@ -130,6 +130,45 @@ def test_dashboard_tables_show_each_sources_exact_recorded_timestamp(
     assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
 
 
+@pytest.mark.parametrize("latency_ms", [0, 1732, (1 << 63) - 1])
+@pytest.mark.parametrize("historical_source", [None, "care", "snapshot"])
+def test_care_table_shows_its_recorded_response_time_without_changing_evidence(
+    timestamp_client, latency_ms, historical_source,
+):
+    client, main = timestamp_client
+    capture(client)
+    # Imported paired observations can disagree; do not display fleet latency
+    # as if it were the separately recorded care-check measurement.
+    with closing(main.store._connect()) as connection, connection:
+        connection.execute("update care_checks set latency_ms = ?", (latency_ms,))
+        if historical_source == "care":
+            connection.execute("update care_checks set checked_at = '2000-01-01 00:00:00'")
+        elif historical_source == "snapshot":
+            connection.execute("update snapshots set captured_at = '2000-01-01 00:00:00'")
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = ObservationTableParser()
+    parser.feed(response.text)
+    assert len(parser.tables) == 2
+    fleet, care = parser.tables
+    for table in (fleet, care):
+        assert table["headers"].count("Response") == 1
+        assert len(table["rows"]) == 1
+        assert len(table["rows"][0]) == len(table["headers"])
+    assert fleet["rows"][0][fleet["headers"].index("Response")] == "100ms"
+    assert care["rows"][0][care["headers"].index("Response")] == f"{latency_ms}ms"
+    evidence = care["rows"][0][care["headers"].index("Evidence")]
+    assert evidence == ("current" if historical_source is None else f"unknown · {historical_source} stale")
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+    after = client.get("/api/summary").json()
+    assert {key: value for key, value in after.items() if key != "generated_at"} == {
+        key: value for key, value in summary.items() if key != "generated_at"
+    }
+
+
 def test_dashboard_timestamp_columns_preserve_empty_table_states(timestamp_client):
     client, _ = timestamp_client
     response = client.get("/")
