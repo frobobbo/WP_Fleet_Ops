@@ -133,6 +133,40 @@ def test_dashboard_numeric_ranges_match_server_validation(form_client, action):
         assert control.get("max") == str(maximum), control["name"]
 
 
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check"])
+@pytest.mark.parametrize("version", [None, "", "  6.6.2  "])
+def test_care_form_does_not_invent_a_wordpress_version(form_client, monkeypatch, action, version):
+    client, main = form_client
+    form = next(form for form in dashboard_forms(client).forms
+                if form["attrs"]["action"] == "/care/manual-check")
+    fields = {control["name"]: control for control in form["controls"]}
+    assert fields["wordpress_version"].get("value", "") == "unknown"
+    payload = {name: field.get("value", "") for name, field in fields.items()}
+    payload.update(name="Version Evidence", url="https://version-evidence.example", client="Care Client")
+    if version is not None:
+        payload["wordpress_version"] = version
+    expected = "unknown" if version in (None, "") else "6.6.2"
+    fetched_versions = []
+
+    def fetch_check(name, url, *, wordpress_version, update_count, backup_age_hours):
+        # Exercise the form-to-fetch handoff without contacting an external site.
+        fetched_versions.append(wordpress_version)
+        return main.evaluate_site(
+            name, url, 200, 250, 60, wordpress_version, update_count, backup_age_hours, {},
+        )
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fetch_check)
+    response = client.post(action, data=payload, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert main.store.latest_care_checks()[0]["wordpress_version"] == expected
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+    if action == "/care/fetch-check":
+        assert fetched_versions == [payload["wordpress_version"] or "unknown"]
+    else:
+        assert fetched_versions == []
+
+
 @pytest.mark.parametrize("action", ["/care/manual-check", "/snapshot"])
 @pytest.mark.parametrize("boundary", [0, (1 << 63) - 1])
 def test_dashboard_telemetry_boundaries_remain_accepted(form_client, action, boundary):

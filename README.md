@@ -70,8 +70,11 @@ Environment variables:
 
 Every care-check and fleet-snapshot field has a unique ID and a matching visible
 label, including the uptime checkbox. Care and snapshot IDs are separate so shared
-field names do not produce ambiguous targets. Field names, defaults, validation
-limits, and the manual/live submission actions are unchanged.
+field names do not produce ambiguous targets. Field names, validation limits,
+and the manual/live submission actions are unchanged. The WordPress
+version defaults to `unknown`, matching the server, rather than recording a
+sample version as observed metadata. Manual and live checks retain an explicitly
+entered version; a live HTTP/TLS check does not automatically detect it.
 
 Numeric observation controls advertise the same nonnegative ranges as server
 validation. Latency, certificate lifetime, update counts, and backup age use the
