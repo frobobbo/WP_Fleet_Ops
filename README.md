@@ -92,6 +92,13 @@ current critical findings. Empty inventories and monitoring gaps prevent a false
 green status, while current critical findings still take precedence over gaps.
 This presentation does not change saved scores, observations, or freshness decisions.
 
+Headline metric descriptions also follow the paired findings rather than just
+numeric score thresholds: a high-scoring site with a warning is not counted as
+healthy, and critical alerts or care findings can count as risks even when the
+fleet score is high. **Current care risks** counts affected sites, not distinct
+client accounts, including corrected care scores and retained critical labels.
+Incomplete or historical paired evidence stays out of these current-health counts.
+
 Both observation tables show each site's URL beneath its name, so identically
 named sites can be distinguished without leaving the dashboard. URLs are escaped,
 read-only text (not external links), wrap within the site cell, and remain visible

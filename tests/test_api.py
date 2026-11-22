@@ -2176,7 +2176,8 @@ def test_score_between_65_and_69_is_consistently_warning_not_critical(tmp_path):
     assert client_row["needs_attention"] == 0
     assert watch["watch_status"] == "warning"
     assert scorecard["status"] == "warning"
-    assert "below 65 score" in page
+    assert "sites with current critical findings" in page
+    assert "below 65 score" not in page
 
 
 def test_api_summary_warns_when_tracked_sites_lack_snapshots(tmp_path):

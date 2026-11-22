@@ -131,7 +131,7 @@
         </div>
         <div class="metrics" style="grid-template-columns:1fr 1fr;margin:0">
           <div class="metric"><label>Sites</label><strong>{{ site_count }}</strong><small>tracked properties</small></div>
-          <div class="metric"><label>Current risks</label><strong class="{{ 'red' if fleet_summary.needs_attention else 'green' }}">{{ fleet_summary.needs_attention }}</strong><small>current sites below 65 score</small></div>
+          <div class="metric"><label>Current risks</label><strong class="{{ 'red' if fleet_summary.needs_attention else 'green' }}">{{ fleet_summary.needs_attention }}</strong><small>sites with current critical findings</small></div>
         </div>
       </aside>
     </section>
@@ -139,8 +139,8 @@
     <section class="metrics" aria-label="Fleet summary metrics">
       <div class="metric"><label>Fleet snapshots</label><strong>{{ fleet_count }}</strong><small>latest operational rows</small></div>
       <div class="metric"><label>Care checks</label><strong>{{ care_count }}</strong><small>client care entries</small></div>
-      <div class="metric"><label>Current healthy sites</label><strong class="green">{{ fleet_summary.healthy_sites }}</strong><small>current score 85 or higher</small></div>
-      <div class="metric"><label>Current client risks</label><strong class="{{ 'red' if fleet_summary.client_risks else 'green' }}">{{ fleet_summary.client_risks }}</strong><small>current red care statuses</small></div>
+      <div class="metric"><label>Current healthy sites</label><strong class="green">{{ fleet_summary.healthy_sites }}</strong><small>healthy paired care and fleet evidence</small></div>
+      <div class="metric"><label>Current care risks</label><strong class="{{ 'red' if fleet_summary.client_risks else 'green' }}">{{ fleet_summary.client_risks }}</strong><small>sites with current critical care findings</small></div>
     </section>
 
     <section class="card" id="monitoring-evidence" aria-label="Monitoring evidence" style="margin-bottom:22px">
