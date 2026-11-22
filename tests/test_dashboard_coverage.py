@@ -2,6 +2,7 @@
 import importlib
 import warnings
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
 import pytest
@@ -110,6 +111,80 @@ def test_empty_dashboard_reports_zero_coverage_and_onboarding_step(coverage_clie
     assert "No sites tracked. Add the first combined observation to begin monitoring." in text
     assert "Monitoring is complete" not in text
     assert 'href="#snapshot"' in section
+
+
+class EvaluationTimeParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.times = []
+        self._time = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "time" and attrs.get("id") == "dashboard-evaluated-at":
+            self._time = {"attrs": attrs, "text": ""}
+            self.times.append(self._time)
+
+    def handle_data(self, data):
+        if self._time is not None:
+            self._time["text"] += data
+
+    def handle_endtag(self, tag):
+        if tag == "time":
+            self._time = None
+
+
+@pytest.mark.parametrize("state", ["current", "gap", "empty"])
+def test_dashboard_shows_its_evaluation_clock_and_only_rechecks_freshness_on_refresh(
+    coverage_client, monkeypatch, state,
+):
+    client, main = coverage_client
+    evaluated_at = datetime(2026, 11, 22, 20, 15, 30, 123456, tzinfo=timezone.utc)
+    recorded_at = (evaluated_at - timedelta(hours=1)).isoformat()
+    if state == "empty":
+        for site in main.store.list_sites():
+            main.store.delete_site(site["url"])
+    else:
+        with closing(main.store._connect()) as connection, connection:
+            connection.execute("update snapshots set captured_at = ?", (recorded_at,))
+            connection.execute("update care_checks set checked_at = ?", (recorded_at,))
+            if state == "gap":
+                connection.execute("update care_checks set checked_at = '2000-01-01 00:00:00'")
+    before = (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks())
+
+    class DashboardClock(datetime):
+        instant = evaluated_at
+
+        @classmethod
+        def now(cls, tz=None):
+            assert tz is timezone.utc
+            return cls.instant
+
+    def unexpected_network_check(*args, **kwargs):
+        pytest.fail("Refreshing the dashboard must not run site checks.")
+
+    monkeypatch.setattr(main, "datetime", DashboardClock)
+    monkeypatch.setattr(main, "fetch_basic_site_check", unexpected_network_check)
+    for elapsed in (timedelta(), timedelta(hours=168)):
+        DashboardClock.instant = evaluated_at + elapsed
+        section, text = evidence_section(client)
+        parser = EvaluationTimeParser()
+        parser.feed(section)
+        assert len(parser.times) == 1
+        timestamp = DashboardClock.instant.isoformat()
+        assert parser.times[0]["attrs"]["datetime"] == timestamp
+        assert timestamp in parser.times[0]["text"]
+        assert "UTC" in parser.times[0]["text"]
+        assert "Dashboard evaluated at" in text
+        assert "Refresh this page to update freshness." in text
+        assert "Refreshing does not run site checks." in text
+        expected_current = 2 if state == "current" and not elapsed else 0
+        expected_sites = 0 if state == "empty" else 2
+        assert f"{expected_current} of {expected_sites} sites have current paired evidence." in text
+        summary = client.get("/api/summary").json()
+        assert summary["generated_at"] == timestamp
+        assert summary["current_evidence_count"] == expected_current
+        assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
 
 
 class GapParser(HTMLParser):

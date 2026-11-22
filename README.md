@@ -120,6 +120,12 @@ stored timestamp, including timezone offsets and invalid values for investigatio
 Empty timestamps display **Unavailable**. These HTML-escaped values are visible for
 both current and historical evidence; they do not change scores or freshness.
 
+The **Monitoring evidence** summary shows the dashboard's UTC evaluation time,
+using the same clock as its freshness and status decisions. The page is not
+live-updating: refresh it to reevaluate freshness; refreshing does not run site
+checks or change saved observations. This evaluation time is separate from each
+observation's recorded timestamp and appears even when no sites are registered.
+
 The **Monitoring evidence** summary shows how many registered sites have both a
 current fleet snapshot and a current care check, plus independent source counts.
 It includes sites with no observations yet; missing, stale, invalid-timestamp,

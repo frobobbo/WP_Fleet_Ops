@@ -147,6 +147,8 @@
       <div class="card-head">
         <div>
           <h3>Monitoring evidence</h3>
+          <p>Dashboard evaluated at <time id="dashboard-evaluated-at" class="mono" datetime="{{ fleet_summary.generated_at }}">{{ fleet_summary.generated_at }} (UTC)</time>.</p>
+          <p>Refresh this page to update freshness. Refreshing does not run site checks.</p>
           <p>{{ fleet_summary.current_evidence_count }} of {{ site_count }} sites have current paired evidence.</p>
           <p>Both a fleet snapshot and a care check must be current within {{ fleet_summary.snapshot_freshness_threshold_hours }} hours.</p>
         </div>
