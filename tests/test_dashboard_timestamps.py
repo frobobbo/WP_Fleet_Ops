@@ -1,4 +1,4 @@
-"""Dashboard rows expose their own recorded time without changing evidence."""
+"""Dashboard rows expose their own recorded values without changing evidence."""
 import importlib
 import warnings
 from contextlib import closing
@@ -162,6 +162,62 @@ def test_care_table_shows_its_recorded_response_time_without_changing_evidence(
     assert care["rows"][0][care["headers"].index("Response")] == f"{latency_ms}ms"
     evidence = care["rows"][0][care["headers"].index("Evidence")]
     assert evidence == ("current" if historical_source is None else f"unknown · {historical_source} stale")
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+    after = client.get("/api/summary").json()
+    assert {key: value for key, value in after.items() if key != "generated_at"} == {
+        key: value for key, value in summary.items() if key != "generated_at"
+    }
+
+
+@pytest.mark.parametrize("historical_source", [None, "care", "snapshot"])
+@pytest.mark.parametrize("version, expected", [
+    ("6.6.2", "6.6.2"),
+    ("  6.6.2  ", "6.6.2"),
+    ("", "unknown"),
+    ("6.6.2 & preview", "6.6.2 & preview"),
+    ('<script>alert("version")</script>', '<script>alert("version")</script>'),
+])
+def test_care_table_shows_recorded_wordpress_version_without_changing_evidence(
+    timestamp_client, version, expected, historical_source,
+):
+    client, main = timestamp_client
+    response = client.post("/care/manual-check", data={
+        "name": "Version Site", "url": "https://version.example",
+        "client": "Care Client", "http_status": 200, "latency_ms": 100,
+        "ssl_days_remaining": 90, "wordpress_version": version,
+        "update_count": 0, "backup_age_hours": 12,
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    with closing(main.store._connect()) as connection, connection:
+        if historical_source == "care":
+            connection.execute("update care_checks set checked_at = '2000-01-01 00:00:00'")
+        elif historical_source == "snapshot":
+            connection.execute("update snapshots set captured_at = '2000-01-01 00:00:00'")
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    assert before[1][0]["wordpress_version"] == expected
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = ObservationTableParser()
+    parser.feed(response.text)
+    assert len(parser.tables) == 2
+    fleet, care = parser.tables
+    assert "WP version" not in fleet["headers"]
+    assert care["headers"].count("WP version") == 1
+    assert len(care["rows"]) == 1
+    row = care["rows"][0]
+    assert len(row) == len(care["headers"])
+    assert row[care["headers"].index("WP version")] == expected
+    assert row[care["headers"].index("Evidence")] == (
+        "current" if historical_source is None else f"unknown · {historical_source} stale"
+    )
+    assert parser.script_count == 0
+    if "<script>" in expected:
+        assert expected not in response.text
+        assert "&lt;script&gt;" in response.text
+    if "&" in expected:
+        assert "6.6.2 &amp; preview" in response.text
     assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
     after = client.get("/api/summary").json()
     assert {key: value for key, value in after.items() if key != "generated_at"} == {

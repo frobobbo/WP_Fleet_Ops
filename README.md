@@ -100,6 +100,11 @@ Zero and large accepted measurements display without rounding. Historical care
 measurements remain visible alongside their existing evidence labels; displaying
 them does not change stored observations, scores, or freshness decisions.
 
+The care-check table also shows the **WP version** saved with that observation,
+including the `unknown` sentinel when no version was supplied. Version labels
+are HTML-escaped and remain visible for historical evidence; this is recorded
+operator metadata, not automatic version detection or a new health claim.
+
 Both observation tables include a **Recorded** column showing that row's exact
 stored timestamp, including timezone offsets and invalid values for investigation.
 Empty timestamps display **Unavailable**. These HTML-escaped values are visible for
