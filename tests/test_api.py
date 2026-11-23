@@ -584,7 +584,8 @@ def test_dashboard_tables_reconcile_current_care_score_and_status(
     fleet, care = response.text.split('<div class="table-card" id="care">', 1)
     fleet = fleet.split('<div class="table-card" id="fleet">', 1)[1]
     assert f'<span class="score {expected_status}"><span class="dot"></span>100</span>' in fleet
-    assert f'<span class="tag {expected_status}">{expected_status}</span>' in care
+    expected_label = {"green": "Healthy", "yellow": "Review needed", "red": "Needs attention"}[expected_status]
+    assert f'<span class="tag {expected_status}">{expected_label}</span>' in care
     assert f'<span class="score {expected_status}"><span class="dot"></span>{care_score}</span>' in care
     assert client.get("/api/care-check-history").json()["care_checks"] == original_care
     assert client.get("/api/snapshot-history").json()["snapshots"] == original_snapshots
@@ -611,7 +612,7 @@ def test_dashboard_tables_keep_incomplete_corrected_scores_historical(
     fleet, care = response.text.split('<div class="table-card" id="care">', 1)
     fleet = fleet.split('<div class="table-card" id="fleet">', 1)[1]
     assert '<span class="score red">' not in fleet + care
-    assert '<span class="tag red">red</span>' not in care
+    assert '<span class="tag red">Needs attention</span>' not in care
     if table != "care_checks" or timestamp is not None:
         assert '<span class="mono">observed green</span>' in care
         assert '<span class="mono">observed 40</span>' in care
@@ -643,7 +644,7 @@ def test_dashboard_fleet_table_preserves_fleet_findings_over_green_care(
     fleet, care = response.text.split('<div class="table-card" id="care">', 1)
     fleet = fleet.split('<div class="table-card" id="fleet">', 1)[1]
     assert f'<span class="score {expected_status}"><span class="dot"></span>{fleet_score}</span>' in fleet
-    assert '<span class="tag green">green</span>' in care
+    assert '<span class="tag green">Healthy</span>' in care
 
 
 def test_dashboard_banner_does_not_claim_empty_inventory_is_current(tmp_path):
@@ -763,7 +764,7 @@ def test_dashboard_rows_require_current_paired_evidence_for_health_claims(tmp_pa
     assert '<span class="tag yellow">unknown · care stale</span>' in response.text
     assert response.text.count('<span class="mono">observed 100</span>') == 2
     assert '<span class="score green"><span class="dot"></span>100</span>' not in response.text
-    assert '<span class="tag green">green</span>' not in response.text
+    assert '<span class="tag green">Healthy</span>' not in response.text
 
 
 def test_actions_order_equal_priority_same_named_sites_by_url(tmp_path, monkeypatch):

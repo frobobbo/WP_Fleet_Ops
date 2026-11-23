@@ -136,6 +136,59 @@ def test_current_critical_risk_outranks_another_sites_monitoring_gap(status_clie
     assert_indicator(client, "red", "Needs attention")
 
 
+@pytest.mark.parametrize("score,saved_status,status,label", [
+    (100, "green", "green", "Healthy"),
+    (75, "green", "yellow", "Review needed"),
+    (40, "green", "red", "Needs attention"),
+    (100, "yellow", "yellow", "Review needed"),
+    (100, "red", "red", "Needs attention"),
+])
+def test_care_table_describes_current_status_in_plain_language(
+    status_client, score, saved_status, status, label,
+):
+    client, main = status_client
+    capture(client)
+    with closing(main.store._connect()) as connection, connection:
+        connection.execute("update care_checks set score = ?, status = ?", (score, saved_status))
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    care_table = response.text.split('<div class="table-card" id="care">', 1)[1].split("</table>", 1)[0]
+    assert f'<span class="tag {status}">{label}</span>' in care_table
+    assert f'<span class="tag {status}">{status}</span>' not in care_table
+    assert f'<span class="score {status}"><span class="dot"></span>{score}</span>' in care_table
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
+@pytest.mark.parametrize("table,timestamp", [
+    ("snapshots", "captured_at"), ("care_checks", "checked_at"),
+])
+@pytest.mark.parametrize("value", [
+    "2000-01-01 00:00:00", "invalid timestamp", "9999-01-01 00:00:00", None,
+])
+def test_plain_language_status_does_not_turn_historical_care_into_current_health(
+    status_client, table, timestamp, value,
+):
+    client, main = status_client
+    capture(client)
+    with closing(main.store._connect()) as connection, connection:
+        connection.execute("update care_checks set score = 40, status = 'green'")
+        if value is None:
+            connection.execute(f"delete from {table}")
+        else:
+            connection.execute(f"update {table} set {timestamp} = ?", (value,))
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    care_table = response.text.split('<div class="table-card" id="care">', 1)[1]
+    for status, label in (("green", "Healthy"), ("yellow", "Review needed"), ("red", "Needs attention")):
+        assert f'<span class="tag {status}">{label}</span>' not in care_table
+    if table != "care_checks" or value is not None:
+        assert '<span class="mono">observed green</span>' in care_table
+        assert '<span class="mono">observed 40</span>' in care_table
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
 def test_score_indicator_background_uses_each_status_palette(status_client):
     client, _ = status_client
     html = client.get("/").text

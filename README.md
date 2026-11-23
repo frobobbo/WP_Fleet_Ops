@@ -91,6 +91,10 @@ The visible status text avoids relying on color alone. A high average cannot hid
 current critical findings. Empty inventories and monitoring gaps prevent a false
 green status, while current critical findings still take precedence over gaps.
 This presentation does not change saved scores, observations, or freshness decisions.
+The care-check table uses the same plain-language status labels for current
+care findings, including corrected low scores and retained warning/critical
+labels, rather than showing raw color names. Historical rows keep their neutral
+`observed` status labels and are not presented as current health.
 
 Headline metric descriptions also follow the paired findings rather than just
 numeric score thresholds: a high-scoring site with a warning is not counted as
