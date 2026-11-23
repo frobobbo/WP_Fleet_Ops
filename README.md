@@ -104,6 +104,12 @@ named sites can be distinguished without leaving the dashboard. URLs are escaped
 read-only text (not external links), wrap within the site cell, and remain visible
 for historical evidence without changing stored observations or health decisions.
 
+The fleet snapshot table includes **Recorded headers**, showing the saved
+security-header count as `0 of 3` through `3 of 3`. This neutral observation is
+not a security-coverage assessment: a count alone does not establish effective
+header protection, especially over plain HTTP. Historical counts remain visible
+with their evidence labels; scores, alerts, and freshness decisions are unchanged.
+
 The care-check table's **HTTP** column displays the recorded `0` sentinel as
 **No response (0)** rather than implying that zero is an HTTP response code.
 Actual HTTP codes remain numeric, including redirects and error responses. The

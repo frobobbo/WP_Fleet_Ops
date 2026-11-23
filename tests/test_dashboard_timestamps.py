@@ -271,6 +271,54 @@ def test_care_table_explains_no_response_without_reinterpreting_http_codes(
     }
 
 
+@pytest.mark.parametrize("header_count", [0, 1, 2, 3])
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("historical_source", [None, "care", "snapshot"])
+def test_fleet_table_shows_recorded_header_count_without_claiming_coverage(
+    timestamp_client, header_count, scheme, historical_source,
+):
+    client, main = timestamp_client
+    response = client.post("/snapshot", data={
+        "name": "Header Evidence", "url": f"{scheme}://headers.example",
+        "client": "Care Client", "uptime_ok": "true", "ssl_days": 90,
+        "wp_updates": 0, "backup_age_hours": 12,
+        "response_ms": 100, "security_header_count": header_count,
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    with closing(main.store._connect()) as connection, connection:
+        if historical_source == "care":
+            connection.execute("update care_checks set checked_at = '2000-01-01 00:00:00'")
+        elif historical_source == "snapshot":
+            connection.execute("update snapshots set captured_at = '2000-01-01 00:00:00'")
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    assert before[0][0]["security_header_count"] == header_count
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = ObservationTableParser()
+    parser.feed(response.text)
+    assert len(parser.tables) == 2
+    fleet, care = parser.tables
+    assert fleet["headers"].count("Recorded headers") == 1
+    assert "Recorded headers" not in care["headers"]
+    assert len(fleet["rows"]) == 1
+    row = fleet["rows"][0]
+    assert len(row) == len(fleet["headers"])
+    assert row[fleet["headers"].index("Recorded headers")] == f"{header_count} of 3"
+    assert row[fleet["headers"].index("Evidence")] == (
+        "current" if historical_source is None else f"unknown · {historical_source} stale"
+    )
+    # A count alone must not assert coverage, especially for HTTP or old data.
+    assert f'<td>{header_count} of 3</td>' in response.text
+    assert summary["current_evidence_count"] == (1 if historical_source is None else 0)
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+    after = client.get("/api/summary").json()
+    assert {key: value for key, value in after.items() if key != "generated_at"} == {
+        key: value for key, value in summary.items() if key != "generated_at"
+    }
+
+
 def test_dashboard_timestamp_columns_preserve_empty_table_states(timestamp_client):
     client, _ = timestamp_client
     response = client.get("/")
