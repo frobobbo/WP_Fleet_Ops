@@ -113,6 +113,51 @@ def test_empty_dashboard_reports_zero_coverage_and_onboarding_step(coverage_clie
     assert 'href="#snapshot"' in section
 
 
+@pytest.mark.parametrize("snapshot_time,snapshot_state", [
+    ("2000-01-01 00:00:00", "stale"),
+    ("invalid timestamp", "invalid"),
+    ("9999-01-01 00:00:00", "clock_skew"),
+    (None, "missing"),
+])
+@pytest.mark.parametrize("care_time,care_state", [
+    ("2000-01-01 00:00:00", "stale"),
+    ("invalid timestamp", "invalid"),
+    ("9999-01-01 00:00:00", "clock_skew"),
+    (None, "missing"),
+])
+def test_observation_tables_show_both_sources_when_both_have_evidence_gaps(
+    coverage_client, snapshot_time, snapshot_state, care_time, care_state,
+):
+    client, main = coverage_client
+    with closing(main.store._connect()) as connection, connection:
+        for table, column, value in (
+            ("snapshots", "captured_at", snapshot_time),
+            ("care_checks", "checked_at", care_time),
+        ):
+            if value is None:
+                connection.execute(f"delete from {table}")
+            else:
+                connection.execute(f"update {table} set {column} = ?", (value,))
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    summary = client.get("/api/summary").json()
+    response = client.get("/")
+    assert response.status_code == 200
+    for table_id, present in (("fleet", snapshot_time is not None), ("care", care_time is not None)):
+        table_html = response.text.split(f'<div class="table-card" id="{table_id}">', 1)[1]
+        table_html = table_html.split('<div class="table-card"', 1)[0].split("</section>", 1)[0]
+        if not present:
+            assert "<table>" not in table_html
+            continue
+        table_html = table_html.split("</table>", 1)[0]
+        for source, state in (("snapshot", snapshot_state), ("care", care_state)):
+            assert f'<span class="tag yellow">unknown · {source} {state}</span>' in table_html
+        assert '<span class="tag green">current</span>' not in table_html
+        assert '<span class="score ' not in table_html
+    assert summary["current_evidence_count"] == 0
+    assert summary["monitoring_gap_count"] == 2
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
 class EvaluationTimeParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)

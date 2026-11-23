@@ -158,6 +158,11 @@ Each gap also shows both recorded source timestamps as stored, including timezon
 offsets and invalid values for investigation. Missing or blank timestamps display
 **Unavailable**. These escaped historical values do not change freshness decisions
 or turn invalid or future-dated observations into current evidence.
+The observation tables list both source gaps in each row's **Evidence** cell
+when neither source is current, including missing, stale, invalid, and future-dated
+sources. Fixing one gap does not conceal the other. Single-gap and fully current
+labels are unchanged; this display does not modify saved data or health decisions.
+
 The fleet table also labels alerts from incomplete paired evidence as **observed**
 and uses neutral badges, including **observed clear** when no alerts were recorded.
 Their messages and recorded severity remain available for investigation, but do
