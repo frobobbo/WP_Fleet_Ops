@@ -225,6 +225,52 @@ def test_care_table_shows_recorded_wordpress_version_without_changing_evidence(
     }
 
 
+@pytest.mark.parametrize("historical_source", [None, "care", "snapshot"])
+@pytest.mark.parametrize("http_status", [0, 200, 204, 206, 301, 503])
+def test_care_table_explains_no_response_without_reinterpreting_http_codes(
+    timestamp_client, http_status, historical_source,
+):
+    client, main = timestamp_client
+    response = client.post("/care/manual-check", data={
+        "name": "HTTP Evidence", "url": "https://http-evidence.example",
+        "client": "Care Client", "http_status": http_status, "latency_ms": 100,
+        "ssl_days_remaining": 90, "wordpress_version": "unknown",
+        "update_count": 0, "backup_age_hours": 12,
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    with closing(main.store._connect()) as connection, connection:
+        if historical_source == "care":
+            connection.execute("update care_checks set checked_at = '2000-01-01 00:00:00'")
+        elif historical_source == "snapshot":
+            connection.execute("update snapshots set captured_at = '2000-01-01 00:00:00'")
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    assert before[1][0]["http_status"] == http_status
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = ObservationTableParser()
+    parser.feed(response.text)
+    assert len(parser.tables) == 2
+    care = parser.tables[1]
+    assert care["headers"].count("HTTP") == 1
+    assert len(care["rows"]) == 1
+    row = care["rows"][0]
+    assert len(row) == len(care["headers"])
+    assert row[care["headers"].index("HTTP")] == (
+        "No response (0)" if http_status == 0 else str(http_status)
+    )
+    assert row[care["headers"].index("Evidence")] == (
+        "current" if historical_source is None else f"unknown · {historical_source} stale"
+    )
+    assert summary["current_evidence_count"] == (1 if historical_source is None else 0)
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+    after = client.get("/api/summary").json()
+    assert {key: value for key, value in after.items() if key != "generated_at"} == {
+        key: value for key, value in summary.items() if key != "generated_at"
+    }
+
+
 def test_dashboard_timestamp_columns_preserve_empty_table_states(timestamp_client):
     client, _ = timestamp_client
     response = client.get("/")

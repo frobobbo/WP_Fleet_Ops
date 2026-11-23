@@ -104,6 +104,12 @@ named sites can be distinguished without leaving the dashboard. URLs are escaped
 read-only text (not external links), wrap within the site cell, and remain visible
 for historical evidence without changing stored observations or health decisions.
 
+The care-check table's **HTTP** column displays the recorded `0` sentinel as
+**No response (0)** rather than implying that zero is an HTTP response code.
+Actual HTTP codes remain numeric, including redirects and error responses. The
+label also applies to historical observations without changing their evidence
+status, saved values, or current-health decisions.
+
 The care-check table includes a **Response** column showing its own recorded
 latency in milliseconds, separate from the fleet snapshot's response time.
 Zero and large accepted measurements display without rounding. Historical care
