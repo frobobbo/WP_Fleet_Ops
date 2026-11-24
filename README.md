@@ -131,6 +131,12 @@ including the `unknown` sentinel when no version was supplied. Version labels
 are HTML-escaped and remain visible for historical evidence; this is recorded
 operator metadata, not automatic version detection or a new health claim.
 
+The care-check table's **Recorded summary** column identifies the narrative as
+saved evidence. When either paired source is missing, stale, invalid, or
+future-dated, an **observed summary** label keeps an old healthy narrative from
+looking like a current assessment. The escaped text remains available for
+investigation; stored summaries, scores, and freshness decisions are unchanged.
+
 The care-check table's **Recorded actions** column shows each observation's saved
 recommendations as an escaped list, so operators can review the next steps without
 exporting a report. Incomplete paired evidence labels these as **observed actions**
