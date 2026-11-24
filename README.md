@@ -85,6 +85,13 @@ server-side integer and domain validation (including rejecting HTTP values 1–9
 
 ### Dashboard monitoring evidence
 
+Populated observation tables are named, keyboard-focusable scroll regions: use
+Tab to focus either table and the left/right arrow keys to review columns on
+narrow screens. An inset focus outline stays visible inside the table card,
+and column headers explicitly identify their scope for assistive technology.
+Empty placeholders do not add tab stops. These presentation changes do not
+change saved observations or current-health decisions.
+
 The average-score indicator follows the same paired-evidence status as the fleet
 summary: green **Healthy**, amber **Review needed**, or red **Needs attention**.
 The visible status text avoids relying on color alone. A high average cannot hide
