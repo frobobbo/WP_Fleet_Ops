@@ -180,8 +180,10 @@ def generate_maintenance_report(
     captured_at_by_url: Mapping[str, str | None] | None = None,
     paired_care_status_by_url: Mapping[str, str] | None = None,
     tracked_site_count: int = 0,
+    generated_at: datetime | None = None,
 ) -> str:
-    lines = ["# WP FleetOps Maintenance Report", "", f"Generated: {datetime.now(timezone.utc).isoformat()}", ""]
+    generated_at = generated_at or datetime.now(timezone.utc)
+    lines = ["# WP FleetOps Maintenance Report", "", f"Generated: {generated_at.isoformat()}", ""]
     # Persisted fetches retain which header is missing. Recomputing alerts from
     # FleetSite's header count discards that evidence in exported reports.
     scored = [

@@ -7242,10 +7242,14 @@ def _combined_report_status(
     return "green"
 
 
-def _build_text_report(client: str | None = None) -> tuple[str, str, int, int, int, int]:
+def _build_text_report(
+    client: str | None = None,
+    *,
+    now: datetime | None = None,
+) -> tuple[str, str, int, int, int, int]:
     """Build a fleet or client report from current paired monitoring evidence."""
     normalized_client = _normalize_client_filter(client)
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     tracked_sites = [
         site
         for site in store.list_sites()
@@ -7360,6 +7364,7 @@ def _build_text_report(client: str | None = None) -> tuple[str, str, int, int, i
                 for check in care_checks
             },
             tracked_site_count=len(tracked_sites),
+            generated_at=now,
         )
     )
     if normalized_client is not None:
@@ -7399,6 +7404,9 @@ def _build_text_report(client: str | None = None) -> tuple[str, str, int, int, i
 @app.get("/api/report")
 def api_report(client: str | None = None):
     """Return a fleet or client care/fleet report with integration metadata."""
+    # Use one instant for freshness decisions, Markdown, and JSON metadata even
+    # if inventory reads or rendering cross an observation's expiry boundary.
+    now = datetime.now(timezone.utc)
     (
         report_text,
         report_status,
@@ -7406,9 +7414,9 @@ def api_report(client: str | None = None):
         site_count,
         tracked_site_count,
         monitoring_gap_count,
-    ) = _build_text_report(client)
+    ) = _build_text_report(client, now=now)
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "client": _normalize_client_filter(client),
         "status": report_status,
         "snapshot_freshness_threshold_hours": SNAPSHOT_FRESHNESS_HOURS,

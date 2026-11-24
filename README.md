@@ -171,6 +171,13 @@ retains normal severity colors; capturing fresh combined evidence restores them.
 
 ### Client report exports
 
+Each report uses one UTC evaluation time for paired-evidence freshness, its
+Markdown `Generated:` timestamp, and `/api/report`'s `generated_at` metadata.
+Slow inventory reads or rendering cannot label the same evidence with a later,
+inconsistent report time. This applies to full-fleet, client-scoped, inline, and
+downloaded reports, including empty inventories and monitoring gaps. Observation
+timestamps and the inclusive freshness boundary are unchanged.
+
 Use the dashboard's **Client report** selector to open an account-scoped Markdown
 report without editing a URL. The list is sorted and deduplicated from the site
 registry, includes **Unassigned**, and includes accounts with no observations yet
