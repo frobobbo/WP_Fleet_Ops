@@ -319,6 +319,69 @@ def test_fleet_table_shows_recorded_header_count_without_claiming_coverage(
     }
 
 
+@pytest.mark.parametrize("source,state", [
+    (None, "current"),
+    ("care", "stale"), ("snapshot", "stale"),
+    ("care", "invalid"), ("snapshot", "invalid"),
+    ("care", "clock_skew"), ("snapshot", "clock_skew"),
+    ("snapshot", "missing"),
+])
+@pytest.mark.parametrize("actions", [
+    ["Verify the latest backup.", "Schedule WordPress updates."],
+    ['<script>alert("action")</script>', "Review backup & hosting."],
+    [],
+])
+def test_care_table_exposes_saved_actions_without_turning_history_into_current_work(
+    timestamp_client, source, state, actions,
+):
+    import json
+    from markupsafe import escape
+
+    client, main = timestamp_client
+    capture(client)
+    with closing(main.store._connect()) as connection, connection:
+        connection.execute("update care_checks set actions_json = ?", (json.dumps(actions),))
+        if source is not None:
+            table, timestamp = (
+                ("care_checks", "checked_at") if source == "care" else
+                ("snapshots", "captured_at")
+            )
+            if state == "missing":
+                connection.execute(f"delete from {table}")
+            else:
+                value = {
+                    "stale": "2000-01-01 00:00:00",
+                    "invalid": "not-a-timestamp",
+                    "clock_skew": "9999-01-01 00:00:00",
+                }[state]
+                connection.execute(f"update {table} set {timestamp} = ?", (value,))
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = ObservationTableParser()
+    parser.feed(response.text)
+    care = parser.tables[-1]
+    assert care["headers"].count("Recorded actions") == 1
+    assert len(care["rows"]) == 1
+    row = care["rows"][0]
+    assert len(row) == len(care["headers"])
+    expected = "".join(actions) if actions else "No recorded actions."
+    if state != "current":
+        expected = "observed actions" + expected
+    assert row[care["headers"].index("Recorded actions")] == expected
+    for action in actions:
+        assert f"<li>{escape(action)}</li>" in response.text
+    assert parser.script_count == 0
+    assert ('<span class="tag">observed actions</span>' in response.text) == (state != "current")
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+    after = client.get("/api/summary").json()
+    assert {key: value for key, value in after.items() if key != "generated_at"} == {
+        key: value for key, value in summary.items() if key != "generated_at"
+    }
+
+
 def test_dashboard_timestamp_columns_preserve_empty_table_states(timestamp_client):
     client, _ = timestamp_client
     response = client.get("/")

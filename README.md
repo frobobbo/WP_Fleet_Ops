@@ -131,6 +131,13 @@ including the `unknown` sentinel when no version was supplied. Version labels
 are HTML-escaped and remain visible for historical evidence; this is recorded
 operator metadata, not automatic version detection or a new health claim.
 
+The care-check table's **Recorded actions** column shows each observation's saved
+recommendations as an escaped list, so operators can review the next steps without
+exporting a report. Incomplete paired evidence labels these as **observed actions**
+rather than current work. Empty lists say **No recorded actions**, not a healthy
+all-clear. This read-only display preserves saved actions, scores, and freshness
+decisions; it does not start checks or perform maintenance.
+
 Both observation tables include a **Recorded** column showing that row's exact
 stored timestamp, including timezone offsets and invalid values for investigation.
 Empty timestamps display **Unavailable**. These HTML-escaped values are visible for
