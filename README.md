@@ -76,6 +76,14 @@ version defaults to `unknown`, matching the server, rather than recording a
 sample version as observed metadata. Manual and live checks retain an explicitly
 entered version; a live HTTP/TLS check does not automatically detect it.
 
+Both client fields suggest existing accounts through a shared, sorted, deduplicated
+list from the site registry, including accounts without observations and
+**Unassigned**. Suggestions are optional: operators can still type a new account
+or leave the client blank. Labels are HTML-escaped, no third-party requests or
+scripts are needed, and browsers without suggestions retain ordinary text fields.
+The list is omitted for an empty registry; it does not change saved client names,
+form actions, validation, or health decisions.
+
 Numeric observation controls advertise the same nonnegative ranges as server
 validation. Latency, certificate lifetime, update counts, and backup age use the
 shared signed 64-bit SQLite maximum; HTTP status keeps its 0–599 bounds and

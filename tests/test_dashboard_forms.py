@@ -25,8 +25,10 @@ class DashboardFormParser(HTMLParser):
         self.ids = []
         self.forms = []
         self.labels = []
+        self.datalists = []
         self._form = None
         self._label = None
+        self._datalist = None
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -42,6 +44,11 @@ class DashboardFormParser(HTMLParser):
         elif tag == "label":
             self._label = {"for": attrs.get("for"), "text": ""}
             self.labels.append(self._label)
+        elif tag == "datalist":
+            self._datalist = {"attrs": attrs, "options": []}
+            self.datalists.append(self._datalist)
+        elif tag == "option" and self._datalist is not None:
+            self._datalist["options"].append(attrs.get("value"))
 
     def handle_data(self, data):
         if self._label is not None:
@@ -52,6 +59,8 @@ class DashboardFormParser(HTMLParser):
             self._form = None
         elif tag == "label":
             self._label = None
+        elif tag == "datalist":
+            self._datalist = None
 
 
 def dashboard_forms(client):
@@ -60,6 +69,63 @@ def dashboard_forms(client):
     parser = DashboardFormParser()
     parser.feed(response.text)
     return parser
+
+
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check", "/snapshot"])
+@pytest.mark.parametrize("account", ["Existing Client", 'New Église & "Care" <ops>', ""])
+def test_observation_forms_suggest_existing_accounts_without_restricting_submission(
+    form_client, monkeypatch, action, account,
+):
+    from markupsafe import escape
+
+    client, main = form_client
+    special_account = 'Église & "Mission" <ops>'
+    for index, label in enumerate(("Zulu Client", "Existing Client", "Existing Client", "", special_account)):
+        main.store.upsert_site(f"Registered {index}", f"https://registry-{index}.example", label)
+    before = (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = DashboardFormParser()
+    parser.feed(response.text)
+    assert len(parser.ids) == len(set(parser.ids))
+    assert len(parser.datalists) == 1, "Both forms should share one registry-backed suggestion list."
+    suggestions = parser.datalists[0]
+    expected = sorted({"Zulu Client", "Existing Client", "Unassigned", special_account}, key=str.casefold)
+    assert suggestions["options"] == expected, "Registry-only accounts must remain discoverable."
+    list_id = suggestions["attrs"]["id"]
+    controls = [control for form in parser.forms for control in form["controls"]
+                if control.get("id") in {"care-client", "snapshot-client"}]
+    assert len(controls) == 2
+    assert all(control.get("list") == list_id for control in controls)
+    assert all("required" not in control and "pattern" not in control for control in controls)
+    assert f'<option value="{escape(special_account)}">' in response.text
+    assert f'<option value="{special_account}">' not in response.text
+    assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+    form_action = "/care/manual-check" if action == "/care/fetch-check" else action
+    form = next(form for form in parser.forms if form["attrs"]["action"] == form_action)
+    payload = {control["name"]: control.get("value", "") for control in form["controls"]}
+    payload.update(name="Suggested Client Site", url="https://suggested-client.example", client=account)
+    monkeypatch.setattr(main, "fetch_basic_site_check", lambda name, url, **kwargs: main.evaluate_site(
+        name, url, 200, 250, 60, kwargs["wordpress_version"],
+        kwargs["update_count"], kwargs["backup_age_hours"], {},
+    ))
+    saved = client.post(action, data=payload, follow_redirects=False)
+    assert saved.status_code == 303
+    site = next(site for site in main.store.list_sites() if site["url"] == payload["url"])
+    assert site["client"] == account
+    assert len(main.store.latest_dashboard()) == len(main.store.latest_care_checks()) == 1
+
+
+def test_empty_registry_has_no_dangling_client_suggestions(form_client):
+    client, main = form_client
+    parser = dashboard_forms(client)
+    assert parser.datalists == []
+    controls = [control for form in parser.forms for control in form["controls"]
+                if control.get("id") in {"care-client", "snapshot-client"}]
+    assert len(controls) == 2
+    assert all("list" not in control for control in controls)
+    assert main.store.list_sites() == []
 
 
 @pytest.mark.parametrize("registered", [False, True])
