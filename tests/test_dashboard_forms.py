@@ -45,10 +45,11 @@ class DashboardFormParser(HTMLParser):
             self._label = {"for": attrs.get("for"), "text": ""}
             self.labels.append(self._label)
         elif tag == "datalist":
-            self._datalist = {"attrs": attrs, "options": []}
+            self._datalist = {"attrs": attrs, "options": [], "option_attributes": []}
             self.datalists.append(self._datalist)
         elif tag == "option" and self._datalist is not None:
             self._datalist["options"].append(attrs.get("value"))
+            self._datalist["option_attributes"].append(attrs)
 
     def handle_data(self, data):
         if self._label is not None:
@@ -88,8 +89,8 @@ def test_observation_forms_suggest_existing_accounts_without_restricting_submiss
     parser = DashboardFormParser()
     parser.feed(response.text)
     assert len(parser.ids) == len(set(parser.ids))
-    assert len(parser.datalists) == 1, "Both forms should share one registry-backed suggestion list."
-    suggestions = parser.datalists[0]
+    suggestions = next(item for item in parser.datalists
+                       if item["attrs"]["id"] == "existing-client-accounts")
     expected = sorted({"Zulu Client", "Existing Client", "Unassigned", special_account}, key=str.casefold)
     assert suggestions["options"] == expected, "Registry-only accounts must remain discoverable."
     list_id = suggestions["attrs"]["id"]
@@ -126,6 +127,74 @@ def test_empty_registry_has_no_dangling_client_suggestions(form_client):
     assert len(controls) == 2
     assert all("list" not in control for control in controls)
     assert main.store.list_sites() == []
+
+
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check", "/snapshot"])
+@pytest.mark.parametrize("registered_url", [False, True])
+def test_observation_forms_suggest_registered_sites_without_restricting_new_urls(
+    form_client, monkeypatch, action, registered_url,
+):
+    from markupsafe import escape
+
+    client, main = form_client
+    special_name = '<img src=x onerror=alert(1)> Église & "Care"'
+    special_client = 'Mission & "Partners" <ops>'
+    existing_url = "https://registered.example?care=1&mode=%22review%22"
+    main.store.upsert_site(special_name, existing_url, special_client)
+    main.store.upsert_site("Unassigned Site", "https://unassigned.example", "")
+    # A repeated canonical registry identity must not duplicate suggestions.
+    main.store.upsert_site(special_name, existing_url, special_client)
+    sites = main.store.list_sites()
+    before = (sites, main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = DashboardFormParser()
+    parser.feed(response.text)
+    assert len(parser.ids) == len(set(parser.ids))
+    lists = [item for item in parser.datalists if item["attrs"]["id"] == "existing-site-urls"]
+    assert len(lists) == 1, "Both forms should share one registry-backed URL list."
+    suggestions = lists[0]
+    assert suggestions["options"] == [site["url"] for site in sites]
+    assert len(suggestions["options"]) == len(set(suggestions["options"])) == 2
+    assert [item["label"] for item in suggestions["option_attributes"]] == [
+        f"{site['name']} · {site['client'] or 'Unassigned'}" for site in sites
+    ]
+    controls = [control for form in parser.forms for control in form["controls"]
+                if control.get("id") in {"care-url", "snapshot-url"}]
+    assert len(controls) == 2
+    assert all(control.get("list") == "existing-site-urls" for control in controls)
+    assert all("required" in control and control["maxlength"] == "2048" for control in controls)
+    assert f'value="{escape(existing_url)}"' in response.text
+    assert f'label="{escape(special_name)} · {escape(special_client)}"' in response.text
+    assert special_name not in response.text
+    assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+    form_action = "/care/manual-check" if action == "/care/fetch-check" else action
+    form = next(form for form in parser.forms if form["attrs"]["action"] == form_action)
+    payload = {control["name"]: control.get("value", "") for control in form["controls"]}
+    selected_url = existing_url if registered_url else "https://new-observation.example"
+    payload.update(name="Observed Site", url=selected_url, client="Care Client")
+    monkeypatch.setattr(main, "fetch_basic_site_check", lambda name, url, **kwargs: main.evaluate_site(
+        name, url, 200, 250, 60, kwargs["wordpress_version"],
+        kwargs["update_count"], kwargs["backup_age_hours"], {},
+    ))
+    saved = client.post(action, data=payload, follow_redirects=False)
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/"
+    assert main.store.latest_dashboard()[0]["url"] == selected_url
+    assert main.store.latest_care_checks()[0]["url"] == selected_url
+    assert len(main.store.list_sites()) == (2 if registered_url else 3)
+
+
+def test_empty_registry_has_no_dangling_site_suggestions(form_client):
+    client, main = form_client
+    parser = dashboard_forms(client)
+    assert not any(item["attrs"]["id"] == "existing-site-urls" for item in parser.datalists)
+    controls = [control for form in parser.forms for control in form["controls"]
+                if control.get("id") in {"care-url", "snapshot-url"}]
+    assert len(controls) == 2
+    assert all("list" not in control for control in controls)
+    assert main.store.health_counts() == {"sites": 0, "care_checks": 0, "fleet_snapshots": 0}
 
 
 @pytest.mark.parametrize("registered", [False, True])

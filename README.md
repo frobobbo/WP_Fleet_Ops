@@ -84,6 +84,13 @@ scripts are needed, and browsers without suggestions retain ordinary text fields
 The list is omitted for an empty registry; it does not change saved client names,
 form actions, validation, or health decisions.
 
+Both URL fields also suggest registered site URLs through one shared list,
+including sites without observations. Suggestions carry the site's name and
+client (or **Unassigned**) to help distinguish endpoints; URLs and labels are
+HTML-escaped. Operators can still enter a new URL, and browsers without datalist
+support retain ordinary inputs. The list is omitted for an empty registry and
+does not autofill or change site names, clients, validation, or saved evidence.
+
 Numeric observation controls advertise the same nonnegative ranges as server
 validation. Latency, certificate lifetime, update counts, and backup age use the
 shared signed 64-bit SQLite maximum; HTTP status keeps its 0–599 bounds and
