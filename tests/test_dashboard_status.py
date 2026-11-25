@@ -189,6 +189,67 @@ def test_plain_language_status_does_not_turn_historical_care_into_current_health
     assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
 
 
+@pytest.mark.parametrize("updates,care_score,care_status,status,label", [
+    (0, 100, "green", "green", "Healthy"),
+    (1, 100, "green", "yellow", "Review needed"),
+    (5, 100, "green", "red", "Needs attention"),
+    (0, 75, "green", "yellow", "Review needed"),
+    (0, 40, "green", "red", "Needs attention"),
+    (0, 100, "yellow", "yellow", "Review needed"),
+    (0, 100, "red", "red", "Needs attention"),
+])
+def test_fleet_score_has_readable_paired_status(
+    status_client, updates, care_score, care_status, status, label,
+):
+    client, main = status_client
+    capture(client, updates=updates)
+    with closing(main.store._connect()) as connection, connection:
+        connection.execute("update care_checks set score = ?, status = ?", (care_score, care_status))
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    # These cases deliberately retain a high fleet score; text, not just color,
+    # must make the paired finding understandable to the operator.
+    score = before[0][0]["score"]
+    assert score >= 85
+    response = client.get("/")
+    assert response.status_code == 200
+    fleet_table = response.text.split('<div class="table-card" id="fleet">', 1)[1].split("</table>", 1)[0]
+    assert f'<span class="score {status}"><span class="dot"></span>{score}</span>' in fleet_table
+    assert f'<span class="tag {status}">{label}</span>' in fleet_table
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
+@pytest.mark.parametrize("table,timestamp", [
+    ("snapshots", "captured_at"), ("care_checks", "checked_at"),
+])
+@pytest.mark.parametrize("value", [
+    "2000-01-01 00:00:00", "invalid timestamp", "9999-01-01 00:00:00", None,
+])
+def test_readable_fleet_status_does_not_escalate_historical_evidence(
+    status_client, table, timestamp, value,
+):
+    client, main = status_client
+    capture(client, updates=5)
+    with closing(main.store._connect()) as connection, connection:
+        if value is None:
+            connection.execute(f"delete from {table}")
+        else:
+            connection.execute(f"update {table} set {timestamp} = ?", (value,))
+    before = (main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    fleet_table = response.text.split('<div class="table-card" id="fleet">', 1)[1].split(
+        '<div class="table-card" id="care">', 1,
+    )[0]
+    for status, label in (("green", "Healthy"), ("yellow", "Review needed"), ("red", "Needs attention")):
+        assert f'<span class="tag {status}">{label}</span>' not in fleet_table
+    if table != "snapshots" or value is not None:
+        assert '<span class="mono">observed 85</span>' in fleet_table
+        assert "observed critical" in fleet_table
+    else:
+        assert "No fleet snapshots yet." in fleet_table
+    assert (main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
 def test_score_indicator_background_uses_each_status_palette(status_client):
     client, _ = status_client
     html = client.get("/").text

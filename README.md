@@ -101,7 +101,12 @@ This presentation does not change saved scores, observations, or freshness decis
 The care-check table uses the same plain-language status labels for current
 care findings, including corrected low scores and retained warning/critical
 labels, rather than showing raw color names. Historical rows keep their neutral
-`observed` status labels and are not presented as current health.
+`observed` status labels and are not presented as current health. The fleet
+snapshot table likewise pairs each current score with **Healthy**, **Review
+needed**, or **Needs attention**, using the worst paired care finding, fleet
+alert, or fleet score. A high score with a critical finding is therefore readable
+without interpreting color. Historical fleet rows retain their neutral observed
+scores instead of acquiring a current status label.
 
 Headline metric descriptions also follow the paired findings rather than just
 numeric score thresholds: a high-scoring site with a warning is not counted as
