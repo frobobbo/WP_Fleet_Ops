@@ -197,6 +197,67 @@ def test_empty_registry_has_no_dangling_site_suggestions(form_client):
     assert main.store.health_counts() == {"sites": 0, "care_checks": 0, "fleet_snapshots": 0}
 
 
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check", "/snapshot"])
+@pytest.mark.parametrize("entered_url, expected_url", [
+    ("forms.example", "https://forms.example"),
+    ("HTTP://FORMS.EXAMPLE:80/path", "http://forms.example/path"),
+    ("https://église.example/été", "https://xn--glise-9ra.example/%C3%A9t%C3%A9"),
+])
+def test_url_controls_allow_server_normalization(form_client, monkeypatch, action, entered_url, expected_url):
+    client, main = form_client
+    parser = dashboard_forms(client)
+    form_action = "/care/manual-check" if action == "/care/fetch-check" else action
+    form = next(form for form in parser.forms if form["attrs"]["action"] == form_action)
+    url_control = next(control for control in form["controls"] if control["name"] == "url")
+    # An absolute-URL input or case-sensitive pattern blocks valid server input
+    # before the shared normalizer can add HTTPS or canonicalize the address.
+    assert url_control.get("type", "text") == "text"
+    assert "pattern" not in url_control
+    assert url_control.get("inputmode") == "url"
+    assert "required" in url_control
+    assert url_control["maxlength"] == "2048"
+    help_id = url_control.get("aria-describedby")
+    assert help_id == ("snapshot-url-help" if action == "/snapshot" else "care-url-help")
+    assert parser.ids.count(help_id) == 1
+    assert "Omit the scheme to use HTTPS." in client.get("/").text
+
+    payload = {control["name"]: control.get("value", "") for control in form["controls"]}
+    payload.update(name="Normalized URL", url=entered_url, client="Care Client")
+    monkeypatch.setattr(main, "fetch_basic_site_check", lambda name, url, **kwargs: main.evaluate_site(
+        name, url, 200, 250, 60, kwargs["wordpress_version"],
+        kwargs["update_count"], kwargs["backup_age_hours"], {},
+    ))
+    response = client.post(action, data=payload, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    assert main.store.list_sites()[0]["url"] == expected_url
+    assert main.store.latest_dashboard()[0]["url"] == expected_url
+    assert main.store.latest_care_checks()[0]["url"] == expected_url
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+
+
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check", "/snapshot"])
+@pytest.mark.parametrize("entered_url", ["ftp://forms.example", "javascript:alert(1)", "https://bad_host.example"])
+def test_text_url_controls_retain_server_safety_checks(form_client, monkeypatch, action, entered_url):
+    from wp_fleet_ops import checks
+
+    client, main = form_client
+    form_action = "/care/manual-check" if action == "/care/fetch-check" else action
+    form = next(form for form in dashboard_forms(client).forms if form["attrs"]["action"] == form_action)
+    payload = {control["name"]: control.get("value", "") for control in form["controls"]}
+    payload.update(name="Invalid URL", url=entered_url)
+
+    def no_network(*_args, **_kwargs):
+        pytest.fail("Rejected URLs must not reach network probes.")
+
+    monkeypatch.setattr(checks.urllib.request, "urlopen", no_network)
+    monkeypatch.setattr(checks, "ssl_days_remaining", no_network)
+    response = client.post(action, data=payload, follow_redirects=False)
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Site URL must be a valid HTTP or HTTPS URL."
+    assert main.store.health_counts() == {"sites": 0, "care_checks": 0, "fleet_snapshots": 0}
+
+
 @pytest.mark.parametrize("registered", [False, True])
 def test_dashboard_controls_have_unique_ids_and_explicit_visible_labels(form_client, registered):
     client, main = form_client
@@ -239,7 +300,9 @@ def test_labeled_observation_forms_preserve_default_submission_contract(form_cli
         assert any(button.get("formaction") == "/care/fetch-check"
                    and button.get("formmethod") == "post" for button in form["buttons"])
     else:
-        assert fields["url"]["pattern"] == "https?://.*"
+        assert fields["url"]["type"] == "text"
+        assert fields["url"]["inputmode"] == "url"
+        assert "pattern" not in fields["url"]
         assert fields["uptime_ok"]["type"] == "checkbox"
         assert "checked" in fields["uptime_ok"]
         assert fields["security_header_count"]["max"] == "3"

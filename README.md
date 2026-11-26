@@ -91,6 +91,14 @@ HTML-escaped. Operators can still enter a new URL, and browsers without datalist
 support retain ordinary inputs. The list is omitted for an empty registry and
 does not autofill or change site names, clients, validation, or saved evidence.
 
+Both URL fields let the shared server normalizer handle scheme-less addresses
+(defaulting to HTTPS), uppercase schemes, and internationalized addresses. They
+use text inputs with a URL keyboard hint instead of browser-only absolute-URL
+and case-sensitive pattern constraints that could reject valid server input.
+Visible, screen-reader-associated help explains the HTTPS default. Required
+fields, length limits, registry suggestions, and server-side URL safety checks
+are unchanged; unsupported schemes and malformed addresses remain rejected.
+
 Numeric observation controls advertise the same nonnegative ranges as server
 validation. Latency, certificate lifetime, update counts, and backup age use the
 shared signed 64-bit SQLite maximum; HTTP status keeps its 0–599 bounds and

@@ -206,7 +206,7 @@
         <form method="post" action="/care/manual-check">
           <div class="form-grid">
             <div class="field"><label for="care-name">Site name</label><input id="care-name" name="name" maxlength="200" placeholder="Strategy Plus" required></div>
-            <div class="field"><label for="care-url">URL</label><input id="care-url" name="url" maxlength="2048"{% if sites %} list="existing-site-urls"{% endif %} placeholder="https://example.com" required></div>
+            <div class="field"><label for="care-url">URL</label><input id="care-url" name="url" maxlength="2048" type="text" inputmode="url" aria-describedby="care-url-help"{% if sites %} list="existing-site-urls"{% endif %} placeholder="https://example.com" required><small id="care-url-help">Omit the scheme to use HTTPS.</small></div>
             <div class="field"><label for="care-client">Client</label><input id="care-client" name="client" maxlength="200"{% if report_clients %} list="existing-client-accounts"{% endif %} placeholder="Client or brand"></div>
             <div class="field"><label for="care-http-status">HTTP status (0 = unreachable)</label><input id="care-http-status" name="http_status" type="number" min="0" max="599" value="200"></div>
             <div class="field"><label for="care-latency">Latency ms</label><input id="care-latency" name="latency_ms" type="number" min="0" max="{{ telemetry_integer_max }}" value="250"></div>
@@ -227,7 +227,7 @@
         <form method="post" action="/snapshot">
           <div class="form-grid">
             <div class="field"><label for="snapshot-name">Site</label><input id="snapshot-name" name="name" maxlength="200" placeholder="Site" required></div>
-            <div class="field"><label for="snapshot-url">URL</label><input id="snapshot-url" name="url" maxlength="2048"{% if sites %} list="existing-site-urls"{% endif %} type="url" placeholder="https://example.com" pattern="https?://.*" required></div>
+            <div class="field"><label for="snapshot-url">URL</label><input id="snapshot-url" name="url" maxlength="2048" type="text" inputmode="url" aria-describedby="snapshot-url-help"{% if sites %} list="existing-site-urls"{% endif %} placeholder="https://example.com" required><small id="snapshot-url-help">Omit the scheme to use HTTPS.</small></div>
             <div class="field"><label for="snapshot-client">Client</label><input id="snapshot-client" name="client" maxlength="200"{% if report_clients %} list="existing-client-accounts"{% endif %} placeholder="Client"></div>
             <label class="check-field" for="snapshot-uptime"><input id="snapshot-uptime" name="uptime_ok" type="checkbox" checked value="true"> Site is up</label>
             <div class="field"><label for="snapshot-ssl-days">SSL days</label><input id="snapshot-ssl-days" name="ssl_days" type="number" min="0" max="{{ telemetry_integer_max }}" value="60"></div>
