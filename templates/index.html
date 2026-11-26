@@ -234,11 +234,11 @@
             <div class="field"><label for="snapshot-url">URL</label><input id="snapshot-url" name="url" maxlength="2048" type="text" inputmode="url" aria-describedby="snapshot-url-help"{% if sites %} list="existing-site-urls"{% endif %} placeholder="https://example.com" required><small id="snapshot-url-help">Omit the scheme to use HTTPS.</small></div>
             <div class="field"><label for="snapshot-client">Client</label><input id="snapshot-client" name="client" maxlength="200"{% if report_clients %} list="existing-client-accounts"{% endif %} placeholder="Client"></div>
             <label class="check-field" for="snapshot-uptime"><input id="snapshot-uptime" name="uptime_ok" type="checkbox" checked value="true"> Site is up</label>
-            <div class="field"><label for="snapshot-ssl-days">SSL days</label><input id="snapshot-ssl-days" name="ssl_days" type="number" min="0" max="{{ telemetry_integer_max }}" value="60"></div>
-            <div class="field"><label for="snapshot-updates">WP updates</label><input id="snapshot-updates" name="wp_updates" type="number" min="0" max="{{ telemetry_integer_max }}" value="0"></div>
-            <div class="field"><label for="snapshot-backup-age">Backup age hrs</label><input id="snapshot-backup-age" name="backup_age_hours" type="number" min="0" max="{{ telemetry_integer_max }}" value="24"></div>
-            <div class="field"><label for="snapshot-response">Response ms</label><input id="snapshot-response" name="response_ms" type="number" min="0" max="{{ telemetry_integer_max }}" value="250"></div>
-            <div class="field"><label for="snapshot-security-headers">Security headers</label><input id="snapshot-security-headers" name="security_header_count" type="number" min="0" max="3" value="0"></div>
+            <div class="field"><label for="snapshot-ssl-days">SSL days</label><input id="snapshot-ssl-days" name="ssl_days" type="number" min="0" max="{{ telemetry_integer_max }}" value="60" required></div>
+            <div class="field"><label for="snapshot-updates">WP updates</label><input id="snapshot-updates" name="wp_updates" type="number" min="0" max="{{ telemetry_integer_max }}" value="0" required></div>
+            <div class="field"><label for="snapshot-backup-age">Backup age hrs</label><input id="snapshot-backup-age" name="backup_age_hours" type="number" min="0" max="{{ telemetry_integer_max }}" value="24" required></div>
+            <div class="field"><label for="snapshot-response">Response ms</label><input id="snapshot-response" name="response_ms" type="number" min="0" max="{{ telemetry_integer_max }}" value="250" required></div>
+            <div class="field"><label for="snapshot-security-headers">Security headers</label><input id="snapshot-security-headers" name="security_header_count" type="number" min="0" max="3" value="0" required></div>
           </div>
           <button>Save snapshot</button>
         </form>

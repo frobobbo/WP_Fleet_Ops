@@ -365,6 +365,31 @@ def test_care_form_does_not_invent_a_wordpress_version(form_client, monkeypatch,
         assert fetched_versions == []
 
 
+def test_snapshot_numeric_controls_require_explicit_values_without_rejecting_zero(form_client):
+    client, main = form_client
+    form = next(form for form in dashboard_forms(client).forms
+                if form["attrs"]["action"] == "/snapshot")
+    numeric_controls = [control for control in form["controls"] if control.get("type") == "number"]
+    assert {control["name"] for control in numeric_controls} == {
+        "ssl_days", "wp_updates", "backup_age_hours", "response_ms", "security_header_count",
+    }
+    for control in numeric_controls:
+        assert "required" in control, f"Clearing {control['name']} must not silently save a default."
+    assert "novalidate" not in form["attrs"]
+    assert all("formnovalidate" not in button for button in form["buttons"])
+
+    # Zero is observed data, not an empty field: derive and submit the actual form.
+    payload = {control["name"]: control.get("value", "") for control in form["controls"]}
+    payload.update(name="Explicit Zero", url="https://explicit-zero.example")
+    payload.update({control["name"]: "0" for control in numeric_controls})
+    response = client.post(form["attrs"]["action"], data=payload, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    saved = main.store.latest_dashboard()[0]
+    assert all(saved[control["name"]] == 0 for control in numeric_controls)
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+
+
 @pytest.mark.parametrize("action", ["/care/manual-check", "/snapshot"])
 @pytest.mark.parametrize("boundary", [0, (1 << 63) - 1])
 def test_dashboard_telemetry_boundaries_remain_accepted(form_client, action, boundary):

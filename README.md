@@ -106,6 +106,14 @@ security-header counts keep their 0–3 bounds. Defaults and submission actions
 are unchanged. Browser constraints are an input aid, not a replacement for exact
 server-side integer and domain validation (including rejecting HTTP values 1–99).
 
+The fleet snapshot's five numeric controls also require a value in the browser.
+Clearing a measurement therefore prompts the operator to enter it instead of
+silently submitting a blank that the server replaces with a default. Explicit
+zero values remain valid, including zero updates and zero recorded headers.
+Pre-filled defaults, range limits, the uptime checkbox, care-check forms, and
+server/API defaults are unchanged. This is a form-entry safeguard, not a new
+server-side evidence-validation boundary.
+
 ### Dashboard monitoring evidence
 
 The first keyboard focus stop is **Skip to fleet observations**. The link becomes
