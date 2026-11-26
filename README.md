@@ -110,9 +110,16 @@ The fleet snapshot's five numeric controls also require a value in the browser.
 Clearing a measurement therefore prompts the operator to enter it instead of
 silently submitting a blank that the server replaces with a default. Explicit
 zero values remain valid, including zero updates and zero recorded headers.
-Pre-filled defaults, range limits, the uptime checkbox, care-check forms, and
-server/API defaults are unchanged. This is a form-entry safeguard, not a new
-server-side evidence-validation boundary.
+Pre-filled defaults, range limits, the uptime checkbox, and server/API defaults
+are unchanged. This is a form-entry safeguard, not a new server-side
+evidence-validation boundary.
+
+The care form likewise requires explicit update-count and backup-age values for
+both manual and live submissions. A live HTTP/TLS probe does not discover these
+two measurements; clearing one must not silently record a default. Explicit
+zero values remain valid. Manual-only HTTP status, latency, and SSL controls
+remain optional so clearing them does not block a live check. Pre-filled values,
+server/API defaults, and network-probe behavior are unchanged.
 
 ### Dashboard monitoring evidence
 

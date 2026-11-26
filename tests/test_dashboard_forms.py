@@ -390,6 +390,49 @@ def test_snapshot_numeric_controls_require_explicit_values_without_rejecting_zer
     assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
 
 
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check"])
+@pytest.mark.parametrize("boundary", [0, (1 << 63) - 1])
+def test_care_metadata_requires_explicit_values_without_rejecting_boundaries(
+    form_client, monkeypatch, action, boundary,
+):
+    client, main = form_client
+    form = next(form for form in dashboard_forms(client).forms
+                if form["attrs"]["action"] == "/care/manual-check")
+    fields = {control["name"]: control for control in form["controls"]}
+    for name in ("update_count", "backup_age_hours"):
+        assert "required" in fields[name], f"Clearing {name} must not silently save a default."
+    assert "novalidate" not in form["attrs"]
+    assert all("formnovalidate" not in button for button in form["buttons"])
+    # Live checks replace these measurements, so requiring them would block a
+    # useful fetch just because an irrelevant manual-only field was cleared.
+    for name in ("http_status", "latency_ms", "ssl_days_remaining"):
+        assert "required" not in fields[name]
+
+    payload = {name: field.get("value", "") for name, field in fields.items()}
+    payload.update(name="Explicit Care Metadata", url="https://care-metadata.example",
+                   update_count=str(boundary), backup_age_hours=str(boundary))
+    if action == "/care/fetch-check":
+        payload.update(http_status="", latency_ms="", ssl_days_remaining="")
+    fetched_metadata = []
+
+    def fetch_check(name, url, *, wordpress_version, update_count, backup_age_hours):
+        fetched_metadata.append((update_count, backup_age_hours))
+        return main.evaluate_site(
+            name, url, 200, 250, 60, wordpress_version, update_count, backup_age_hours, {},
+        )
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fetch_check)
+    response = client.post(action, data=payload, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/"
+    care = main.store.latest_care_checks()[0]
+    snapshot = main.store.latest_dashboard()[0]
+    assert (care["update_count"], care["backup_age_hours"]) == (boundary, boundary)
+    assert (snapshot["wp_updates"], snapshot["backup_age_hours"]) == (boundary, boundary)
+    assert fetched_metadata == ([(boundary, boundary)] if action == "/care/fetch-check" else [])
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+
+
 @pytest.mark.parametrize("action", ["/care/manual-check", "/snapshot"])
 @pytest.mark.parametrize("boundary", [0, (1 << 63) - 1])
 def test_dashboard_telemetry_boundaries_remain_accepted(form_client, action, boundary):

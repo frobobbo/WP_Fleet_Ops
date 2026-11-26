@@ -216,8 +216,8 @@
             <div class="field"><label for="care-latency">Latency ms</label><input id="care-latency" name="latency_ms" type="number" min="0" max="{{ telemetry_integer_max }}" value="250"></div>
             <div class="field"><label for="care-ssl-days">SSL days</label><input id="care-ssl-days" name="ssl_days_remaining" type="number" min="0" max="{{ telemetry_integer_max }}" value="60"></div>
             <div class="field"><label for="care-wordpress-version">WP version</label><input id="care-wordpress-version" name="wordpress_version" maxlength="100" value="unknown"></div>
-            <div class="field"><label for="care-updates">Updates</label><input id="care-updates" name="update_count" type="number" min="0" max="{{ telemetry_integer_max }}" value="0"></div>
-            <div class="field"><label for="care-backup-age">Backup age hrs</label><input id="care-backup-age" name="backup_age_hours" type="number" min="0" max="{{ telemetry_integer_max }}" value="24"></div>
+            <div class="field"><label for="care-updates">Updates</label><input id="care-updates" name="update_count" type="number" min="0" max="{{ telemetry_integer_max }}" value="0" required></div>
+            <div class="field"><label for="care-backup-age">Backup age hrs</label><input id="care-backup-age" name="backup_age_hours" type="number" min="0" max="{{ telemetry_integer_max }}" value="24" required></div>
           </div>
           <div class="form-actions">
             <button type="submit">Save manual check</button>
