@@ -1,4 +1,4 @@
-"""Wide observation tables must remain usable without a pointer."""
+"""Dashboard navigation and wide tables must remain usable without a pointer."""
 import importlib
 import warnings
 from contextlib import closing
@@ -24,6 +24,7 @@ class TableAccessibilityParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.ids = []
+        self.elements = []
         self.headings = {}
         self.wrappers = []
         self._heading = None
@@ -31,6 +32,7 @@ class TableAccessibilityParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        self.elements.append((tag, attrs))
         if "id" in attrs:
             self.ids.append(attrs["id"])
         if tag == "h3":
@@ -107,3 +109,42 @@ def test_observation_tables_are_named_keyboard_scroll_regions(accessible_client,
     assert {k: v for k, v in after_summary.items() if k != "generated_at"} == {
         k: v for k, v in summary.items() if k != "generated_at"
     }
+
+
+@pytest.mark.parametrize("populated", [False, True])
+def test_keyboard_skip_link_bypasses_entry_forms(accessible_client, populated):
+    client, main = accessible_client
+    if populated:
+        saved = client.post("/snapshot", data={
+            "name": "Keyboard Site", "url": "https://keyboard.example",
+            "client": "Care Client", "uptime_ok": "true", "ssl_days": 90,
+            "wp_updates": 0, "backup_age_hours": 12,
+            "response_ms": 100, "security_header_count": 3,
+        }, follow_redirects=False)
+        assert saved.status_code == 303
+    before = (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks())
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = TableAccessibilityParser()
+    parser.feed(response.text)
+    tabbable = [
+        (tag, attrs) for tag, attrs in parser.elements
+        if (tag == "a" and "href" in attrs or tag in {"button", "input", "select", "textarea"}
+            or "tabindex" in attrs)
+        and attrs.get("tabindex") != "-1" and "disabled" not in attrs
+    ]
+    tag, link = tabbable[0]
+    assert tag == "a" and "skip-link" in link.get("class", "").split()
+    assert link.get("href") == "#fleet-table-heading", "Skip repeated navigation and entry forms."
+    assert ">Skip to fleet observations</a>" in response.text
+    targets = [attrs for tag, attrs in parser.elements
+               if tag == "h3" and attrs.get("id") == "fleet-table-heading"]
+    assert len(targets) == 1
+    assert targets[0].get("tabindex") == "-1", "Fragment target must accept focus without a new tab stop."
+    assert parser.headings["fleet-table-heading"] == "Fleet operations"
+    assert len(parser.ids) == len(set(parser.ids))
+    assert ".skip-link:focus" in response.text
+    assert "transform:translateY(0)" in response.text
+    assert ".table-card h3:focus" in response.text
+    assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before

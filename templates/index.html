@@ -39,6 +39,8 @@
       min-height:100vh;
     }
     a{color:inherit;text-decoration:none}
+    .skip-link{position:absolute;top:12px;left:12px;z-index:10;transform:translateY(-200%);background:var(--bg);color:var(--text);border:2px solid var(--brand-2);border-radius:13px;padding:12px 15px;font-weight:650}
+    .skip-link:focus{transform:translateY(0);outline:2px solid var(--text);outline-offset:2px}
     .shell{max-width:1420px;margin:0 auto;padding:28px clamp(18px,3vw,44px) 52px}
     .topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:34px}
     .brand{display:flex;align-items:center;gap:12px}
@@ -72,6 +74,7 @@
     .tables{display:grid;gap:18px}.table-card{padding:0}.table-header{padding:22px 24px;border-bottom:1px solid var(--line-2);display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:920px}th{color:#808797;text-transform:uppercase;letter-spacing:.08em;font-size:11px;text-align:left;font-weight:650;background:rgba(255,255,255,.018)}td,th{padding:15px 18px;border-bottom:1px solid var(--line-2);vertical-align:top}td{color:var(--soft);font-size:13px}tbody tr:hover{background:rgba(255,255,255,.026)}.site-name{color:var(--text);font-weight:650}.score{display:inline-flex;align-items:center;gap:8px;font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace}.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 18px currentColor}.tag{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;margin:2px;color:var(--soft);background:rgba(255,255,255,.035);font-size:12px}.empty{padding:34px 24px;color:var(--muted);text-align:center}.report-link{display:flex;justify-content:flex-end;margin-top:20px}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace}.footer-note{color:#6f7685;font-size:12px;text-align:center;margin-top:28px}
     #monitoring-gaps{margin-top:18px}#monitoring-gaps summary{cursor:pointer;color:var(--soft)}.evidence-gaps{padding-left:22px}.evidence-gaps li{padding:12px 0;border-bottom:1px solid var(--line-2);overflow-wrap:anywhere}
     .table-wrap:focus-visible{outline:2px solid var(--brand-2);outline-offset:-2px}
+    .table-card h3:focus{outline:2px solid var(--brand-2);outline-offset:2px}
     .site-url{max-width:260px;overflow-wrap:anywhere;color:var(--muted);font-size:12px;margin-top:6px}
     .care-actions{margin:0;padding-left:18px;min-width:220px;overflow-wrap:anywhere}.care-actions li+li{margin-top:6px}
     @media (max-width:1050px){.hero,.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.form-grid{grid-template-columns:repeat(2,1fr)}}
@@ -79,6 +82,7 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#fleet-table-heading">Skip to fleet observations</a>
 {% set fleet_count = fleet_rows|length %}
 {% set care_count = care_checks|length %}
 {% set site_count = sites|length %}
@@ -243,7 +247,7 @@
 
     <section class="tables">
       <div class="table-card" id="fleet">
-        <div class="table-header"><div><h3 id="fleet-table-heading">Fleet operations</h3><p>Operational health score, uptime, SSL, backups, performance, and generated alerts. Header counts are recorded observations, not a security-coverage assessment.</p></div><span class="tag mono">{{ fleet_count }} rows</span></div>
+        <div class="table-header"><div><h3 id="fleet-table-heading" tabindex="-1">Fleet operations</h3><p>Operational health score, uptime, SSL, backups, performance, and generated alerts. Header counts are recorded observations, not a security-coverage assessment.</p></div><span class="tag mono">{{ fleet_count }} rows</span></div>
         <div class="table-wrap"{% if fleet_rows %} tabindex="0" role="region" aria-labelledby="fleet-table-heading"{% endif %}>
           {% if fleet_rows %}
           <table aria-labelledby="fleet-table-heading"><thead><tr><th scope="col">Site</th><th scope="col">Client</th><th scope="col">Recorded</th><th scope="col">Evidence</th><th scope="col">Score</th><th scope="col">Up</th><th scope="col">SSL</th><th scope="col">Updates</th><th scope="col">Backup</th><th scope="col">Response</th><th scope="col">Recorded headers</th><th scope="col">Alerts</th></tr></thead><tbody>

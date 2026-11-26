@@ -108,6 +108,12 @@ server-side integer and domain validation (including rejecting HTTP values 1–9
 
 ### Dashboard monitoring evidence
 
+The first keyboard focus stop is **Skip to fleet observations**. The link becomes
+visible when focused and jumps past navigation and entry forms to the fleet table
+heading, which receives a visible focus outline without adding another Tab stop.
+This works with empty and populated inventories and does not start checks or
+change saved observations.
+
 Populated observation tables are named, keyboard-focusable scroll regions: use
 Tab to focus either table and the left/right arrow keys to review columns on
 narrow screens. An inset focus outline stays visible inside the table card,
