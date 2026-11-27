@@ -206,8 +206,8 @@
     {% endif %}
     <section class="grid">
       <div class="card" id="care-form">
-        <div class="card-head"><div><h3>Care check</h3><p>Capture client-report numbers manually or run a live HTTP, TLS, and security-header check.</p></div><span class="tag">CarePulse</span></div>
-        <form method="post" action="/care/manual-check">
+        <div class="card-head"><div><h3 id="care-form-heading">Care check</h3><p>Capture client-report numbers manually or run a live HTTP, TLS, and security-header check.</p></div><span class="tag">CarePulse</span></div>
+        <form method="post" action="/care/manual-check" aria-labelledby="care-form-heading">
           <div class="form-grid">
             <div class="field"><label for="care-name">Site name</label><input id="care-name" name="name" maxlength="200" placeholder="Strategy Plus" required></div>
             <div class="field"><label for="care-url">URL</label><input id="care-url" name="url" maxlength="2048" type="text" inputmode="url" aria-describedby="care-url-help"{% if sites %} list="existing-site-urls"{% endif %} placeholder="https://example.com" required><small id="care-url-help">Omit the scheme to use HTTPS.</small></div>
@@ -228,8 +228,8 @@
       </div>
 
       <div class="card" id="snapshot">
-        <div class="card-head"><div><h3>Fleet snapshot</h3><p>Log the operational posture of a site and generate alerts automatically.</p></div><span class="tag">FleetOps</span></div>
-        <form method="post" action="/snapshot">
+        <div class="card-head"><div><h3 id="snapshot-form-heading">Fleet snapshot</h3><p>Log the operational posture of a site and generate alerts automatically.</p></div><span class="tag">FleetOps</span></div>
+        <form method="post" action="/snapshot" aria-labelledby="snapshot-form-heading">
           <div class="form-grid">
             <div class="field"><label for="snapshot-name">Site</label><input id="snapshot-name" name="name" maxlength="200" placeholder="Site" required></div>
             <div class="field"><label for="snapshot-url">URL</label><input id="snapshot-url" name="url" maxlength="2048" type="text" inputmode="url" aria-describedby="snapshot-url-help"{% if sites %} list="existing-site-urls"{% endif %} placeholder="https://example.com" required><small id="snapshot-url-help">Omit the scheme to use HTTPS.</small></div>
@@ -273,8 +273,8 @@
 
     {% if report_clients %}
     <section class="card" id="client-reports" style="margin-top:20px">
-      <div class="card-head"><div><h3>Client report</h3><p>Export one account's care and fleet evidence, including any monitoring gaps.</p></div></div>
-      <form id="client-report-form" method="get" action="/report">
+      <div class="card-head"><div><h3 id="client-report-heading">Client report</h3><p>Export one account's care and fleet evidence, including any monitoring gaps.</p></div></div>
+      <form id="client-report-form" method="get" action="/report" aria-labelledby="client-report-heading">
         <div class="field">
           <label for="client-report-account">Client account</label>
           <select id="client-report-account" name="client" required>

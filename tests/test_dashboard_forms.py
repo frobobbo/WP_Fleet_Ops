@@ -275,6 +275,35 @@ def test_dashboard_controls_have_unique_ids_and_explicit_visible_labels(form_cli
         assert labels[0]["text"].strip(), f"{identifier} needs visible label text."
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_dashboard_forms_are_named_by_unique_visible_headings(form_client, registered):
+    client, main = form_client
+    if registered:
+        main.store.upsert_site("Registered Site", "https://forms.example", "Care Client")
+    before = (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = DashboardFormParser()
+    parser.feed(response.text)
+    expected = {
+        "/care/manual-check": ("care-form-heading", "Care check", "post"),
+        "/snapshot": ("snapshot-form-heading", "Fleet snapshot", "post"),
+    }
+    if registered:
+        expected["/report"] = ("client-report-heading", "Client report", "get")
+    assert len(parser.forms) == len(expected)
+    assert len(parser.ids) == len(set(parser.ids))
+    for form in parser.forms:
+        attrs = form["attrs"]
+        heading_id, heading, method = expected[attrs["action"]]
+        assert attrs.get("aria-labelledby") == heading_id, "Each form needs an accessible name."
+        assert parser.ids.count(heading_id) == 1, "A form name must resolve to exactly one heading."
+        assert f'<h3 id="{heading_id}">{heading}</h3>' in response.text
+        assert attrs["method"] == method
+        assert "aria-hidden" not in attrs and "novalidate" not in attrs
+    assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
 @pytest.mark.parametrize("action", ["/care/manual-check", "/snapshot"])
 def test_labeled_observation_forms_preserve_default_submission_contract(form_client, action):
     client, main = form_client

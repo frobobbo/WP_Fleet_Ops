@@ -76,6 +76,12 @@ version defaults to `unknown`, matching the server, rather than recording a
 sample version as observed metadata. Manual and live checks retain an explicitly
 entered version; a live HTTP/TLS check does not automatically detect it.
 
+The care-check, fleet-snapshot, and client-report forms also use their visible
+headings as accessible names, so screen-reader form navigation can distinguish
+data entry from report export. Each name resolves to one unique heading; the
+report form is still omitted for an empty registry. This does not add keyboard
+stops or change controls, validation, submission actions, or saved evidence.
+
 Both client fields suggest existing accounts through a shared, sorted, deduplicated
 list from the site registry, including accounts without observations and
 **Unassigned**. Suggestions are optional: operators can still type a new account
