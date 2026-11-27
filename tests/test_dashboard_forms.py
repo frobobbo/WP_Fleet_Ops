@@ -332,6 +332,51 @@ def test_dashboard_numeric_ranges_match_server_validation(form_client, action):
 
 
 @pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check"])
+def test_care_form_explains_operator_supplied_metadata(form_client, monkeypatch, action):
+    client, main = form_client
+    before = main.store.health_counts()
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = DashboardFormParser()
+    parser.feed(response.text)
+    form = next(form for form in parser.forms
+                if form["attrs"]["action"] == "/care/manual-check")
+    fields = {control["name"]: control for control in form["controls"]}
+    help_id = "care-metadata-help"
+    assert parser.ids.count(help_id) == 1
+    assert (
+        f'<p id="{help_id}">Live checks refresh HTTP status, latency, SSL, and security headers. '
+        "They use the WP version, update count, and backup age you enter; "
+        "verify these values before saving either kind of check.</p>"
+    ) in response.text
+    for name in ("wordpress_version", "update_count", "backup_age_hours"):
+        assert help_id in fields[name].get("aria-describedby", "").split()
+    assert main.store.health_counts() == before, "Viewing guidance must not create evidence."
+
+    payload = {name: field.get("value", "") for name, field in fields.items()}
+    payload.update(name="Entered Care Metadata", url="https://entered-metadata.example",
+                   wordpress_version="6.6.2", update_count="4", backup_age_hours="48")
+    fetched = []
+
+    def fetch_check(name, url, *, wordpress_version, update_count, backup_age_hours):
+        fetched.append((wordpress_version, update_count, backup_age_hours))
+        return main.evaluate_site(
+            name, url, 200, 250, 60, wordpress_version, update_count, backup_age_hours, {},
+        )
+
+    monkeypatch.setattr(main, "fetch_basic_site_check", fetch_check)
+    saved = client.post(action, data=payload, follow_redirects=False)
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/"
+    care = main.store.latest_care_checks()[0]
+    snapshot = main.store.latest_dashboard()[0]
+    assert (care["wordpress_version"], care["update_count"], care["backup_age_hours"]) == ("6.6.2", 4, 48)
+    assert (snapshot["wp_updates"], snapshot["backup_age_hours"]) == (4, 48)
+    assert fetched == ([("6.6.2", 4, 48)] if action == "/care/fetch-check" else [])
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+
+
+@pytest.mark.parametrize("action", ["/care/manual-check", "/care/fetch-check"])
 @pytest.mark.parametrize("version", [None, "", "  6.6.2  "])
 def test_care_form_does_not_invent_a_wordpress_version(form_client, monkeypatch, action, version):
     client, main = form_client

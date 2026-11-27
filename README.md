@@ -121,6 +121,13 @@ zero values remain valid. Manual-only HTTP status, latency, and SSL controls
 remain optional so clearing them does not block a live check. Pre-filled values,
 server/API defaults, and network-probe behavior are unchanged.
 
+Visible help beside the care form explains which measurements a live probe
+refreshes and which metadata comes from the operator. The WP version, update
+count, and backup-age controls each reference that help for screen readers;
+operators are reminded to verify these values before either manual or live
+submission. This guidance does not detect WordPress metadata, run extra probes,
+or change saved values, defaults, validation, or either submission action.
+
 ### Dashboard monitoring evidence
 
 The first keyboard focus stop is **Skip to fleet observations**. The link becomes
