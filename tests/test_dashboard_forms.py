@@ -410,6 +410,45 @@ def test_care_form_does_not_invent_a_wordpress_version(form_client, monkeypatch,
         assert fetched_versions == []
 
 
+@pytest.mark.parametrize("zero_values", [False, True])
+def test_snapshot_form_explains_manual_evidence_without_changing_submission(form_client, zero_values):
+    client, main = form_client
+    before = (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks())
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = DashboardFormParser()
+    parser.feed(response.text)
+    form = next(form for form in parser.forms if form["attrs"]["action"] == "/snapshot")
+    fields = {control["name"]: control for control in form["controls"]}
+    help_id = "snapshot-evidence-help"
+    assert parser.ids.count(help_id) == 1
+    assert (
+        f'<p id="{help_id}">Saving a snapshot does not run site checks. '
+        "All measurements and the uptime setting are entered by you; "
+        "replace pre-filled values with verified observations before saving.</p>"
+    ) in response.text
+    observation_fields = {
+        "uptime_ok", "ssl_days", "wp_updates", "backup_age_hours", "response_ms", "security_header_count",
+    }
+    for name in observation_fields:
+        assert help_id in fields[name].get("aria-describedby", "").split()
+    assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+    payload = {name: field.get("value", "") for name, field in fields.items()}
+    payload.update(name="Entered Snapshot Evidence", url="https://entered-snapshot.example")
+    if zero_values:
+        payload.update({name: "0" for name in observation_fields if name != "uptime_ok"})
+        payload.pop("uptime_ok")
+    saved = client.post(form["attrs"]["action"], data=payload, follow_redirects=False)
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/"
+    snapshot = main.store.latest_dashboard()[0]
+    for name in observation_fields - {"uptime_ok"}:
+        assert snapshot[name] == int(payload[name])
+    assert bool(snapshot["uptime_ok"]) is (not zero_values)
+    assert main.store.health_counts() == {"sites": 1, "care_checks": 1, "fleet_snapshots": 1}
+
+
 def test_snapshot_numeric_controls_require_explicit_values_without_rejecting_zero(form_client):
     client, main = form_client
     form = next(form for form in dashboard_forms(client).forms

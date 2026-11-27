@@ -128,6 +128,13 @@ operators are reminded to verify these values before either manual or live
 submission. This guidance does not detect WordPress metadata, run extra probes,
 or change saved values, defaults, validation, or either submission action.
 
+The fleet snapshot form also explains that saving does not run site checks:
+all measurements and the uptime setting come from the operator. Its five
+numeric controls and uptime checkbox reference this guidance for screen readers,
+and operators are reminded to replace pre-filled values with verified
+observations. Guidance is read-only; defaults, accepted zero values, unchecked
+uptime behavior, saved evidence, and the submission action are unchanged.
+
 ### Dashboard monitoring evidence
 
 The first keyboard focus stop is **Skip to fleet observations**. The link becomes
