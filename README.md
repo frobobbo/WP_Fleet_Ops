@@ -200,6 +200,14 @@ future-dated, an **observed summary** label keeps an old healthy narrative from
 looking like a current assessment. The escaped text remains available for
 investigation; stored summaries, scores, and freshness decisions are unchanged.
 
+The care-check table's **Named headers** column lists the sorted, HTML-escaped
+security-header names saved with that observation, without exposing header values.
+Count-only snapshots and manual care checks show **No named header evidence**
+rather than inventing named controls or claiming that no protection exists.
+When either paired source is incomplete, **observed headers** labels the list as
+historical evidence. The display uses neutral styling, not a security-coverage
+badge, and does not change saved data, scores, alerts, or freshness decisions.
+
 The care-check table's **Recorded actions** column shows each observation's saved
 recommendations as an escaped list, so operators can review the next steps without
 exporting a report. Incomplete paired evidence labels these as **observed actions**
