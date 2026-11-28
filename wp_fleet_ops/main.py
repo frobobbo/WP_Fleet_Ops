@@ -113,11 +113,15 @@ async def database_operational_error(_request: Request, exc: sqlite3.Operational
     raise exc
 
 
+# Share handlers so HEAD-based monitors receive the same status and headers as
+# GET, including readiness failures. Uvicorn suppresses the HEAD response body.
+@app.head("/health", include_in_schema=False)
 @app.get("/health")
 def health():
     return {"status": "ok", "app": "wp-fleet-ops", "revision": APP_REVISION}
 
 
+@app.head("/ready", include_in_schema=False)
 @app.get("/ready")
 def ready():
     """Confirm the app can reach its SQLite store before receiving traffic."""
