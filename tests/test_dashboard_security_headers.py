@@ -38,8 +38,9 @@ class CareHeaderParser(HTMLParser):
         if tag == "table" and attrs.get("aria-labelledby") == "care-table-heading":
             self.in_table = True
         elif self.in_table and tag in {"th", "td"}:
-            self.column = tag
-            if tag == "th":
+            # Row headers are observation cells; only column headers name fields.
+            self.column = "th" if tag == "th" and attrs.get("scope") == "col" else "td"
+            if self.column == "th":
                 self.headers.append("")
             else:
                 self.cells.append("")

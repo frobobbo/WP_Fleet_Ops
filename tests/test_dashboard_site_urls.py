@@ -37,7 +37,7 @@ class SiteIdentityParser(HTMLParser):
         elif self.table is not None:
             if tag == "tr":
                 self.row = []
-            elif tag == "td":
+            elif tag == "td" or tag == "th" and dict(attrs).get("scope") == "row":
                 self.cell = []
 
     def handle_data(self, data):
@@ -47,7 +47,7 @@ class SiteIdentityParser(HTMLParser):
     def handle_endtag(self, tag):
         if self.table is None:
             return
-        if tag == "td" and self.cell is not None:
+        if tag in {"td", "th"} and self.cell is not None:
             assert self.row is not None
             self.row.append("".join(self.cell))
             self.cell = None

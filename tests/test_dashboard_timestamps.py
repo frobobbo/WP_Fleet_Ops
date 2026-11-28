@@ -28,6 +28,7 @@ class ObservationTableParser(HTMLParser):
         self.table = None
         self.row = None
         self.cell = None
+        self.column_header = False
         self.script_count = 0
 
     def handle_starttag(self, tag, attrs):
@@ -40,6 +41,7 @@ class ObservationTableParser(HTMLParser):
                 self.row = []
             elif tag in ("th", "td"):
                 self.cell = []
+                self.column_header = tag == "th" and dict(attrs).get("scope") == "col"
 
     def handle_data(self, data):
         if self.cell is not None:
@@ -50,7 +52,7 @@ class ObservationTableParser(HTMLParser):
             return
         if tag in ("th", "td") and self.cell is not None:
             text = "".join(self.cell).strip()
-            if tag == "th":
+            if self.column_header:
                 self.table["headers"].append(text)
             else:
                 assert self.row is not None

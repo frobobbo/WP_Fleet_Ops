@@ -29,6 +29,9 @@ class TableAccessibilityParser(HTMLParser):
         self.wrappers = []
         self._heading = None
         self._wrapper = None
+        self._row = None
+        self._in_body = False
+        self.body_rows = []
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -44,16 +47,29 @@ class TableAccessibilityParser(HTMLParser):
             self.wrappers.append(self._wrapper)
         elif tag == "table" and self._wrapper is not None:
             self._wrapper["tables"].append(attrs)
-        elif tag == "th" and self._wrapper is not None:
+        elif tag == "th" and self._wrapper is not None and not self._in_body:
             self._wrapper["headers"].append(attrs)
+        if tag == "tbody":
+            self._in_body = True
+        elif tag == "tr" and self._in_body:
+            self._row = {"cells": [], "text": ""}
+            self.body_rows.append(self._row)
+        elif tag in {"td", "th"} and self._row is not None:
+            self._row["cells"].append((tag, attrs))
 
     def handle_data(self, data):
         if self._heading:
             self.headings[self._heading] += data
+        if self._row is not None:
+            self._row["text"] += data
 
     def handle_endtag(self, tag):
         if tag == "h3":
             self._heading = None
+        elif tag == "tr":
+            self._row = None
+        elif tag == "tbody":
+            self._in_body = False
         elif tag == "table":
             self._wrapper = None
 
@@ -148,3 +164,48 @@ def test_keyboard_skip_link_bypasses_entry_forms(accessible_client, populated):
     assert "transform:translateY(0)" in response.text
     assert ".table-card h3:focus" in response.text
     assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+
+
+@pytest.mark.parametrize("state", ["empty", "current", "stale"])
+def test_site_identity_is_the_row_header_in_each_observation_table(accessible_client, state):
+    client, main = accessible_client
+    if state != "empty":
+        for name, url in (
+            ('Shared <site> & "name"', "https://first-row.example"),
+            ('Shared <site> & "name"', "https://second-row.example"),
+        ):
+            saved = client.post("/snapshot", data={
+                "name": name, "url": url, "client": "Care Client",
+                "uptime_ok": "true", "ssl_days": 90, "wp_updates": 0,
+                "backup_age_hours": 12, "response_ms": 100, "security_header_count": 3,
+            }, follow_redirects=False)
+            assert saved.status_code == 303
+        if state == "stale":
+            with closing(main.store._connect()) as con, con:
+                con.execute("update snapshots set captured_at = '2000-01-01 00:00:00'")
+    before = (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks())
+    summary = client.get("/api/summary").json()
+
+    response = client.get("/")
+    assert response.status_code == 200
+    parser = TableAccessibilityParser()
+    parser.feed(response.text)
+    assert len(parser.body_rows) == (0 if state == "empty" else 4)
+    for row in parser.body_rows:
+        tag, attrs = row["cells"][0]
+        assert tag == "th", "The site's identity must label the row, not be an ordinary data cell."
+        assert attrs.get("scope") == "row"
+        assert all(tag == "td" for tag, _ in row["cells"][1:])
+        assert len(row["cells"]) in {12, 15}, "Keep all recorded observation columns."
+        assert 'Shared <site> & "name"' in row["text"]
+        assert sum(url in row["text"] for url in (
+            "https://first-row.example", "https://second-row.example",
+        )) == 1, "The URL must continue to distinguish sites with the same name."
+    assert not any(tag == "site" for tag, _ in parser.elements), "Site labels must remain escaped."
+    assert 'th[scope="col"]' in response.text, "Column-heading styling must not leak into row headers."
+    assert 'td,th[scope="row"]' in response.text, "Site row headers must retain body-cell styling."
+    assert (main.store.list_sites(), main.store.latest_dashboard(), main.store.latest_care_checks()) == before
+    after_summary = client.get("/api/summary").json()
+    assert {k: v for k, v in after_summary.items() if k != "generated_at"} == {
+        k: v for k, v in summary.items() if k != "generated_at"
+    }

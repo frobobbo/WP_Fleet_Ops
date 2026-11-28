@@ -153,8 +153,12 @@ Populated observation tables are named, keyboard-focusable scroll regions: use
 Tab to focus either table and the left/right arrow keys to review columns on
 narrow screens. An inset focus outline stays visible inside the table card,
 and column headers explicitly identify their scope for assistive technology.
-Empty placeholders do not add tab stops. These presentation changes do not
-change saved observations or current-health decisions.
+Empty placeholders do not add tab stops. Each populated table also identifies
+its site-name-and-URL cell as a row header, retaining the site context while
+assistive technology moves across measurements. Site labels remain escaped,
+same-name sites keep their distinguishing URLs, and row headers retain normal
+body-cell styling rather than the uppercase column-heading treatment. These
+presentation changes do not change saved observations or current-health decisions.
 
 The average-score indicator follows the same paired-evidence status as the fleet
 summary: green **Healthy**, amber **Review needed**, or red **Needs attention**.
