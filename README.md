@@ -188,6 +188,15 @@ named sites can be distinguished without leaving the dashboard. URLs are escaped
 read-only text (not external links), wrap within the site cell, and remain visible
 for historical evidence without changing stored observations or health decisions.
 
+Each observation row's client label is an underlined link to that account's
+Markdown report. Sites without a client show **Unassigned** and open the matching
+account report. Account names are escaped for display and URL-encoded as one
+query parameter, including Unicode and punctuation. These same-origin shortcuts
+also remain available for historical observations; reports still enforce paired
+evidence freshness and account scoping. Opening a report does not run checks or
+change saved data, and the full-fleet export and account selector remain available.
+Report scoping is not an authentication or tenant-authorization boundary.
+
 The fleet snapshot table includes **Recorded headers**, showing the saved
 security-header count as `0 of 3` through `3 of 3`. This neutral observation is
 not a security-coverage assessment: a count alone does not establish effective
